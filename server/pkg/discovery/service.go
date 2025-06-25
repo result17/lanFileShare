@@ -3,20 +3,22 @@ package discovery
 import (
 	"context"
 	"net"
-	"time"
 )
 
 const (
-	DefaultServerName = "_file-sharing._tcp.local"
+	DefaultServerType = "_file-sharing._websocket._tcp"
+	DefaultDomain     = "local"
 )
 
 type ServiceInfo struct {
-	Name string
-	Addr net.IP
-	Port int
+	Name   string // hostname or instance name
+	Type   string // service name, e.g., "_file-sharing._tcp"
+	Domain string // domain, e.g., "local"
+	Addr   net.IP
+	Port   int
 }
 
 type ServiceDiscovery interface {
 	Announce(ctx context.Context, service ServiceInfo) error
-	Discover(serviceType string, timeout time.Duration) (serviceInfo ServiceInfo, err error)
+	Discover(serviceName string, service string) (chan []ServiceInfo, error)
 }

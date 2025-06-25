@@ -3,55 +3,93 @@ package discovery
 import (
 	"context"
 	"fmt"
-	"os"
-	"time"
+	"sync"
 
-	"github.com/hashicorp/mdns"
+	"github.com/brutella/dnssd"
 )
 
 type MDNSAdapter struct{}
 
+var timeFormat = "15:04:05.000"
+
 func (m *MDNSAdapter) Announce(ctx context.Context, serviceInfo ServiceInfo) error {
-	host, _ := os.Hostname()
-	info := []string{"Local file sender"}
-	service, _ := mdns.NewMDNSService(host, serviceInfo.Name, "local", "", serviceInfo.Port, nil, info)
+	text := make(map[string]string)
+	text["desc"] = "Local file sender"
 
-	server, _ := mdns.NewServer((&mdns.Config{Zone: service}))
+	cfg := dnssd.Config{
+		Name:   serviceInfo.Name,
+		Type:   serviceInfo.Type,
+		Domain: serviceInfo.Domain,
+		// mdns will multicast to ip address, so we can leave it nil
+		IPs:  nil,
+		Text: text,
+		Port: serviceInfo.Port,
+	}
 
-	defer server.Shutdown()
-	<-ctx.Done() // keep server running
+	service, err := dnssd.NewService(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create mDNS service: %w", err)
+	}
+
+	rp, err := dnssd.NewResponder()
+	if err != nil {
+		return fmt.Errorf("failed to create mDNS responder: %w", err)
+	}
+
+	rp.Add(service)
+	rp.Respond(ctx)
 
 	fmt.Println("Shutting down mDNS server")
 	return nil
 }
 
 // windows does not support ipv6 multicast, so we need to use ipv4
-func (m *MDNSAdapter) Discover(serviceType string, timeout time.Duration) (serviceInfo ServiceInfo, err error) {
-	entriesCh := make(chan *mdns.ServiceEntry, 4)
+func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []ServiceInfo, error) {
+	var (
+		mu      sync.RWMutex
+		entries = make(map[string]ServiceInfo)
+		outCh   = make(chan []ServiceInfo, 10)
+	)
 
-	var service ServiceInfo
+	sendSnapshot := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		snapshot := make([]ServiceInfo, 0, len(entries))
+		for _, entry := range entries {
+			snapshot = append(snapshot, entry)
+		}
+		fmt.Printf("Current services: %d\n", len(snapshot))
+		select {
+		case outCh <- snapshot:
+		default:
+		}
+	}
+
+	addFn := func(e dnssd.BrowseEntry) {
+		fmt.Printf("Discovered service: %s, type: %s, addr: %s, port: %d\n", e.Type, e.Name, e.IPs[0], e.Port)
+		mu.Lock()
+		entries[e.Name+e.IfaceName] = ServiceInfo{
+			Name:   e.Name,
+			Type:   e.Type,
+			Domain: e.Domain,
+			Addr:   e.IPs[0],
+			Port:   e.Port,
+		}
+		mu.Unlock()
+		sendSnapshot()
+	}
+
+	rmvFn := func(e dnssd.BrowseEntry) {
+		mu.Lock()
+		delete(entries, e.Name+e.IfaceName)
+		mu.Unlock()
+		sendSnapshot()
+	}
 
 	go func() {
-		for entry := range entriesCh {
-			fmt.Printf("Got new entry: %v\n", entry)
-			service = ServiceInfo{
-				Name: entry.Name,
-				Addr: entry.Addr,
-				Port: entry.Port,
-			}
-		}
+		dnssd.LookupType(ctx, service, addFn, rmvFn)
+		close(outCh)
 	}()
-	// mdns.Lookup("file-share.local", entriesCh)
-	mdns.Query(&mdns.QueryParam{
-		Service:             "_file-share._tcp",
-		Domain:              "local",
-		Timeout:             timeout,
-		Entries:             entriesCh,
-		WantUnicastResponse: false,
-		DisableIPv4:         false,
-		DisableIPv6:         false,
-	})
-	defer close(entriesCh)
 
-	return service, nil
+	return outCh, nil
 }
