@@ -58,7 +58,6 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []Serv
 		for _, entry := range entries {
 			snapshot = append(snapshot, entry)
 		}
-		fmt.Printf("Current services: %d\n", len(snapshot))
 		select {
 		case outCh <- snapshot:
 		default:
@@ -66,7 +65,6 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []Serv
 	}
 
 	addFn := func(e dnssd.BrowseEntry) {
-		fmt.Printf("Discovered service: %s, type: %s, addr: %s, port: %d\n", e.Type, e.Name, e.IPs[0], e.Port)
 		mu.Lock()
 		entries[e.Name+e.IfaceName] = ServiceInfo{
 			Name:   e.Name,

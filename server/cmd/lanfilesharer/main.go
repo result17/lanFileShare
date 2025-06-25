@@ -1,13 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
+
+	"github.com/rescp17/lanFileSharer/api" // Adjust the import path as necessary
 )
 
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello, World!")
-	})
+
+	http.HandleFunc("/ask", api.AskHandler) // Register the AskHandler
 	http.ListenAndServe(":8080", nil)
 }
