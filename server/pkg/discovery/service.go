@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	DefaultServerType = "_file-sharing._websocket._tcp"
+	DefaultServerType = "_file-sharing._tcp"
 	DefaultDomain     = "local"
 )
 
