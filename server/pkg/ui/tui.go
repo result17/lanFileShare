@@ -10,6 +10,8 @@ import (
 	dnssdlog "github.com/brutella/dnssd/log"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/charmbracelet/lipgloss"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 )
@@ -28,22 +30,27 @@ const (
 
 type model struct {
 	mode     mode
+	port     int
 	server   *http.Server // HTTP server for the TUI
 	services []discovery.ServiceInfo
-	port     int           // port to listen on
-	spinner  spinner.Model // choices to display in the UI
+	spinner  spinner.Model
 }
 
 func InitialModel(m mode, port int) model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
 	return model{
 		mode:     m,
 		port:     port,
 		services: []discovery.ServiceInfo{},
-		spinner:  spinner.New(),
+		spinner:  s,
 	}
 }
 
 func (m model) Init() tea.Cmd {
+	 errCh := make(chan error, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /ask", api.AskHandler) // Register the AskHandler
 
@@ -72,16 +79,25 @@ func (m model) Init() tea.Cmd {
 
 	Adapter := &discovery.MDNSAdapter{}
 
-	return func() tea.Msg {
-		if err := Adapter.Announce(context.TODO(), serviceInfo); err != nil {
-			return serverErrorMsg{err}
-		}
-		if err := m.server.ListenAndServe(); err != http.ErrServerClosed {
-			return serverErrorMsg{err}
-		}
-		m.spinner.Tick()
-		return nil
-	}
+    go func() {
+        if err := Adapter.Announce(context.TODO(), serviceInfo); err != nil {
+            errCh <- err
+            return
+        }
+        if err := m.server.ListenAndServe(); err != http.ErrServerClosed {
+            errCh <- err
+        }
+    }()
+
+	return tea.Batch(
+		m.spinner.Tick,
+		func() tea.Msg  {
+			  if err := <-errCh; err != nil {
+                return serverErrorMsg{err}
+            }
+            return nil
+		},
+	)
 }
 
 func (m model) View() string {
@@ -106,10 +122,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		default:
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
+			return m, nil
 		}
+	default:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
-	return m, nil
 }
