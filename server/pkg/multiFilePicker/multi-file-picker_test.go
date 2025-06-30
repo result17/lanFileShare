@@ -1,0 +1,218 @@
+package multiFilePicker
+
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// setupTestDir creates a temporary directory structure for testing.
+// It returns the path to the temp directory and a cleanup function.
+func setupTestDir(t *testing.T) (string, func()) {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "test-picker-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+
+	// Create some files and directories with predictable names for sorting
+	if err := os.WriteFile(filepath.Join(tempDir, "file_a.txt"), []byte("a"), 0666); err != nil {
+		t.Fatalf("Failed to create file_a.txt: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(tempDir, "subdir_b"), 0777); err != nil {
+		t.Fatalf("Failed to create subdir_b: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "subdir_b", "file_c.txt"), []byte("c"), 0666); err != nil {
+		t.Fatalf("Failed to create subdir_b/file_c.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "file_d.txt"), []byte("d"), 0666); err != nil {
+		t.Fatalf("Failed to create file_d.txt: %v", err)
+	}
+
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return tempDir, cleanup
+}
+
+// newTestModel creates a model for testing, ensuring items are sorted for predictability.
+func newTestModel(t *testing.T, path string) model {
+	m := initialModel(path)
+	// Sort items because os.ReadDir doesn't guarantee order
+	sort.Slice(m.items, func(i, j int) bool {
+		return m.items[i].Name() < m.items[j].Name()
+	})
+	return m
+}
+
+func TestInitialModel(t *testing.T) {
+	tempDir, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	m := initialModel(tempDir)
+
+	if m.path != tempDir {
+		t.Errorf("expected path %q, got %q", tempDir, m.path)
+	}
+
+	// Expecting 3 items: file_a.txt, file_d.txt, subdir_b
+	if len(m.items) != 3 {
+		t.Errorf("expected 3 items, got %d", len(m.items))
+	}
+
+	if len(m.selected) != 0 {
+		t.Errorf("expected selected map to be empty, but it has %d items", len(m.selected))
+	}
+}
+
+func TestUpdateMovement(t *testing.T) {
+	m := model{
+		items: make([]fs.DirEntry, 3), // 3 dummy items
+		keys:  DefaultKeyMap,
+	}
+
+	// Use a helper to create key messages
+	keyDown := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}
+	keyUp := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}
+
+	// Test moving down
+	newModel, _ := m.Update(keyDown)
+	m = newModel.(model)
+	if m.cursor != 1 {
+		t.Errorf("expected cursor to be at 1 after moving down, got %d", m.cursor)
+	}
+
+	// Test moving down again
+	newModel, _ = m.Update(keyDown)
+	m = newModel.(model)
+	if m.cursor != 2 {
+		t.Errorf("expected cursor to be at 2 after moving down, got %d", m.cursor)
+	}
+
+	// Test moving down at the bottom
+	newModel, _ = m.Update(keyDown)
+	m = newModel.(model)
+	if m.cursor != 2 {
+		t.Errorf("expected cursor to stay at 2 at the bottom, got %d", m.cursor)
+	}
+
+	// Test moving up
+	newModel, _ = m.Update(keyUp)
+	m = newModel.(model)
+	if m.cursor != 1 {
+		t.Errorf("expected cursor to be at 1 after moving up, got %d", m.cursor)
+	}
+
+	// Test moving up again
+	newModel, _ = m.Update(keyUp)
+	m = newModel.(model)
+	if m.cursor != 0 {
+		t.Errorf("expected cursor to be at 0 after moving up, got %d", m.cursor)
+	}
+
+	// Test moving up at the top
+	newModel, _ = m.Update(keyUp)
+	m = newModel.(model)
+	if m.cursor != 0 {
+		t.Errorf("expected cursor to stay at 0 at the top, got %d", m.cursor)
+	}
+}
+
+func TestUpdateSelection(t *testing.T) {
+	tempDir, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	m := newTestModel(t, tempDir)
+	spaceKey := tea.KeyMsg{Type: tea.KeySpace}
+
+	// Select item at cursor 0 ('file_a.txt')
+	newModel, _ := m.Update(spaceKey)
+	m = newModel.(model)
+	item0Path := filepath.Join(tempDir, m.items[0].Name())
+	if _, ok := m.selected[item0Path]; !ok {
+		t.Errorf("expected item 0 to be selected, but it's not")
+	}
+
+	// Deselect item at cursor 0
+	newModel, _ = m.Update(spaceKey)
+	m = newModel.(model)
+	if _, ok := m.selected[item0Path]; ok {
+		t.Errorf("expected item 0 to be deselected, but it's still selected")
+	}
+}
+
+func TestConfirmSelection(t *testing.T) {
+	tempDir, cleanup := setupTestDir(t)
+	defer cleanup()
+
+	m := newTestModel(t, tempDir)
+	// Sorted items are: file_a.txt, file_d.txt, subdir_b
+
+	// 1. Select 'file_a.txt' (cursor is at 0)
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = newModel.(model)
+
+	// 2. Move cursor to 'subdir_b' (index 2)
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = newModel.(model)
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = newModel.(model)
+	if m.cursor != 2 {
+		t.Fatalf("cursor should be at index 2, but is at %d", m.cursor)
+	}
+
+	// 3. Select 'subdir_b'
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = newModel.(model)
+
+	// 4. Confirm selection
+	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	m = finalModel.(model)
+	if !m.quitting {
+		t.Errorf("expected model to be quitting after confirm, but it's not")
+	}
+
+	expected := []string{
+		filepath.Join(tempDir, "file_a.txt"),
+		filepath.Join(tempDir, "subdir_b", "file_c.txt"),
+	}
+
+	// Sort both slices for consistent comparison
+	sort.Strings(expected)
+	sort.Strings(m.choice)
+
+	if !reflect.DeepEqual(expected, m.choice) {
+		t.Errorf("expected choice to be %v, got %v", expected, m.choice)
+	}
+}
+
+func TestQuit(t *testing.T) {
+	m := model{keys: DefaultKeyMap}
+
+	// Test with 'q'
+	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if !finalModel.(model).quitting {
+		t.Errorf("expected model to be quitting after 'q' key, but it's not")
+	}
+
+	// Test with 'esc'
+	m = model{keys: DefaultKeyMap} // reset model
+	finalModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if !finalModel.(model).quitting {
+		t.Errorf("expected model to be quitting after 'esc' key, but it's not")
+	}
+
+	// Test with 'ctrl+c'
+	m = model{keys: DefaultKeyMap} // reset model
+	finalModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !finalModel.(model).quitting {
+		t.Errorf("expected model to be quitting after 'ctrl+c' key, but it's not")
+	}
+}

@@ -3,14 +3,13 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/brutella/dnssd"
 )
 
 type MDNSAdapter struct{}
-
-var timeFormat = "15:04:05.000"
 
 func (m *MDNSAdapter) Announce(ctx context.Context, serviceInfo ServiceInfo) error {
 	text := make(map[string]string)
@@ -66,7 +65,8 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []Serv
 
 	addFn := func(e dnssd.BrowseEntry) {
 		mu.Lock()
-		entries[e.Name+e.IfaceName] = ServiceInfo{
+		log.Printf("Found service %s %s %d  %s in dns-sd", e.Name, e.Type, e.Port, e.IfaceName)
+		entries[fmt.Sprintf("%s:%s:%s", e.Name, e.Type, e.Domain)] = ServiceInfo{
 			Name:   e.Name,
 			Type:   e.Type,
 			Domain: e.Domain,
@@ -79,7 +79,7 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []Serv
 
 	rmvFn := func(e dnssd.BrowseEntry) {
 		mu.Lock()
-		delete(entries, e.Name+e.IfaceName)
+		delete(entries, fmt.Sprintf("%s:%s:%s", e.Name, e.Type, e.Domain))
 		mu.Unlock()
 		sendSnapshot()
 	}
