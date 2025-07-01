@@ -15,7 +15,7 @@ import (
 // It returns the path to the temp directory and a cleanup function.
 func setupTestDir(t *testing.T) (string, func()) {
 	t.Helper()
-	tempDir, err := os.MkdirTemp("", "test-picker-*")
+	tempDir, err := os.MkdirTemp(".", "test-picker-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -42,7 +42,7 @@ func setupTestDir(t *testing.T) (string, func()) {
 }
 
 // newTestModel creates a model for testing, ensuring items are sorted for predictability.
-func newTestModel(t *testing.T, path string) model {
+func newTestModel(t *testing.T, path string) Model {
 	m := initialModel(path)
 	// Sort items because os.ReadDir doesn't guarantee order
 	sort.Slice(m.items, func(i, j int) bool {
@@ -72,7 +72,7 @@ func TestInitialModel(t *testing.T) {
 }
 
 func TestUpdateMovement(t *testing.T) {
-	m := model{
+	m := Model{
 		items: make([]fs.DirEntry, 3), // 3 dummy items
 		keys:  DefaultKeyMap,
 	}
@@ -83,42 +83,42 @@ func TestUpdateMovement(t *testing.T) {
 
 	// Test moving down
 	newModel, _ := m.Update(keyDown)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 1 {
 		t.Errorf("expected cursor to be at 1 after moving down, got %d", m.cursor)
 	}
 
 	// Test moving down again
 	newModel, _ = m.Update(keyDown)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 2 {
 		t.Errorf("expected cursor to be at 2 after moving down, got %d", m.cursor)
 	}
 
 	// Test moving down at the bottom
 	newModel, _ = m.Update(keyDown)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 2 {
 		t.Errorf("expected cursor to stay at 2 at the bottom, got %d", m.cursor)
 	}
 
 	// Test moving up
 	newModel, _ = m.Update(keyUp)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 1 {
 		t.Errorf("expected cursor to be at 1 after moving up, got %d", m.cursor)
 	}
 
 	// Test moving up again
 	newModel, _ = m.Update(keyUp)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 0 {
 		t.Errorf("expected cursor to be at 0 after moving up, got %d", m.cursor)
 	}
 
 	// Test moving up at the top
 	newModel, _ = m.Update(keyUp)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 0 {
 		t.Errorf("expected cursor to stay at 0 at the top, got %d", m.cursor)
 	}
@@ -133,15 +133,15 @@ func TestUpdateSelection(t *testing.T) {
 
 	// Select item at cursor 0 ('file_a.txt')
 	newModel, _ := m.Update(spaceKey)
-	m = newModel.(model)
+	m = newModel.(Model)
 	item0Path := filepath.Join(tempDir, m.items[0].Name())
 	if _, ok := m.selected[item0Path]; !ok {
-		t.Errorf("expected item 0 to be selected, but it's not")
+		t.Errorf("expected item 0 to be selected, but it's not. selected is %v, selected size is %d", m.selected, len(m.selected))
 	}
 
 	// Deselect item at cursor 0
 	newModel, _ = m.Update(spaceKey)
-	m = newModel.(model)
+	m = newModel.(Model)
 	if _, ok := m.selected[item0Path]; ok {
 		t.Errorf("expected item 0 to be deselected, but it's still selected")
 	}
@@ -156,25 +156,25 @@ func TestConfirmSelection(t *testing.T) {
 
 	// 1. Select 'file_a.txt' (cursor is at 0)
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = newModel.(model)
+	m = newModel.(Model)
 
 	// 2. Move cursor to 'subdir_b' (index 2)
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = newModel.(model)
+	m = newModel.(Model)
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = newModel.(model)
+	m = newModel.(Model)
 	if m.cursor != 2 {
 		t.Fatalf("cursor should be at index 2, but is at %d", m.cursor)
 	}
 
 	// 3. Select 'subdir_b'
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = newModel.(model)
+	m = newModel.(Model)
 
 	// 4. Confirm selection
 	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	m = finalModel.(model)
+	m = finalModel.(Model)
 	if !m.quitting {
 		t.Errorf("expected model to be quitting after confirm, but it's not")
 	}
@@ -194,25 +194,25 @@ func TestConfirmSelection(t *testing.T) {
 }
 
 func TestQuit(t *testing.T) {
-	m := model{keys: DefaultKeyMap}
+	m := Model{keys: DefaultKeyMap}
 
 	// Test with 'q'
 	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	if !finalModel.(model).quitting {
+	if !finalModel.(Model).quitting {
 		t.Errorf("expected model to be quitting after 'q' key, but it's not")
 	}
 
 	// Test with 'esc'
-	m = model{keys: DefaultKeyMap} // reset model
+	m = Model{keys: DefaultKeyMap} // reset model
 	finalModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	if !finalModel.(model).quitting {
+	if !finalModel.(Model).quitting {
 		t.Errorf("expected model to be quitting after 'esc' key, but it's not")
 	}
 
 	// Test with 'ctrl+c'
-	m = model{keys: DefaultKeyMap} // reset model
+	m = Model{keys: DefaultKeyMap} // reset model
 	finalModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	if !finalModel.(model).quitting {
+	if !finalModel.(Model).quitting {
 		t.Errorf("expected model to be quitting after 'ctrl+c' key, but it's not")
 	}
 }

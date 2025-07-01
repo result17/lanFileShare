@@ -24,13 +24,13 @@ type KeyMap struct {
 var DefaultKeyMap = KeyMap{
 	Up:           key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move up")),
 	Down:         key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move down")),
-	ToggleSelect: key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle select")),
+	ToggleSelect: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
 	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm selection")),
 	Quit:         key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q/esc", "quit")),
 }
 
 // --- Model ---
-type model struct {
+type Model struct {
 	// The directory we are listing
 	path string
 	// The files and directories in the current path
@@ -47,7 +47,7 @@ type model struct {
 	choice []string
 }
 
-func initialModel(path string) model {
+func initialModel(path string) Model {
 	// Read the directory
 	items, err := os.ReadDir(path)
 	if err != nil {
@@ -55,7 +55,7 @@ func initialModel(path string) model {
 		panic(err)
 	}
 
-	return model{
+	return Model{
 		path:     path,
 		items:    items,
 		selected: make(map[string]struct{}),
@@ -64,11 +64,11 @@ func initialModel(path string) model {
 }
 
 // --- Bubble Tea Methods ---
-func (m model) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quitting {
 		return m, tea.Quit
 	}
@@ -129,7 +129,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() string {
+func (m Model) View() string {
 	if m.quitting {
 		if len(m.choice) > 0 {
 			return fmt.Sprintf("Selected files:\n%s\n", strings.Join(m.choice, "\n"))
@@ -175,7 +175,7 @@ func (m model) View() string {
 	return s.String()
 }
 
-func (m model) helpView() string {
+func (m Model) helpView() string {
 	helps := []string{
 		m.keys.Up.Help().Key + " " + m.keys.Up.Help().Desc,
 		m.keys.Down.Help().Key + " " + m.keys.Down.Help().Desc,
@@ -184,4 +184,17 @@ func (m model) helpView() string {
 		m.keys.Quit.Help().Key + " " + m.keys.Quit.Help().Desc,
 	}
 	return "\n" + strings.Join(helps, "  ")
+}
+
+// Run starts the file picker and returns the selected file paths.
+func Run(startDir string) ([]string, error) {
+	p := tea.NewProgram(initialModel(startDir))
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil, fmt.Errorf("error running program: %w", err)
+	}
+
+	// The final model is returned from p.Run()
+	m := finalModel.(Model)
+	return m.choice, nil
 }
