@@ -47,7 +47,7 @@ type Model struct {
 	choice []string
 }
 
-func initialModel(path string) Model {
+func InitialModel(path string) Model {
 	// Read the directory
 	items, err := os.ReadDir(path)
 	if err != nil {
@@ -188,7 +188,7 @@ func (m Model) helpView() string {
 
 // Run starts the file picker and returns the selected file paths.
 func Run(startDir string) ([]string, error) {
-	p := tea.NewProgram(initialModel(startDir))
+	p := tea.NewProgram(InitialModel(startDir))
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("error running program: %w", err)

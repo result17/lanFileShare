@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
-	"github.com/charmbracelet/bubbles/table"
+	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
 )
 
 type foundServiceMsg struct {
@@ -18,10 +20,12 @@ type foundServiceMsg struct {
 }
 
 type senderModel struct {
-	port     int
-	spinner  spinner.Model
-	table    table.Model
-	services []discovery.ServiceInfo
+	port            int
+	spinner         spinner.Model
+	table           table.Model
+	services        []discovery.ServiceInfo
+	selectedService table.Row
+	fp              multiFilePicker.Model
 }
 
 var columns = []table.Column{
@@ -36,15 +40,31 @@ var baseStyle = lipgloss.NewStyle().
 	BorderStyle(lipgloss.NormalBorder()).
 	BorderForeground(lipgloss.Color("240"))
 
-func initSenderModel(m mode, port int) model{
+var highLightFontStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
+
+func initSenderModel(m mode, port int) model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	wd, err := os.Getwd()
+
+	if err != nil {
+		return model{
+			mode: m,
+			sender: senderModel{
+				spinner: s,
+				port:    port,
+			},
+		}
+	}
+
 	return model{
 		mode: m,
 		sender: senderModel{
 			spinner: s,
 			port:    port,
+			fp:      multiFilePicker.InitialModel(wd),
 		},
 	}
 }
@@ -116,16 +136,22 @@ func (m model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, readServices
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "esc":
-			if m.sender.table.Focused() {
-				m.sender.table.Blur()
-			} else {
-				m.sender.table.Focus()
+		if m.sender.selectedService == nil {
+			switch msg.String() {
+			case "esc":
+				if m.sender.table.Focused() {
+					m.sender.table.Blur()
+				} else {
+					m.sender.table.Focus()
+				}
+			case "enter":
+				m.sender.selectedService = m.sender.table.SelectedRow()
+				return m, nil
 			}
-		case "enter":
-			// TODO
-			return m, nil
+		} else {
+			newFpModel, cmd := m.sender.fp.Update(msg)
+			m.sender.fp = newFpModel.(multiFilePicker.Model)
+			return m, cmd
 		}
 	}
 
@@ -143,6 +169,20 @@ func (m model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) senderView() string {
 	s := ""
+
+	if m.sender.selectedService != nil {
+		s += m.selectedFilesView()
+	} else {
+		s += m.selectReceiverView()
+	}
+
+	s += "\nPress q to quit.\n"
+
+	return s
+}
+
+func (m model) selectReceiverView() string {
+	s := ""
 	length := len(m.sender.services)
 	if length < 1 {
 		s += fmt.Sprintf("\n%s Finding receiver", m.sender.spinner.View())
@@ -150,8 +190,9 @@ func (m model) senderView() string {
 		s += fmt.Sprintf("\n%s Found %d receiver(s)\n", m.sender.spinner.View(), length)
 		s += baseStyle.Render(m.sender.table.View()) + "\n"
 	}
-
-	s += "\nPress q to quit.\n"
-
 	return s
+}
+
+func (m model) selectedFilesView() string {
+	return fmt.Sprintf("Receiver: %s\n%s\n", highLightFontStyle.Render(m.sender.selectedService[1]), m.sender.fp.View())
 }

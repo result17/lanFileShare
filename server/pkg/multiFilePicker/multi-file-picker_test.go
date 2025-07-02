@@ -43,7 +43,7 @@ func setupTestDir(t *testing.T) (string, func()) {
 
 // newTestModel creates a model for testing, ensuring items are sorted for predictability.
 func newTestModel(t *testing.T, path string) Model {
-	m := initialModel(path)
+	m := InitialModel(path)
 	// Sort items because os.ReadDir doesn't guarantee order
 	sort.Slice(m.items, func(i, j int) bool {
 		return m.items[i].Name() < m.items[j].Name()
@@ -55,7 +55,7 @@ func TestInitialModel(t *testing.T) {
 	tempDir, cleanup := setupTestDir(t)
 	defer cleanup()
 
-	m := initialModel(tempDir)
+	m := InitialModel(tempDir)
 
 	if m.path != tempDir {
 		t.Errorf("expected path %q, got %q", tempDir, m.path)
