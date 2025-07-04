@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -250,7 +251,6 @@ func (m Model) View() string {
 		visibleItems = 20 // Default if height is not yet set
 	}
 
-
 	start := m.offset
 	end := m.offset + visibleItems
 	if end > len(m.items) {
@@ -331,20 +331,31 @@ func getSelectedPaths(selection map[string]struct{}) []string {
 	return paths
 }
 
-// Run starts the file picker and returns the selected file paths.
-func Run() ([]string, error) {
-	p := tea.NewProgram(InitialModel())
-	finalModel, err := p.Run()
+func (m *Model) SetPath(path string) error {
+	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("error running program: %w", err)
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return fmt.Errorf("path does not exist: %s", absPath)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory: %s", absPath)
+	}
+	items, err := os.ReadDir(absPath)
+	if err != nil {
+		return fmt.Errorf("could not read directory: %w", err)
 	}
 
-	m := finalModel.(Model)
-	// If user quits without confirming, choice might be empty.
-	// If they confirmed via browser, we need to populate it now.
-	if len(m.choice) == 0 && len(m.selected) > 0 {
-		m.choice = getSelectedPaths(m.selected)
-	}
-
-	return m.choice, nil
+	sort.Slice(m.items, func(i, j int) bool {
+		return m.items[i].Name() < m.items[j].Name()
+	})
+	m.path = absPath
+	m.items = items
+	m.cursor = 0
+	m.offset = 0
+	m.inputErr = nil
+	m.mode = modeBrowse
+	return nil
 }

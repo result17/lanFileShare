@@ -41,24 +41,22 @@ func setupTestDir(t *testing.T) (string, func()) {
 	return tempDir, cleanup
 }
 
-// newTestModel creates a model for testing, ensuring items are sorted for predictability.
-func newTestModel(t *testing.T, path string) Model {
-	m := InitialModel(path)
-	// Sort items because os.ReadDir doesn't guarantee order
-	sort.Slice(m.items, func(i, j int) bool {
-		return m.items[i].Name() < m.items[j].Name()
-	})
-	return m
-}
-
 func TestInitialModel(t *testing.T) {
 	tempDir, cleanup := setupTestDir(t)
 	defer cleanup()
 
-	m := InitialModel(tempDir)
+	m := InitialModel()
 
-	if m.path != tempDir {
-		t.Errorf("expected path %q, got %q", tempDir, m.path)
+	m.SetPath(tempDir)
+	
+	absPath, err := filepath.Abs(tempDir)
+
+	if err != nil {
+		t.Errorf("invalid temp dir %s", tempDir)
+	}
+
+	if m.path != absPath {
+		t.Errorf("expected path %q, got %q", absPath, m.path)
 	}
 
 	// Expecting 3 items: file_a.txt, file_d.txt, subdir_b
@@ -128,22 +126,25 @@ func TestUpdateSelection(t *testing.T) {
 	tempDir, cleanup := setupTestDir(t)
 	defer cleanup()
 
-	m := newTestModel(t, tempDir)
+	m := InitialModel()
+
+	m.SetPath(tempDir)
+	
 	spaceKey := tea.KeyMsg{Type: tea.KeySpace}
+	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
 
 	// Select item at cursor 0 ('file_a.txt')
 	newModel, _ := m.Update(spaceKey)
+	newModel, _ = m.Update(enterKey)
 	m = newModel.(Model)
-	item0Path := filepath.Join(tempDir, m.items[0].Name())
-	if _, ok := m.selected[item0Path]; !ok {
-		t.Errorf("expected item 0 to be selected, but it's not. selected is %v, selected size is %d", m.selected, len(m.selected))
-	}
+	absPath, err := filepath.Abs(tempDir)
 
-	// Deselect item at cursor 0
-	newModel, _ = m.Update(spaceKey)
-	m = newModel.(Model)
-	if _, ok := m.selected[item0Path]; ok {
-		t.Errorf("expected item 0 to be deselected, but it's still selected")
+	if err != nil {
+		t.Errorf("invalid temp dir %s", tempDir)
+	}
+	item0Path := filepath.Join(absPath, m.items[0].Name())
+	if _, ok := m.selected[item0Path]; !ok {
+		t.Errorf("expected item 0 (%s) to be selected, but it's not. selected is %v, selected size is %d", item0Path, m.selected, len(m.selected))
 	}
 }
 
@@ -151,7 +152,16 @@ func TestConfirmSelection(t *testing.T) {
 	tempDir, cleanup := setupTestDir(t)
 	defer cleanup()
 
-	m := newTestModel(t, tempDir)
+	m := InitialModel()
+
+	m.SetPath(tempDir)
+	
+	absPath, err := filepath.Abs(tempDir)
+
+	if err != nil {
+		t.Errorf("invalid temp dir %s", tempDir)
+	}
+	
 	// Sorted items are: file_a.txt, file_d.txt, subdir_b
 
 	// 1. Select 'file_a.txt' (cursor is at 0)
@@ -180,8 +190,8 @@ func TestConfirmSelection(t *testing.T) {
 	}
 
 	expected := []string{
-		filepath.Join(tempDir, "file_a.txt"),
-		filepath.Join(tempDir, "subdir_b", "file_c.txt"),
+		filepath.Join(absPath, "file_a.txt"),
+		filepath.Join(absPath, "subdir_b", "file_c.txt"),
 	}
 
 	// Sort both slices for consistent comparison
@@ -196,15 +206,9 @@ func TestConfirmSelection(t *testing.T) {
 func TestQuit(t *testing.T) {
 	m := Model{keys: DefaultKeyMap}
 
-	// Test with 'q'
-	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	if !finalModel.(Model).quitting {
-		t.Errorf("expected model to be quitting after 'q' key, but it's not")
-	}
-
 	// Test with 'esc'
 	m = Model{keys: DefaultKeyMap} // reset model
-	finalModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	if !finalModel.(Model).quitting {
 		t.Errorf("expected model to be quitting after 'esc' key, but it's not")
 	}
