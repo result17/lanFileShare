@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -47,24 +46,12 @@ func initSenderModel(m mode, port int) model {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	wd, err := os.Getwd()
-
-	if err != nil {
-		return model{
-			mode: m,
-			sender: senderModel{
-				spinner: s,
-				port:    port,
-			},
-		}
-	}
-
 	return model{
 		mode: m,
 		sender: senderModel{
 			spinner: s,
 			port:    port,
-			fp:      multiFilePicker.InitialModel(wd),
+			fp:      multiFilePicker.InitialModel(),
 		},
 	}
 }
@@ -175,8 +162,6 @@ func (m model) senderView() string {
 	} else {
 		s += m.selectReceiverView()
 	}
-
-	s += "\nPress q to quit.\n"
 
 	return s
 }

@@ -47,21 +47,24 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) View() string {
+	var s string
 	switch m.mode {
 	case Sender:
-		return m.senderView()
+		s += m.senderView()
 	case Receiver:
-		return m.receiverView()
+		s += m.receiverView()
 	default:
 		return ""
 	}
+	s += "press ctrl + c to quit"
+	return s
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
 		}
 	}

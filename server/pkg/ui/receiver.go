@@ -92,9 +92,6 @@ func (m model) initReceiver() tea.Cmd {
 func (m model) receiverView() string {
 	s := fmt.Sprintf("\n\n %s Awaiting sender connection", m.receiver.spinner.View())
 
-	// The footer
-	s += "\nPress q to quit.\n"
-
 	// Send the UI for rendering
 	return s
 }
