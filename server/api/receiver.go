@@ -11,19 +11,6 @@ import (
 
 var AskRequests sync.Map
 
-type FileInfo struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"`
-	Type string `json:"type"`
-}
-
-type AskRequest struct {
-	SenderName string     `json:"senderName"`
-	ServiceID  string     `json:"serviceID"`
-	Files      []FileInfo `json:"files"`
-	Thumbnail  string     `json:"thumbnail"`
-}
-
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
@@ -56,13 +43,12 @@ func AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req AskRequest
+	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	AskRequests.Store(req.ServiceID, req)
 	log.Printf("Ask received: %+v", req)
 
 	w.WriteHeader(http.StatusOK)

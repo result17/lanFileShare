@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
-		"sort"
+	"sort"
 	"strings"
 )
 
