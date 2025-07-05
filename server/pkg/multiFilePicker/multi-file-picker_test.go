@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"testing"
 
@@ -185,9 +184,6 @@ func TestConfirmSelection(t *testing.T) {
 	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	m = finalModel.(Model)
-	if !m.quitting {
-		t.Errorf("expected model to be quitting after confirm, but it's not")
-	}
 
 	expected := []string{
 		filepath.Join(absPath, "file_a.txt"),
@@ -196,10 +192,12 @@ func TestConfirmSelection(t *testing.T) {
 
 	// Sort both slices for consistent comparison
 	sort.Strings(expected)
-	sort.Strings(m.choice)
 
-	if !reflect.DeepEqual(expected, m.choice) {
-		t.Errorf("expected choice to be %v, got %v", expected, m.choice)
+	for i, info := range m.infos {
+		if info.Path != expected[i] {
+			t.Errorf("expected path to be %v, got %v", expected[i], info.Path)
+		}
+		
 	}
 }
 

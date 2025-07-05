@@ -3,6 +3,7 @@ package multiFilePicker
 import (
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,9 +13,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 type mode int
+type SelectedFileNodeMsg struct {
+	Infos []*fileInfo.FileNode
+}
 
 const (
 	modeBrowse mode = iota
@@ -48,12 +53,12 @@ type Model struct {
 	cursor   int
 	keys     KeyMap
 	quitting bool
-	choice   []string
 	mode     mode
 	input    textinput.Model
 	inputErr error
 	height   int // For viewport height
 	offset   int // For scrolling
+	infos    []*fileInfo.FileNode
 }
 
 func InitialModel() Model {
@@ -81,8 +86,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+
 	if m.quitting {
-		return m, tea.Quit
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -168,9 +174,10 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Confirm):
 		if len(m.selected) > 0 {
-			m.choice = getSelectedPaths(m.selected)
-			m.quitting = true
-			return m, tea.Quit
+			infos := getSelectedFileNodes(m.selected)
+			return m, func() tea.Msg {
+				return SelectedFileNodeMsg{Infos: infos}
+			}
 		}
 	}
 	return m, nil
@@ -219,13 +226,6 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	if m.quitting {
-		if len(m.choice) > 0 {
-			return fmt.Sprintf("Selected:\n%s\n", strings.Join(m.choice, "\n"))
-		}
-		return "No selection. Bye!\n"
-	}
-
 	var s strings.Builder
 
 	// Header
@@ -239,7 +239,6 @@ func (m Model) View() string {
 	if m.path != "" {
 		s.WriteString(fmt.Sprintf("Browsing: %s\n", m.path))
 	}
-	s.WriteString("Select files and folders:\n")
 
 	// Viewport logic
 	headerHeight := 6 // Approximate number of lines in the header
@@ -313,22 +312,17 @@ func (m Model) helpView() string {
 	)
 }
 
-func getSelectedPaths(selection map[string]struct{}) []string {
-	var paths []string
+func getSelectedFileNodes(selection map[string]struct{}) []*fileInfo.FileNode {
+	var infos []*fileInfo.FileNode
 	for path := range selection {
-		info, err := os.Stat(path)
-		if err == nil && info.IsDir() {
-			filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-				if err == nil && !d.IsDir() {
-					paths = append(paths, p)
-				}
-				return nil
-			})
-		} else if err == nil && !info.IsDir() {
-			paths = append(paths, path)
+		info, err := fileInfo.CreateNode(path)
+		if err != nil {
+			log.Printf("Failed to create fileNode, %v", err)
+			continue
 		}
+		infos = append(infos, info)
 	}
-	return paths
+	return infos
 }
 
 func (m *Model) SetPath(path string) error {

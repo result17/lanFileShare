@@ -56,7 +56,7 @@ func (m model) View() string {
 	default:
 		return ""
 	}
-	s += "press ctrl + c to quit"
+	s += "\n press ctrl + c to quit"
 	return s
 }
 
