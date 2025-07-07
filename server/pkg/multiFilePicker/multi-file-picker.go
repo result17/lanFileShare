@@ -40,6 +40,8 @@ const (
 type KeyMap struct {
 	Up           key.Binding
 	Down         key.Binding
+	Left         key.Binding // Page up
+	Right        key.Binding // Page down
 	ToggleSelect key.Binding
 	ToggleInput  key.Binding
 	Confirm      key.Binding
@@ -49,6 +51,8 @@ type KeyMap struct {
 var DefaultKeyMap = KeyMap{
 	Up:           key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move up")),
 	Down:         key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move down")),
+	Left:         key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "page up")),
+	Right:        key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "page down")),
 	ToggleSelect: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
 	ToggleInput:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
 	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
@@ -58,6 +62,7 @@ var DefaultKeyMap = KeyMap{
 // --- Model ---
 type Model struct {
 	path     string
+	lastPath string // For relative path resolution
 	items    []fs.DirEntry
 	selected map[string]struct{}
 	cursor   int
@@ -80,8 +85,15 @@ func InitialModel() Model {
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
 
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Printf("Could not get working directory: %v", err)
+		wd = "" // Fallback to empty string
+	}
+
 	return Model{
 		path:     "",              // Initially empty
+		lastPath: wd,              // Start with the working directory
 		items:    []fs.DirEntry{}, // Initially empty
 		selected: make(map[string]struct{}),
 		keys:     DefaultKeyMap,
@@ -169,6 +181,40 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case key.Matches(msg, m.keys.Right): // Page down
+		visibleItems := m.visibleItems()
+		// Move cursor down by one page
+		m.cursor += visibleItems
+		if m.cursor >= len(m.items) {
+			m.cursor = len(m.items) - 1
+		}
+		// Scroll the view down by one page
+		m.offset += visibleItems
+		if m.offset > len(m.items)-visibleItems {
+			m.offset = len(m.items) - visibleItems
+		}
+		// Ensure the cursor is within the visible viewport
+		if m.cursor >= m.offset+visibleItems {
+			m.offset = m.cursor - visibleItems + 1
+		}
+
+	case key.Matches(msg, m.keys.Left): // Page up
+		visibleItems := m.visibleItems()
+		// Move cursor up by one page
+		m.cursor -= visibleItems
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		// Scroll the view up by one page
+		m.offset -= visibleItems
+		if m.offset < 0 {
+			m.offset = 0
+		}
+		// Ensure the cursor is within the visible viewport
+		if m.cursor < m.offset {
+			m.offset = m.cursor
+		}
+
 	case key.Matches(msg, m.keys.ToggleSelect):
 		item := m.items[m.cursor]
 		path := filepath.Join(m.path, item.Name())
@@ -194,6 +240,11 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if key.Matches(msg, m.keys.Confirm) {
 		path := m.input.Value()
+		// Resolve path relative to the last path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(m.lastPath, path)
+		}
+
 		absPath, err := filepath.Abs(path)
 		if err != nil {
 			m.inputErr = fmt.Errorf("invalid path: %w", err)
@@ -218,6 +269,7 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		m.path = absPath
+		m.lastPath = absPath // Update last path
 		m.items = items
 		m.mode = modeBrowse
 		m.input.Reset()
@@ -241,6 +293,10 @@ func (m Model) View() string {
 		s.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.inputErr.Error()))
 	}
 	s.WriteString("\n\n")
+
+	if m.path == "" {
+		return s.String()
+	}
 
 	if m.path != "" {
 		s.WriteString(fmt.Sprintf("Browsing: %s\n\n", m.path))
@@ -318,7 +374,7 @@ func (m Model) View() string {
 			nameStr = nameStr + "/"
 		}
 
-		// 先 padRight，再加样式
+		// Pad right first, then add style
 		nameCell := padRight(nameStr, nameWidth)
 		timeCell := padRight(modTime, timeWidth)
 		sizeCell := padRight(size, sizeWidth)
@@ -326,7 +382,7 @@ func (m Model) View() string {
 		if item.IsDir() {
 			nameCell = dirStyle.Render(nameCell)
 		}
-		// 普通文件不加 nameCol.Render，直接输出 padRight 后的 nameCell
+		// For regular files, don't add nameCol.Render, just output the padded nameCell
 		s.WriteString(nameCell + " " +
 			timeCell + " " +
 			sizeCell + "\n")
@@ -342,8 +398,8 @@ func (m Model) View() string {
 
 func (m Model) helpView() string {
 	return lipgloss.NewStyle().Faint(true).Render(
-		fmt.Sprintf("'%s' to browse, '%s' to confirm, '%s' to quit",
-			m.keys.ToggleInput.Help().Key, m.keys.Confirm.Help().Key, m.keys.Quit.Help().Key),
+		fmt.Sprintf("Use '%s'/'%s' to page, '%s' to browse, '%s' to confirm, '%s' to quit",
+			m.keys.Left.Help().Key, m.keys.Right.Help().Key, m.keys.ToggleInput.Help().Key, m.keys.Confirm.Help().Key, m.keys.Quit.Help().Key),
 	)
 }
 
@@ -381,6 +437,7 @@ func (m *Model) SetPath(path string) error {
 		return m.items[i].Name() < m.items[j].Name()
 	})
 	m.path = absPath
+	m.lastPath = absPath // Also update the last path
 	m.items = items
 	m.cursor = 0
 	m.offset = 0
@@ -396,7 +453,7 @@ func (m *Model) visibleItems() int {
 	}
 	visible := m.height - headerHeight
 	if visible < 1 {
-		visible = 10
+		visible = 16
 	}
 	return visible
 }
