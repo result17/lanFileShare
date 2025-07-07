@@ -3,7 +3,6 @@ package discovery
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/brutella/dnssd"
@@ -65,7 +64,6 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []Serv
 
 	addFn := func(e dnssd.BrowseEntry) {
 		mu.Lock()
-		log.Printf("Found service %s %s %d  %s in dns-sd", e.Name, e.Type, e.Port, e.IfaceName)
 		entries[fmt.Sprintf("%s:%s:%s", e.Name, e.Type, e.Domain)] = ServiceInfo{
 			Name:   e.Name,
 			Type:   e.Type,

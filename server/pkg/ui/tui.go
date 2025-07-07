@@ -25,7 +25,7 @@ type model struct {
 func InitialModel(m mode, port int) model {
 	switch m {
 	case Sender:
-		return initSenderModel(m, port)
+		return initSenderModel()
 	case Receiver:
 		return initReceiverModel(m, port)
 	default:

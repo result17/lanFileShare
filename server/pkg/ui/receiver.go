@@ -38,12 +38,14 @@ func initReceiverModel(m mode, port int) model {
 func (m model) initReceiver() tea.Cmd {
 	errCh := make(chan error, 1)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ask", api.AskHandler) // Register the AskHandler
+	// 1. Create a configured API instance.
+	// All routing, middleware, and logic are handled within the API.
+	apiHandler := api.NewAPI()
 
+	// 2. Pass the API instance directly as the Handler to the server.
 	m.receiver.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", m.receiver.port),
-		Handler: mux,
+		Handler: apiHandler, // Use the API instance directly.
 	}
 
 	hostname, err := os.Hostname()
@@ -59,7 +61,7 @@ func (m model) initReceiver() tea.Cmd {
 		Name:   fmt.Sprintf("%s-%s", hostname, serviceUUID[:8]),
 		Type:   discovery.DefaultServerType,
 		Domain: discovery.DefaultDomain,
-		Addr:   nil, // This will be set by the discovery package
+		Addr:   nil, // This will be set by the discovery package.
 		Port:   m.receiver.port,
 	}
 	// remove dnssd logging
@@ -69,18 +71,24 @@ func (m model) initReceiver() tea.Cmd {
 	Adapter := &discovery.MDNSAdapter{}
 
 	go func() {
+		// Start service discovery and the HTTP server in the same goroutine
+		// to better manage their lifecycle.
+		go func() {
+			if err := m.receiver.server.ListenAndServe(); err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+
 		if err := Adapter.Announce(context.TODO(), serviceInfo); err != nil {
 			errCh <- err
 			return
-		}
-		if err := m.receiver.server.ListenAndServe(); err != http.ErrServerClosed {
-			errCh <- err
 		}
 	}()
 
 	return tea.Batch(
 		m.receiver.spinner.Tick,
 		func() tea.Msg {
+			// Listen for errors on the channel.
 			if err := <-errCh; err != nil {
 				return serverErrorMsg{err}
 			}

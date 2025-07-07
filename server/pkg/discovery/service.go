@@ -18,7 +18,7 @@ type ServiceInfo struct {
 	Port   int
 }
 
-type ServiceDiscovery interface {
+type Adapter interface {
 	Announce(ctx context.Context, service ServiceInfo) error
-	Discover(serviceName string, service string) (chan []ServiceInfo, error)
+	Discover(ctx context.Context, service string) (chan []ServiceInfo, error)
 }
