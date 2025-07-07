@@ -13,8 +13,18 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
+
+// padRight pads a string to the given width (in runewidth), using spaces.
+func padRight(str string, width int) string {
+	w := runewidth.StringWidth(str)
+	if w >= width {
+		return str
+	}
+	return str + strings.Repeat(" ", width-w)
+}
 
 type mode int
 type SelectedFileNodeMsg struct {
@@ -143,23 +153,19 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
-			// Scroll up if cursor is at the top of the viewport
+			// If the cursor moved above the visible viewport, scroll up
 			if m.cursor < m.offset {
-				m.offset = m.cursor
+				m.offset--
 			}
 		}
 
 	case key.Matches(msg, m.keys.Down):
 		if m.cursor < len(m.items)-1 {
 			m.cursor++
-			// Scroll down if cursor is at the bottom of the viewport
-			// The number of visible items is roughly m.height - header lines
-			visibleItems := m.height - 10 // Adjust this based on your header's height
-			if visibleItems < 1 {
-				visibleItems = 1
-			}
+			// If the cursor moved below the visible viewport, scroll down
+			visibleItems := m.visibleItems()
 			if m.cursor >= m.offset+visibleItems {
-				m.offset = m.cursor - visibleItems + 1
+				m.offset++
 			}
 		}
 
@@ -237,18 +243,24 @@ func (m Model) View() string {
 	s.WriteString("\n\n")
 
 	if m.path != "" {
-		s.WriteString(fmt.Sprintf("Browsing: %s\n", m.path))
+		s.WriteString(fmt.Sprintf("Browsing: %s\n\n", m.path))
 	}
 
-	// Viewport logic
-	headerHeight := 6 // Approximate number of lines in the header
-	if m.inputErr != nil {
-		headerHeight++
-	}
-	visibleItems := m.height - headerHeight
-	if visibleItems < 1 {
-		visibleItems = 20 // Default if height is not yet set
-	}
+	// Table column widths
+	nameWidth := 36
+	timeWidth := 20
+	sizeWidth := 10
+
+	// Table header: pad first, then style
+	headerStyle := lipgloss.NewStyle().Bold(true)
+	s.WriteString(
+		headerStyle.Render(padRight("", 5)) + " " +
+			headerStyle.Render(padRight("Name", nameWidth)) + " " +
+			headerStyle.Render(padRight("Last Modified", timeWidth)) + " " +
+			headerStyle.Render(padRight("Size(bytes)", sizeWidth)) + "\n",
+	)
+
+	visibleItems := m.visibleItems()
 
 	start := m.offset
 	end := m.offset + visibleItems
@@ -289,17 +301,40 @@ func (m Model) View() string {
 			s.WriteString(deselectedStyle.String())
 		}
 
-		if item.IsDir() {
-			s.WriteString(dirStyle.Render(item.Name() + "/"))
-		} else {
-			s.WriteString(item.Name())
+		info, err := item.Info()
+		modTime := ""
+		size := ""
+
+		if err == nil {
+			modTime = info.ModTime().Format("2006-01-02 15:04:05")
+			if info.IsDir() {
+				size = "<DIR>"
+			} else {
+				size = fmt.Sprintf("%d", info.Size())
+			}
 		}
-		s.WriteString("\n")
+		nameStr := item.Name()
+		if item.IsDir() {
+			nameStr = nameStr + "/"
+		}
+
+		// 先 padRight，再加样式
+		nameCell := padRight(nameStr, nameWidth)
+		timeCell := padRight(modTime, timeWidth)
+		sizeCell := padRight(size, sizeWidth)
+
+		if item.IsDir() {
+			nameCell = dirStyle.Render(nameCell)
+		}
+		// 普通文件不加 nameCol.Render，直接输出 padRight 后的 nameCell
+		s.WriteString(nameCell + " " +
+			timeCell + " " +
+			sizeCell + "\n")
 	}
 
 	// Scroll indicator
 	if len(m.items) > visibleItems {
-		s.WriteString(fmt.Sprintf("... %d/%d ...\n", m.cursor+1, len(m.items)))
+		s.WriteString(fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, len(m.items)))
 	}
 
 	return s.String()
@@ -352,4 +387,16 @@ func (m *Model) SetPath(path string) error {
 	m.inputErr = nil
 	m.mode = modeBrowse
 	return nil
+}
+
+func (m *Model) visibleItems() int {
+	headerHeight := 8
+	if m.inputErr != nil {
+		headerHeight++
+	}
+	visible := m.height - headerHeight
+	if visible < 1 {
+		visible = 10
+	}
+	return visible
 }
