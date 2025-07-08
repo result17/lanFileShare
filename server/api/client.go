@@ -50,12 +50,12 @@ func NewClient(serviceID string) *Client {
 
 // AskPayload defines the structure for the /ask request.
 type AskPayload struct {
-	Files []*fileInfo.FileNode `json:"files"`
+	Files []fileInfo.FileNode `json:"files"`
 }
 
 // SendAskRequest sends the list of files to the receiver and asks for confirmation.
 // It no longer needs to know about the service ID; the transport handles it automatically.
-func (c *Client) SendAskRequest(ctx context.Context, receiverURL string, files []*fileInfo.FileNode) error {
+func (c *Client) SendAskRequest(ctx context.Context, receiverURL string, files []fileInfo.FileNode) error {
 	payload := AskPayload{
 		Files: files,
 	}

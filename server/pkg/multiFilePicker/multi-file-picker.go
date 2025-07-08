@@ -28,7 +28,7 @@ func padRight(str string, width int) string {
 
 type mode int
 type SelectedFileNodeMsg struct {
-	Files []*fileInfo.FileNode
+	Files []fileInfo.FileNode
 }
 
 const (
@@ -405,8 +405,8 @@ func (m Model) helpView() string {
 	)
 }
 
-func getSelectedFileNodes(selection map[string]struct{}) []*fileInfo.FileNode {
-	var files []*fileInfo.FileNode
+func getSelectedFileNodes(selection map[string]struct{}) []fileInfo.FileNode {
+	var files []fileInfo.FileNode
 	for path := range selection {
 		info, err := fileInfo.CreateNode(path)
 		if err != nil {

@@ -27,7 +27,7 @@ func (q QuitAppMsg) isAppEvent() {}
 // SendFilesMsg is an event sent when the user selects a receiver to send files to.
 type SendFilesMsg struct {
 	Receiver discovery.ServiceInfo
-	Files []*fileInfo.FileNode
+	Files []fileInfo.FileNode
 }
 
 func (s SendFilesMsg) isAppEvent() {}
@@ -41,7 +41,7 @@ type App struct {
 	apiClient     *api.Client
 	uiMessages    chan tea.Msg     // Channel to send messages to the UI
 	appEvents     chan AppEvent    // Channel to receive events from the UI
-	selectedFiles []*fileInfo.FileNode
+	selectedFiles []fileInfo.FileNode
 }
 
 // NewApp creates a new sender application instance.
@@ -118,7 +118,7 @@ func (a *App) startDiscovery(ctx context.Context) {
 }
 
 // SelectFiles sets the files that the user has chosen.
-func (a *App) SelectFiles(files []*fileInfo.FileNode) {
+func (a *App) SelectFiles(files []fileInfo.FileNode) {
 	a.selectedFiles = files
 }
 

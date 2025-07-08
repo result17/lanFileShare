@@ -9,33 +9,33 @@ import (
 )
 
 type FileNode struct {
-	Name        string      `json:"name"`
-	IsDir       bool        `json:"is_dir"`
-	SizeInBytes int64       `json:"size_in_bytes"`
-	MimeType    string      `json:"mite_type,omitempty"`
-	Checksum    string      `json:"checksum,omitempty"`
-	Children    []*FileNode `json:"children,omitempty"`
-	Path        string      `json:"-"`
+	Name     string     `json:"name"`
+	IsDir    bool       `json:"is_dir"`
+	Size     int64      `json:"size"`
+	MimeType string     `json:"mite_type,omitempty"`
+	Checksum string     `json:"checksum,omitempty"`
+	Children []FileNode `json:"children,omitempty"`
+	Path     string     `json:"-"`
 }
 
-func CreateNode(path string) (*FileNode, error) {
+func CreateNode(path string) (FileNode, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return FileNode{}, err
 	}
-	node := &FileNode{
-		Name:        info.Name(),
-		IsDir:       info.IsDir(),
-		SizeInBytes: info.Size(),
-		Path: 		 path,
+	node := FileNode{
+		Name:  info.Name(),
+		IsDir: info.IsDir(),
+		Size:  info.Size(),
+		Path:  path,
 	}
 	if node.IsDir {
 		entries, err := os.ReadDir(path)
 		if err != nil {
-			return nil, err
+			return FileNode{}, err
 		}
 
-		node.Children = make([]*FileNode, 0)
+		node.Children = make([]FileNode, 0)
 
 		for _, entry := range entries {
 			childPath := filepath.Join(path, entry.Name())
@@ -45,7 +45,7 @@ func CreateNode(path string) (*FileNode, error) {
 				continue
 			}
 			node.Children = append(node.Children, childNode)
-			node.SizeInBytes += childNode.SizeInBytes
+			node.Size += childNode.Size
 		}
 	} else {
 		mime, err := mimetype.DetectFile(path)
@@ -56,7 +56,7 @@ func CreateNode(path string) (*FileNode, error) {
 	}
 	checksum, err := node.CalcChecksum()
 	if err != nil {
-		return nil, err
+		return FileNode{}, err
 	}
 	node.Checksum = checksum
 	return node, nil
