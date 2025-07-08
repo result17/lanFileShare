@@ -28,7 +28,7 @@ func padRight(str string, width int) string {
 
 type mode int
 type SelectedFileNodeMsg struct {
-	Infos []*fileInfo.FileNode
+	Files []*fileInfo.FileNode
 }
 
 const (
@@ -73,7 +73,8 @@ type Model struct {
 	inputErr error
 	height   int // For viewport height
 	offset   int // For scrolling
-	infos    []*fileInfo.FileNode
+	files    []*fileInfo.FileNode
+	// OnSelect func([]*fileInfo.FileNode) tea.Cmd // Callback for when files are selected
 }
 
 func InitialModel() Model {
@@ -226,9 +227,10 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Confirm):
 		if len(m.selected) > 0 {
-			infos := getSelectedFileNodes(m.selected)
+			files := getSelectedFileNodes(m.selected)
+			// Fallback to sending a message if no callback is provided.
 			return m, func() tea.Msg {
-				return SelectedFileNodeMsg{Infos: infos}
+				return SelectedFileNodeMsg{Files: files}
 			}
 		}
 	}
@@ -404,16 +406,16 @@ func (m Model) helpView() string {
 }
 
 func getSelectedFileNodes(selection map[string]struct{}) []*fileInfo.FileNode {
-	var infos []*fileInfo.FileNode
+	var files []*fileInfo.FileNode
 	for path := range selection {
 		info, err := fileInfo.CreateNode(path)
 		if err != nil {
 			log.Printf("Failed to create fileNode, %v", err)
 			continue
 		}
-		infos = append(infos, info)
+		files = append(files, info)
 	}
-	return infos
+	return files
 }
 
 func (m *Model) SetPath(path string) error {

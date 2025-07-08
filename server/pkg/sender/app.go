@@ -13,6 +13,25 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
+// --- App Events ---
+// AppEvent defines an event sent from the TUI to the App's logic controller.
+type AppEvent interface {
+	isAppEvent()
+}
+
+// QuitAppMsg is an event sent when the user wants to quit the application.
+type QuitAppMsg struct{}
+
+func (q QuitAppMsg) isAppEvent() {}
+
+// SendFilesMsg is an event sent when the user selects a receiver to send files to.
+type SendFilesMsg struct {
+	Receiver discovery.ServiceInfo
+	Files []*fileInfo.FileNode
+}
+
+func (s SendFilesMsg) isAppEvent() {}
+
 // App is the main application logic controller for the sender.
 // It manages state, coordinates services, and communicates with the UI.
 type App struct {
@@ -20,7 +39,8 @@ type App struct {
 	guard         *concurrency.ConcurrencyGuard
 	discoverer    discovery.Adapter
 	apiClient     *api.Client
-	uiMessages    chan tea.Msg // Channel to send messages to the UI
+	uiMessages    chan tea.Msg     // Channel to send messages to the UI
+	appEvents     chan AppEvent    // Channel to receive events from the UI
 	selectedFiles []*fileInfo.FileNode
 }
 
@@ -33,6 +53,7 @@ func NewApp() *App {
 		discoverer: &discovery.MDNSAdapter{},
 		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
 		uiMessages: make(chan tea.Msg),
+		appEvents:  make(chan AppEvent),
 	}
 }
 
@@ -41,17 +62,57 @@ func (a *App) UIMessages() <-chan tea.Msg {
 	return a.uiMessages
 }
 
-// StartDiscovery begins the process of finding receivers on the network.
-func (a *App) StartDiscovery() {
+// AppEvents returns a write-only channel for the TUI to send events to the app.
+func (a *App) AppEvents() chan<- AppEvent {
+	return a.appEvents
+}
+
+// Run starts the application's main event loop.
+// It listens for events from the TUI and manages the application's lifecycle.
+func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
+	a.startDiscovery(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Context was cancelled, so we are shutting down.
+			return
+		case event := <-a.appEvents:
+			// Process events from the TUI
+			switch e := event.(type) {
+			case QuitAppMsg:
+				// TUI requested to quit, cancel the context to trigger shutdown.
+				cancel()
+				return
+			case SendFilesMsg:
+				// TUI requested to send files to a specific receiver.
+				a.SelectFiles(e.Files)
+				a.StartSendProcess(e.Receiver)
+			}
+		}
+	}
+}
+
+// startDiscovery begins the process of finding receivers on the network.
+func (a *App) startDiscovery(ctx context.Context) {
 	go func() {
-		serviceChan, err := a.discoverer.Discover(context.Background(), fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
+		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 		if err != nil {
 			a.uiMessages <- ErrorMsg{Err: fmt.Errorf("failed to start discovery: %w", err)}
 			return
 		}
 
-		for services := range serviceChan {
-			a.uiMessages <- FoundServicesMsg{Services: services}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case services, ok := <-serviceChan:
+				if !ok {
+					// Channel closed, discovery stopped.
+					return
+				}
+				a.uiMessages <- FoundServicesMsg{Services: services}
+			}
 		}
 	}()
 }

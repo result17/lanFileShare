@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -87,7 +88,8 @@ func (m *model) listenForAppMessages() tea.Cmd {
 }
 
 func (m *model) initSender() tea.Cmd {
-	m.sender.app.StartDiscovery()
+	ctx, cancel := context.WithCancel(context.Background())
+	go m.sender.app.Run(ctx, cancel)
 	return tea.Batch(m.sender.spinner.Tick, m.listenForAppMessages())
 }
 
@@ -108,6 +110,12 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle messages from the app logic layer first
 	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			m.sender.app.AppEvents() <- sender.QuitAppMsg{}
+			return m, tea.Quit
+		}
 	case sender.FoundServicesMsg:
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
 			m.sender.state = selectingReceiver
@@ -151,9 +159,11 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case selectingFiles:
 		switch msg := msg.(type) {
 		case multiFilePicker.SelectedFileNodeMsg:
-			m.sender.app.SelectFiles(msg.Infos)
-			m.sender.app.StartSendProcess(m.sender.selectedService)
 			// The app will now send messages about the transfer progress
+			m.sender.app.AppEvents() <- sender.SendFilesMsg{
+				Receiver: m.sender.selectedService,
+				Files:    msg.Files,
+			}
 		}
 		newFpModel, cmd := m.sender.fp.Update(msg)
 		m.sender.fp = newFpModel.(multiFilePicker.Model)

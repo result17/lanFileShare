@@ -2,9 +2,10 @@ package api
 
 import (
 	"encoding/json"
-	"log"
-	"net/http"
 	"errors"
+	"log"
+	"log/slog"
+	"net/http"
 
 	"github.com/gorilla/websocket"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
@@ -40,7 +41,6 @@ func (a *API) registerRoutes() {
 	askHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.AskHandler))
 	a.mux.Handle("POST /ask", askHandlerWithMiddleware)
 }
-
 
 // ReceiverGuard manages the server's state and core logic.
 type ReceiverGuard struct {
@@ -110,7 +110,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Ask received: %+v", req)
+	slog.Info("Ask received", "request", req)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Accepted"))

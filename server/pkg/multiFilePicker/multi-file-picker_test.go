@@ -47,7 +47,7 @@ func TestInitialModel(t *testing.T) {
 	m := InitialModel()
 
 	m.SetPath(tempDir)
-	
+
 	absPath, err := filepath.Abs(tempDir)
 
 	if err != nil {
@@ -128,7 +128,7 @@ func TestUpdateSelection(t *testing.T) {
 	m := InitialModel()
 
 	m.SetPath(tempDir)
-	
+
 	spaceKey := tea.KeyMsg{Type: tea.KeySpace}
 	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
 
@@ -154,13 +154,13 @@ func TestConfirmSelection(t *testing.T) {
 	m := InitialModel()
 
 	m.SetPath(tempDir)
-	
+
 	absPath, err := filepath.Abs(tempDir)
 
 	if err != nil {
 		t.Errorf("invalid temp dir %s", tempDir)
 	}
-	
+
 	// Sorted items are: file_a.txt, file_d.txt, subdir_b
 
 	// 1. Select 'file_a.txt' (cursor is at 0)
@@ -193,11 +193,11 @@ func TestConfirmSelection(t *testing.T) {
 	// Sort both slices for consistent comparison
 	sort.Strings(expected)
 
-	for i, info := range m.infos {
+	for i, info := range m.files {
 		if info.Path != expected[i] {
 			t.Errorf("expected path to be %v, got %v", expected[i], info.Path)
 		}
-		
+
 	}
 }
 

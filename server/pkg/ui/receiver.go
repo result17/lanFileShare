@@ -1,19 +1,19 @@
 package ui
 
 import (
-	"net/http"
-	"fmt"
 	"context"
+	"fmt"
 	"io"
+	"net/http"
 	"os"
 
-	"github.com/google/uuid"
 	dnssdlog "github.com/brutella/dnssd/log"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/rescp17/lanFileSharer/pkg/discovery"
-	"github.com/rescp17/lanFileSharer/api"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
+	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/pkg/discovery"
 )
 
 type receiverModel struct {
@@ -105,8 +105,15 @@ func (m model) receiverView() string {
 }
 
 func (m model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+	}
 	var cmd tea.Cmd
 	m.receiver.spinner, cmd = m.receiver.spinner.Update(msg)
 	return m, cmd
 }
-
