@@ -13,18 +13,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
+	"github.com/gabriel-vasile/mimetype"
+	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
-
-// padRight pads a string to the given width (in runewidth), using spaces.
-func padRight(str string, width int) string {
-	w := runewidth.StringWidth(str)
-	if w >= width {
-		return str
-	}
-	return str + strings.Repeat(" ", width-w)
-}
 
 type mode int
 type SelectedFileNodeMsg struct {
@@ -306,16 +298,18 @@ func (m Model) View() string {
 
 	// Table column widths
 	nameWidth := 36
+	typeWidth := 30
 	timeWidth := 20
-	sizeWidth := 10
+	sizeWidth := 16
 
 	// Table header: pad first, then style
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	s.WriteString(
-		headerStyle.Render(padRight("", 5)) + " " +
-			headerStyle.Render(padRight("Name", nameWidth)) + " " +
-			headerStyle.Render(padRight("Last Modified", timeWidth)) + " " +
-			headerStyle.Render(padRight("Size(bytes)", sizeWidth)) + "\n",
+		headerStyle.Render(util.PadRight("", 5)) + " " +
+			headerStyle.Render(util.PadRight("Name", nameWidth)) + " " +
+			headerStyle.Render(util.PadRight("Last Modified", timeWidth)) + " " +
+			headerStyle.Render(util.PadRight("Size", sizeWidth)) +
+			headerStyle.Render(util.PadRight("Type", typeWidth)) + "\n\n",
 	)
 
 	visibleItems := m.visibleItems()
@@ -368,18 +362,24 @@ func (m Model) View() string {
 			if info.IsDir() {
 				size = "<DIR>"
 			} else {
-				size = fmt.Sprintf("%d", info.Size())
+				size = util.FormatSize(info.Size())
 			}
 		}
 		nameStr := item.Name()
 		if item.IsDir() {
 			nameStr = nameStr + "/"
 		}
+		typeStr := ""
+		mime, err := mimetype.DetectFile(path)
+		if err == nil {
+			typeStr = mime.String()
+		}
 
 		// Pad right first, then add style
-		nameCell := padRight(nameStr, nameWidth)
-		timeCell := padRight(modTime, timeWidth)
-		sizeCell := padRight(size, sizeWidth)
+		nameCell := util.PadRight(nameStr, nameWidth)
+		typeCell := util.PadRight(typeStr, typeWidth)
+		timeCell := util.PadRight(modTime, timeWidth)
+		sizeCell := util.PadRight(size, sizeWidth)
 
 		if item.IsDir() {
 			nameCell = dirStyle.Render(nameCell)
@@ -387,7 +387,8 @@ func (m Model) View() string {
 		// For regular files, don't add nameCol.Render, just output the padded nameCell
 		s.WriteString(nameCell + " " +
 			timeCell + " " +
-			sizeCell + "\n")
+			sizeCell + "" +
+			typeCell + "\n\n")
 	}
 
 	// Scroll indicator
@@ -453,9 +454,11 @@ func (m *Model) visibleItems() int {
 	if m.inputErr != nil {
 		headerHeight++
 	}
-	visible := m.height - headerHeight
+	// Each item now takes up 2 lines
+	visible := (m.height - headerHeight) / 2
 	if visible < 1 {
-		visible = 16
+		// Fallback to a reasonable number, maybe half of the original
+		visible = 8
 	}
 	return visible
 }
