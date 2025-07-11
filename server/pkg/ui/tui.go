@@ -27,7 +27,7 @@ func InitialModel(m mode, port int) model {
 	case Sender:
 		return initSenderModel()
 	case Receiver:
-		return initReceiverModel(m, port)
+		return initReceiverModel(port)
 	default:
 		return model{
 			mode: m,

@@ -80,8 +80,8 @@ func initSenderModel() model {
 	}
 }
 
-// listenForAppMessages is a command that listens for messages from the sender app.
-func (m *model) listenForAppMessages() tea.Cmd {
+// listenForSenderAppMessages is a command that listens for messages from the sender app.
+func (m *model) listenForSenderAppMessages() tea.Cmd {
 	return func() tea.Msg {
 		return <-m.sender.app.UIMessages()
 	}
@@ -90,7 +90,7 @@ func (m *model) listenForAppMessages() tea.Cmd {
 func (m *model) initSender() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	go m.sender.app.Run(ctx, cancel)
-	return tea.Batch(m.sender.spinner.Tick, m.listenForAppMessages())
+	return tea.Batch(m.sender.spinner.Tick, m.listenForSenderAppMessages())
 }
 
 func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
@@ -121,21 +121,21 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sender.state = selectingReceiver
 		}
 		m.updateReceiverTable(msg.Services)
-		return m, m.listenForAppMessages() // Continue listening
+		return m, m.listenForSenderAppMessages() // Continue listening
 	case sender.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
-		return m, m.listenForAppMessages()
+		return m, m.listenForSenderAppMessages()
 	case sender.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
 		log.Println("Status Update:", msg.Message) // For now, just log
-		return m, m.listenForAppMessages()
+		return m, m.listenForSenderAppMessages()
 	case sender.TransferCompleteMsg:
 		m.sender.state = transferComplete
-		return m, m.listenForAppMessages()
+		return m, m.listenForSenderAppMessages()
 	case sender.ErrorMsg:
 		m.sender.state = transferFailed
 		m.sender.lastError = msg.Err
-		return m, m.listenForAppMessages()
+		return m, m.listenForSenderAppMessages()
 	}
 
 	// Handle UI events

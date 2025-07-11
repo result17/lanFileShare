@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"log"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -21,6 +22,25 @@ type AppEvent interface {
 
 // QuitAppMsg is an event sent when the user wants to quit the application.
 type QuitAppMsg struct{}
+
+// --- Custom tea.Msg types for UI communication ---
+
+type FoundServicesMsg struct {
+	Services []discovery.ServiceInfo
+}
+
+type StatusUpdateMsg struct {
+	Message string
+}
+
+type TransferStartedMsg struct{}
+
+type TransferCompleteMsg struct{}
+
+type ErrorMsg struct {
+	Err error
+}
+
 
 func (q QuitAppMsg) isAppEvent() {}
 
@@ -98,7 +118,9 @@ func (a *App) startDiscovery(ctx context.Context) {
 	go func() {
 		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 		if err != nil {
-			a.uiMessages <- ErrorMsg{Err: fmt.Errorf("failed to start discovery: %w", err)}
+			err := fmt.Errorf("failed to start discovery: %w", err)
+			log.Printf("[Discover discover]: %v", err)
+			a.uiMessages <- ErrorMsg{Err: err}
 			return
 		}
 
@@ -159,22 +181,4 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 			a.uiMessages <- TransferCompleteMsg{}
 		}
 	}()
-}
-
-// --- Custom tea.Msg types for UI communication ---
-
-type FoundServicesMsg struct {
-	Services []discovery.ServiceInfo
-}
-
-type StatusUpdateMsg struct {
-	Message string
-}
-
-type TransferStartedMsg struct{}
-
-type TransferCompleteMsg struct{}
-
-type ErrorMsg struct {
-	Err error
 }
