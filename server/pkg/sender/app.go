@@ -72,7 +72,7 @@ func NewApp() *App {
 		guard:      concurrency.NewConcurrencyGuard(),
 		discoverer: &discovery.MDNSAdapter{},
 		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
-		uiMessages: make(chan tea.Msg),
+		uiMessages: make(chan tea.Msg, 5),
 		appEvents:  make(chan AppEvent),
 	}
 }

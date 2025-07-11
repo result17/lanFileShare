@@ -35,7 +35,7 @@ func NewApp() *App {
 	// The API layer will now need a way to send messages back to the app,
 	// which will then be forwarded to the UI.
 	// We will pass the uiMessages channel down to the api layer.
-	uiMessages := make(chan tea.Msg)
+	uiMessages := make(chan tea.Msg, 5)
 	apiHandler := api.NewAPI(uiMessages)
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
@@ -84,7 +84,6 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 			log.Printf("[Discover announce]: %v", err)
 			a.uiMessages <- ErrorMsg{Err: err}
 		}
-		<-ctx.Done()
 	}()
 }
 
@@ -98,6 +97,7 @@ func (a *App) startServer(ctx context.Context, port int) {
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server ListenAndServe: %v", err)
+			a.uiMessages <- ErrorMsg{ Err: fmt.Errorf("failed to create http server") }
 		}
 	}()
 
