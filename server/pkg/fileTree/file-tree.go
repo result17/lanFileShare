@@ -1,4 +1,4 @@
-package ui
+package fileTree
 
 import (
 	"fmt"
@@ -8,7 +8,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/internal/style"
 )
+
 
 // KeyMap defines the keybindings for the file tree.
 type KeyMap struct {
@@ -109,7 +111,7 @@ func (m Model) View() string {
 	var s strings.Builder
 
 	// Title
-	s.WriteString(TitleStyle.Render(m.title))
+	s.WriteString(style.TitleStyle.Render(m.title))
 	s.WriteString("\n\n")
 
 	nameWidth := 40
@@ -117,17 +119,17 @@ func (m Model) View() string {
 	typeWidth := 35
 
 	// Header
-	s.WriteString(HeaderStyle.Render(util.PadRight("", 1)))
-	s.WriteString(HeaderStyle.Render(util.PadRight("Name", nameWidth)))
-	s.WriteString(HeaderStyle.Render(util.PadRight("Size", sizeWidth)))
-	s.WriteString(HeaderStyle.Render(util.PadRight("Type", typeWidth)))
+	s.WriteString(style.HeaderStyle.Render(util.PadRight("", 1)))
+	s.WriteString(style.HeaderStyle.Render(util.PadRight("Name", nameWidth)))
+	s.WriteString(style.HeaderStyle.Render(util.PadRight("Size", sizeWidth)))
+	s.WriteString(style.HeaderStyle.Render(util.PadRight("Type", typeWidth)))
 	s.WriteString("\n\n")
 
 	// File list
 	for i, node := range m.nodes {
-		cursor := NoCursorStyle.String()
+		cursor := style.NoCursorStyle.String()
 		if m.cursor == i {
-			cursor = CursorStyle.String()
+			cursor = style.CursorStyle.String()
 		}
 
 		name := node.Name
@@ -135,9 +137,9 @@ func (m Model) View() string {
 		typeStr := "<DIR>"
 
 		if node.IsDir {
-			name = DirStyle.Render(name + "/")
+			name = style.DirStyle.Render(name + "/")
 		} else {
-			name = FileStyle.Render(name)
+			name = style.FileStyle.Render(name)
 			sizeStr = util.FormatSize(node.Size)
 			typeStr = node.MimeType
 		}
@@ -157,9 +159,9 @@ func (m Model) View() string {
 		m.keys.GoToParent.Help().Key+"/"+m.keys.GoToParent.Help().Desc,
 		m.keys.Quit.Help().Key+"/"+m.keys.Quit.Help().Desc,
 	)
-	s.WriteString(HelpStyle.Render(help))
+	s.WriteString(style.HelpStyle.Render(help))
 
-	return DocStyle.Render(s.String())
+	return style.DocStyle.Render(s.String())
 }
 
 // GetSelectedNode returns the currently selected FileNode.

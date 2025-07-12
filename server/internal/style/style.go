@@ -1,4 +1,4 @@
-package ui
+package style
 
 import (
 	"github.com/charmbracelet/bubbles/spinner"
@@ -16,6 +16,13 @@ var (
 	colorPurple    = lipgloss.Color("99")
 )
 
+
+// --- Sender Styles ---
+var (
+	BaseStyle          = lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorDarkGray)
+	HighlightFontStyle = lipgloss.NewStyle().Foreground(colorCyan)
+)
+
 // --- File Tree Styles ---
 var (
 	DocStyle      = lipgloss.NewStyle().Margin(1, 2)
@@ -28,11 +35,6 @@ var (
 	HeaderStyle   = lipgloss.NewStyle().Bold(true).Padding(0, 1)
 )
 
-// --- Sender Styles ---
-var (
-	BaseStyle          = lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorDarkGray)
-	HighlightFontStyle = lipgloss.NewStyle().Foreground(colorCyan)
-)
 
 // --- Common Components ---
 

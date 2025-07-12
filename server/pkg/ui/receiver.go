@@ -6,7 +6,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-
+	"github.com/rescp17/lanFileSharer/internal/style"
+	"github.com/rescp17/lanFileSharer/pkg/fileTree"
 	"github.com/rescp17/lanFileSharer/pkg/receiver"
 )
 
@@ -18,18 +19,19 @@ const (
 	showingFileNodes
 	receivingFiles
 	receiveComplete
-	rFailed
+	receiveFailed
 )
 
 type receiverModel struct {
-	state   receiverState
-	app     *receiver.App
-	spinner spinner.Model
-	port    int
+	state    receiverState
+	app      *receiver.App
+	spinner  spinner.Model
+	port     int
+	fileTree fileTree.Model
 }
 
 func initReceiverModel(port int) model {
-	s := NewSpinner()
+	s := style.NewSpinner()
 
 	return model{
 		mode: Receiver,
@@ -57,10 +59,14 @@ func (m model) initReceiver() tea.Cmd {
 }
 
 func (m model) receiverView() string {
-	s := fmt.Sprintf("\n\n %s Awaiting sender connection", m.receiver.spinner.View())
-
-	// Send the UI for rendering
-	return s
+	switch m.receiver.state {
+	case awaitingReceiver:
+		return fmt.Sprintf("\n\n %s Awaiting sender connection", m.receiver.spinner.View())
+	case showingFileNodes:
+		return ""
+	default:
+		return "Internal error: unknown receiver state"
+	}
 }
 
 func (m model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {

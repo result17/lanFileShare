@@ -12,6 +12,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
 	"github.com/rescp17/lanFileSharer/pkg/sender"
+	"github.com/rescp17/lanFileSharer/internal/style"
 )
 
 // senderState defines the different states of the sender UI.
@@ -46,7 +47,7 @@ var columns = []table.Column{
 }
 
 func initSenderModel() model {
-	s := NewSpinner()
+	s := style.NewSpinner()
 
 	t := table.New(
 		table.WithColumns(columns),
@@ -55,7 +56,7 @@ func initSenderModel() model {
 		table.WithHeight(0),
 	)
 
-	t.SetStyles(NewTableStyles())
+	t.SetStyles(style.NewTableStyles())
 
 	return model{
 		mode: Sender,
@@ -178,15 +179,15 @@ func (m *model) senderView() string {
 		return fmt.Sprintf("\n%s Finding receivers...", m.sender.spinner.View())
 	case selectingReceiver:
 		s := fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
-		s += BaseStyle.Render(m.sender.table.View()) + "\n"
+		s += style.BaseStyle.Render(m.sender.table.View()) + "\n"
 		s += "Use arrow keys to navigate, Enter to select."
 		return s
 	case selectingFiles:
-		return fmt.Sprintf("Receiver: %s\n%s\n", HighlightFontStyle.Render(m.sender.selectedService.Name), m.sender.fp.View())
+		return fmt.Sprintf("Receiver: %s\n%s\n", style.HighlightFontStyle.Render(m.sender.selectedService.Name), m.sender.fp.View())
 	case waitingForReceiverConfirmation:
-		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), HighlightFontStyle.Render(m.sender.selectedService.Name))
+		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), style.HighlightFontStyle.Render(m.sender.selectedService.Name))
 	case sendingFiles:
-		return fmt.Sprintf("\n%s Sending files to %s...", m.sender.spinner.View(), HighlightFontStyle.Render(m.sender.selectedService.Name))
+		return fmt.Sprintf("\n%s Sending files to %s...", m.sender.spinner.View(), style.HighlightFontStyle.Render(m.sender.selectedService.Name))
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:
