@@ -6,21 +6,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
-)
-
-// Styles
-var (
-	docStyle      = lipgloss.NewStyle().Margin(1, 2)
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).SetString("> ")
-	noCursorStyle = lipgloss.NewStyle().SetString("  ")
-	dirStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
-	fileStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
-	helpStyle     = lipgloss.NewStyle().Faint(true)
-	headerStyle   = lipgloss.NewStyle().Bold(true).Padding(0, 1)
 )
 
 // KeyMap defines the keybindings for the file tree.
@@ -122,7 +109,7 @@ func (m Model) View() string {
 	var s strings.Builder
 
 	// Title
-	s.WriteString(titleStyle.Render(m.title))
+	s.WriteString(TitleStyle.Render(m.title))
 	s.WriteString("\n\n")
 
 	nameWidth := 40
@@ -130,17 +117,17 @@ func (m Model) View() string {
 	typeWidth := 35
 
 	// Header
-	s.WriteString(headerStyle.Render(util.PadRight("", 1)))
-	s.WriteString(headerStyle.Render(util.PadRight("Name", nameWidth)))
-	s.WriteString(headerStyle.Render(util.PadRight("Size", sizeWidth)))
-	s.WriteString(headerStyle.Render(util.PadRight("Type", typeWidth)))
+	s.WriteString(HeaderStyle.Render(util.PadRight("", 1)))
+	s.WriteString(HeaderStyle.Render(util.PadRight("Name", nameWidth)))
+	s.WriteString(HeaderStyle.Render(util.PadRight("Size", sizeWidth)))
+	s.WriteString(HeaderStyle.Render(util.PadRight("Type", typeWidth)))
 	s.WriteString("\n\n")
 
 	// File list
 	for i, node := range m.nodes {
-		cursor := noCursorStyle.String()
+		cursor := NoCursorStyle.String()
 		if m.cursor == i {
-			cursor = cursorStyle.String()
+			cursor = CursorStyle.String()
 		}
 
 		name := node.Name
@@ -148,18 +135,18 @@ func (m Model) View() string {
 		typeStr := "<DIR>"
 
 		if node.IsDir {
-			name = dirStyle.Render(name + "/")
+			name = DirStyle.Render(name + "/")
 		} else {
-			name = fileStyle.Render(name)
+			name = FileStyle.Render(name)
 			sizeStr = util.FormatSize(node.Size)
 			typeStr = node.MimeType
 		}
 
 		s.WriteString(cursor)
 		s.WriteString(util.PadRight(name, nameWidth))
-        s.WriteString(util.PadRight(sizeStr, sizeWidth))
-        s.WriteString(util.PadRight(typeStr, typeWidth))
-        s.WriteString("\n\n")
+		s.WriteString(util.PadRight(sizeStr, sizeWidth))
+		s.WriteString(util.PadRight(typeStr, typeWidth))
+		s.WriteString("\n\n")
 	}
 
 	// Help view
@@ -170,9 +157,9 @@ func (m Model) View() string {
 		m.keys.GoToParent.Help().Key+"/"+m.keys.GoToParent.Help().Desc,
 		m.keys.Quit.Help().Key+"/"+m.keys.Quit.Help().Desc,
 	)
-	s.WriteString(helpStyle.Render(help))
+	s.WriteString(HelpStyle.Render(help))
 
-	return docStyle.Render(s.String())
+	return DocStyle.Render(s.String())
 }
 
 // GetSelectedNode returns the currently selected FileNode.

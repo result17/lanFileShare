@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
 	"github.com/rescp17/lanFileSharer/pkg/sender"
@@ -46,16 +45,8 @@ var columns = []table.Column{
 	{Title: "Port", Width: 10},
 }
 
-var baseStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("240"))
-
-var highLightFontStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-
 func initSenderModel() model {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s := NewSpinner()
 
 	t := table.New(
 		table.WithColumns(columns),
@@ -64,9 +55,7 @@ func initSenderModel() model {
 		table.WithHeight(0),
 	)
 
-	styles := table.DefaultStyles()
-	styles.Selected = styles.Selected.Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Bold(false)
-	t.SetStyles(styles)
+	t.SetStyles(NewTableStyles())
 
 	return model{
 		mode: Sender,
@@ -189,15 +178,15 @@ func (m *model) senderView() string {
 		return fmt.Sprintf("\n%s Finding receivers...", m.sender.spinner.View())
 	case selectingReceiver:
 		s := fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
-		s += baseStyle.Render(m.sender.table.View()) + "\n"
+		s += BaseStyle.Render(m.sender.table.View()) + "\n"
 		s += "Use arrow keys to navigate, Enter to select."
 		return s
 	case selectingFiles:
-		return fmt.Sprintf("Receiver: %s\n%s\n", highLightFontStyle.Render(m.sender.selectedService.Name), m.sender.fp.View())
+		return fmt.Sprintf("Receiver: %s\n%s\n", HighlightFontStyle.Render(m.sender.selectedService.Name), m.sender.fp.View())
 	case waitingForReceiverConfirmation:
-		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), highLightFontStyle.Render(m.sender.selectedService.Name))
+		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), HighlightFontStyle.Render(m.sender.selectedService.Name))
 	case sendingFiles:
-		return fmt.Sprintf("\n%s Sending files to %s...", m.sender.spinner.View(), highLightFontStyle.Render(m.sender.selectedService.Name))
+		return fmt.Sprintf("\n%s Sending files to %s...", m.sender.spinner.View(), HighlightFontStyle.Render(m.sender.selectedService.Name))
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:

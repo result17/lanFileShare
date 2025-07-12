@@ -17,7 +17,7 @@ import (
 // Note: This is a simplified message. In a real app, you'd have separate
 // messages for start, progress, and completion.
 type fileNodeUpdateMsg struct {
-	Node fileInfo.FileNode
+	Nodes []fileInfo.FileNode
 }
 
 // API is the main entry point for the entire receiver API.
@@ -107,9 +107,8 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 
 	// For now, just take the first file to demonstrate communication.
 	if len(req.Files) > 0 {
-		firstFile := req.Files[0]
 		// Send the file information to the UI via the channel.
-		s.uiMessages <- fileNodeUpdateMsg{Node: firstFile}
+		s.uiMessages <- fileNodeUpdateMsg{Nodes: req.Files}
 	}
 
 	w.WriteHeader(http.StatusOK)

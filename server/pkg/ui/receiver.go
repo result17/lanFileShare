@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/rescp17/lanFileSharer/pkg/receiver"
 )
@@ -30,9 +29,7 @@ type receiverModel struct {
 }
 
 func initReceiverModel(port int) model {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s := NewSpinner()
 
 	return model{
 		mode: Receiver,
