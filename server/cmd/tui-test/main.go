@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
-	"github.com/rescp17/lanFileSharer/pkg/ui"
+	"github.com/rescp17/lanFileSharer/pkg/fileTree"
 )
 
 // main is the entry point for the TUI example.
@@ -17,7 +17,7 @@ func main() {
 	sampleNodes := createSampleData()
 
 	// 2. Create a new file tree model with a title and the data.
-	fileTreeModel := ui.NewFileTree("Remote Files", sampleNodes)
+	fileTreeModel := fileTree.NewFileTree("Remote Files", sampleNodes)
 
 	// 3. Start the Bubble Tea program.
 	p := tea.NewProgram(fileTreeModel)

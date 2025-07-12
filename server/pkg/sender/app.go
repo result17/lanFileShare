@@ -9,48 +9,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
-
-// --- App Events ---
-// AppEvent defines an event sent from the TUI to the App's logic controller.
-type AppEvent interface {
-	isAppEvent()
-}
-
-// QuitAppMsg is an event sent when the user wants to quit the application.
-type QuitAppMsg struct{}
-
-// --- Custom tea.Msg types for UI communication ---
-
-type FoundServicesMsg struct {
-	Services []discovery.ServiceInfo
-}
-
-type StatusUpdateMsg struct {
-	Message string
-}
-
-type TransferStartedMsg struct{}
-
-type TransferCompleteMsg struct{}
-
-type ErrorMsg struct {
-	Err error
-}
-
-
-func (q QuitAppMsg) isAppEvent() {}
-
-// SendFilesMsg is an event sent when the user selects a receiver to send files to.
-type SendFilesMsg struct {
-	Receiver discovery.ServiceInfo
-	Files []fileInfo.FileNode
-}
-
-func (s SendFilesMsg) isAppEvent() {}
 
 // App is the main application logic controller for the sender.
 // It manages state, coordinates services, and communicates with the UI.
@@ -60,7 +23,7 @@ type App struct {
 	discoverer    discovery.Adapter
 	apiClient     *api.Client
 	uiMessages    chan tea.Msg     // Channel to send messages to the UI
-	appEvents     chan AppEvent    // Channel to receive events from the UI
+	appEvents     chan sender.AppEvent    // Channel to receive events from the UI
 	selectedFiles []fileInfo.FileNode
 }
 
@@ -73,7 +36,7 @@ func NewApp() *App {
 		discoverer: &discovery.MDNSAdapter{},
 		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
 		uiMessages: make(chan tea.Msg, 5),
-		appEvents:  make(chan AppEvent),
+		appEvents:  make(chan sender.AppEvent),
 	}
 }
 
@@ -83,7 +46,7 @@ func (a *App) UIMessages() <-chan tea.Msg {
 }
 
 // AppEvents returns a write-only channel for the TUI to send events to the app.
-func (a *App) AppEvents() chan<- AppEvent {
+func (a *App) AppEvents() chan<- sender.AppEvent {
 	return a.appEvents
 }
 
@@ -100,11 +63,11 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		case event := <-a.appEvents:
 			// Process events from the TUI
 			switch e := event.(type) {
-			case QuitAppMsg:
+			case sender.QuitAppMsg:
 				// TUI requested to quit, cancel the context to trigger shutdown.
 				cancel()
 				return
-			case SendFilesMsg:
+			case sender.SendFilesMsg:
 				// TUI requested to send files to a specific receiver.
 				a.SelectFiles(e.Files)
 				a.StartSendProcess(e.Receiver)
@@ -120,7 +83,7 @@ func (a *App) startDiscovery(ctx context.Context) {
 		if err != nil {
 			err := fmt.Errorf("failed to start discovery: %w", err)
 			log.Printf("[Discover discover]: %v", err)
-			a.uiMessages <- ErrorMsg{Err: err}
+			a.uiMessages <- sender.ErrorMsg{Err: err}
 			return
 		}
 
@@ -133,7 +96,7 @@ func (a *App) startDiscovery(ctx context.Context) {
 					// Channel closed, discovery stopped.
 					return
 				}
-				a.uiMessages <- FoundServicesMsg{Services: services}
+				a.uiMessages <- sender.FoundServicesMsg{Services: services}
 			}
 		}
 	}()
@@ -148,7 +111,7 @@ func (a *App) SelectFiles(files []fileInfo.FileNode) {
 // It is protected by a concurrency guard to prevent multiple simultaneous sends.
 func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 	task := func() error {
-		a.uiMessages <- TransferStartedMsg{}
+		a.uiMessages <- sender.TransferStartedMsg{}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -156,14 +119,14 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		receiverURL := fmt.Sprintf("http://%s:%d", receiver.Addr.String(), receiver.Port)
 
 		// 1. Send /ask request and wait for confirmation
-		a.uiMessages <- StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
 		err := a.apiClient.SendAskRequest(ctx, receiverURL, a.selectedFiles)
 		if err != nil {
 			return fmt.Errorf("receiver did not accept transfer: %w", err)
 		}
 
 		// 2. Send the files (placeholder for now)
-		a.uiMessages <- StatusUpdateMsg{Message: "Sending files..."}
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}
 		time.Sleep(2 * time.Second) // Simulate file transfer
 
 		return nil // Success
@@ -173,12 +136,12 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		err := a.guard.Execute(task)
 		if err != nil {
 			if err == concurrency.ErrBusy {
-				a.uiMessages <- ErrorMsg{Err: fmt.Errorf("a transfer is already in progress")}
+				a.uiMessages <- sender.ErrorMsg{Err: fmt.Errorf("a transfer is already in progress")}
 			} else {
-				a.uiMessages <- ErrorMsg{Err: err}
+				a.uiMessages <- sender.ErrorMsg{Err: err}
 			}
 		} else {
-			a.uiMessages <- TransferCompleteMsg{}
+			a.uiMessages <- sender.TransferCompleteMsg{}
 		}
 	}()
 }

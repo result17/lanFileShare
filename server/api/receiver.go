@@ -9,16 +9,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/gorilla/websocket"
+	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
-
-// fileNodeUpdateMsg is a message sent to the UI to update it with file info.
-// Note: This is a simplified message. In a real app, you'd have separate
-// messages for start, progress, and completion.
-type fileNodeUpdateMsg struct {
-	Nodes []fileInfo.FileNode
-}
 
 // API is the main entry point for the entire receiver API.
 type API struct {
@@ -108,7 +102,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	// For now, just take the first file to demonstrate communication.
 	if len(req.Files) > 0 {
 		// Send the file information to the UI via the channel.
-		s.uiMessages <- fileNodeUpdateMsg{Nodes: req.Files}
+		s.uiMessages <- receiver.FileNodeUpdateMsg{Nodes: req.Files}
 	}
 
 	w.WriteHeader(http.StatusOK)

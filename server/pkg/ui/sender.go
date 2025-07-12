@@ -13,6 +13,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
 	"github.com/rescp17/lanFileSharer/pkg/sender"
 	"github.com/rescp17/lanFileSharer/internal/style"
+	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
 )
 
 // senderState defines the different states of the sender UI.
@@ -103,26 +104,26 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
-			m.sender.app.AppEvents() <- sender.QuitAppMsg{}
+			m.sender.app.AppEvents() <- senderEvent.QuitAppMsg{}
 			return m, tea.Quit
 		}
-	case sender.FoundServicesMsg:
+	case senderEvent.FoundServicesMsg:
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
 			m.sender.state = selectingReceiver
 		}
 		m.updateReceiverTable(msg.Services)
 		return m, m.listenForSenderAppMessages() // Continue listening
-	case sender.TransferStartedMsg:
+	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
 		return m, m.listenForSenderAppMessages()
-	case sender.StatusUpdateMsg:
+	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
 		log.Println("Status Update:", msg.Message) // For now, just log
 		return m, m.listenForSenderAppMessages()
-	case sender.TransferCompleteMsg:
+	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
 		return m, m.listenForSenderAppMessages()
-	case sender.ErrorMsg:
+	case senderEvent.ErrorMsg:
 		m.sender.state = transferFailed
 		m.sender.lastError = msg.Err
 		return m, m.listenForSenderAppMessages()
@@ -150,7 +151,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case multiFilePicker.SelectedFileNodeMsg:
 			// The app will now send messages about the transfer progress
-			m.sender.app.AppEvents() <- sender.SendFilesMsg{
+			m.sender.app.AppEvents() <- senderEvent.SendFilesMsg{
 				Receiver: m.sender.selectedService,
 				Files:    msg.Files,
 			}

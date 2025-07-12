@@ -13,13 +13,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 )
-
-type ErrorMsg struct {
-	Err error
-}
 
 // App is the main application logic controller for the receiver.
 // It manages state, coordinates services, and communicates with the UI.
@@ -64,7 +61,7 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Printf("Could not get hostname %v", err)
-		a.uiMessages <- ErrorMsg{Err: err}
+		a.uiMessages <- receiver.ErrorMsg{Err: err}
 		return
 	}
 	serviceUUID := uuid.New().String()
@@ -82,7 +79,7 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 		if err != nil {
 			err := fmt.Errorf("failed to start announce: %w", err)
 			log.Printf("[Discover announce]: %v", err)
-			a.uiMessages <- ErrorMsg{Err: err}
+			a.uiMessages <- receiver.ErrorMsg{Err: err}
 		}
 	}()
 }
@@ -97,7 +94,7 @@ func (a *App) startServer(ctx context.Context, port int) {
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server ListenAndServe: %v", err)
-			a.uiMessages <- ErrorMsg{ Err: fmt.Errorf("failed to create http server") }
+			a.uiMessages <- receiver.ErrorMsg{ Err: fmt.Errorf("failed to create http server") }
 		}
 	}()
 
