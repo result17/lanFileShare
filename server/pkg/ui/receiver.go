@@ -68,7 +68,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case receiverEvent.FileNodeUpdateMsg:
 		m.receiver.state = showingFileNodes
-		m.receiver.fileTree = fileTree.NewFileTree("Received files:", msg.Nodes)
+		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 		return m, m.listenForAppMessages()
 	case receiverEvent.ErrorMsg:
 		// In the future, we can add a receiveFailed state and display the error.

@@ -127,27 +127,31 @@ func (m Model) View() string {
 
 	// File list
 	for i, node := range m.nodes {
-		cursor := style.NoCursorStyle.String()
+		cursor := style.NoCursorStyle.Render(" ")
 		if m.cursor == i {
-			cursor = style.CursorStyle.String()
+			cursor = style.CursorStyle.Render(">")
 		}
 
 		name := node.Name
 		sizeStr := ""
 		typeStr := "<DIR>"
 
+		var nameCell, sizeCell, typeCell string
+
 		if node.IsDir {
-			name = style.DirStyle.Render(name + "/")
+			nameCell = style.DirStyle.Render(util.PadRight(name+"/", nameWidth))
+			typeCell = style.DirStyle.Render(util.PadRight(typeStr, typeWidth))
 		} else {
-			name = style.FileStyle.Render(name)
 			sizeStr = util.FormatSize(node.Size)
 			typeStr = node.MimeType
+			nameCell = style.FileStyle.Render(util.PadRight(name, nameWidth))
+			typeCell = style.FileStyle.Render(util.PadRight(typeStr, typeWidth))
 		}
 
-		s.WriteString(cursor)
-		s.WriteString(util.PadRight(name, nameWidth))
-		s.WriteString(util.PadRight(sizeStr, sizeWidth))
-		s.WriteString(util.PadRight(typeStr, typeWidth))
+		sizeCell = util.PadRight(sizeStr, sizeWidth)
+
+		row := fmt.Sprintf("%s %s %s %s", cursor, nameCell, sizeCell, typeCell)
+		s.WriteString(row)
 		s.WriteString("\n\n")
 	}
 
