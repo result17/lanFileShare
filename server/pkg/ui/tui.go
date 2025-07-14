@@ -4,8 +4,8 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
-	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
+	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
 )
 
 type mode int
@@ -37,7 +37,7 @@ func InitialModel(m mode, port int) model {
 		appController = senderApp.NewApp()
 		sender = initSenderModel()
 	case Receiver:
-		appController = receiverApp.NewApp()
+		appController = receiverApp.NewApp(port)
 		receiver = initReceiverModel(appController, port)
 	}
 
@@ -73,7 +73,7 @@ func (m model) View() string {
 	default:
 		return ""
 	}
-	s += "\n press ctrl + c to quit"
+	s += "\nPress ctrl + c to quit"
 	return s
 }
 

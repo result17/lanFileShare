@@ -25,12 +25,13 @@ type App struct {
 	guard      *concurrency.ConcurrencyGuard
 	registrar  discovery.Adapter
 	api        *api.API
+	port       int
 	uiMessages chan tea.Msg             // Channel to send messages TO the UI
 	appEvents  chan app_events.AppEvent // Channel to receive events FROM the UI
 }
 
 // NewApp creates a new receiver application instance.
-func NewApp() *App {
+func NewApp(port int) *App {
 	uiMessages := make(chan tea.Msg, 5)
 	apiHandler := api.NewAPI(uiMessages)
 	dnssdlog.Info.SetOutput(io.Discard)
@@ -39,6 +40,7 @@ func NewApp() *App {
 		guard:      concurrency.NewConcurrencyGuard(),
 		registrar:  &discovery.MDNSAdapter{},
 		api:        apiHandler,
+		port:       port,
 		uiMessages: uiMessages,
 		appEvents:  make(chan app_events.AppEvent),
 	}
@@ -47,8 +49,8 @@ func NewApp() *App {
 // Run starts the application's main event loop and services.
 func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 	// Start the mDNS registration service in the background.
-	a.startRegistration(ctx, 8080) // Assuming a default port for now
-	a.startServer(ctx, 8080)
+	a.startRegistration(ctx, a.port)
+	a.startServer(ctx, a.port)
 
 	for {
 		select {
@@ -108,8 +110,8 @@ func (a *App) startServer(ctx context.Context, port int) {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server ListenAndServe: %v", err)
-			a.uiMessages <- receiver.ErrorMsg{ Err: fmt.Errorf("failed to create http server") }
+			log.Printf("HTTP server ListenAndServe: %v", err)
+			a.uiMessages <- receiver.ErrorMsg{Err: fmt.Errorf("failed to create http server %v", err)}
 		}
 	}()
 

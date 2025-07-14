@@ -22,10 +22,11 @@ const (
 )
 
 type receiverModel struct {
-	state    receiverState
-	spinner  spinner.Model
-	port     int
-	fileTree fileTree.Model
+	state     receiverState
+	spinner   spinner.Model
+	port      int
+	fileTree  fileTree.Model
+	lastError error
 }
 
 func initReceiverModel(app AppController, port int) receiverModel {
@@ -51,6 +52,8 @@ func (m model) receiverView() string {
 		return fmt.Sprintf("\n\n %s Awaiting sender connection on port %d...", m.receiver.spinner.View(), m.receiver.port)
 	case showingFileNodes:
 		return m.receiver.fileTree.View()
+	case receiveFailed:
+		return fmt.Sprintf("\nAn error occurred: %v\n", style.ErrorStyle.Render(m.receiver.lastError.Error()))
 	default:
 		return "Internal error: unknown receiver state"
 	}
@@ -59,28 +62,38 @@ func (m model) receiverView() string {
 func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Handle high-priority messages first
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
-			// In the future, we might want to send a QuitAppMsg here.
 			return m, tea.Quit
 		}
-	case receiverEvent.FileNodeUpdateMsg:
-		m.receiver.state = showingFileNodes
-		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
-		return m, m.listenForAppMessages()
 	case receiverEvent.ErrorMsg:
-		// In the future, we can add a receiveFailed state and display the error.
-		// For now, just quit.
-		return m, tea.Quit
+		m.receiver.lastError = msg.Err
+		m.receiver.state = receiveFailed
+		return m, m.listenForAppMessages()
 	}
 
-	// If we are showing the file tree, pass messages to it.
-	if m.receiver.state == showingFileNodes {
+	// Handle state-specific updates
+	switch m.receiver.state {
+	case receiveFailed:
+		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
+			// Restart the receiver UI
+			*m = InitialModel(Receiver, m.receiver.port)
+			return m, m.Init()
+		}
+	case showingFileNodes:
 		newFileTree, cmd := m.receiver.fileTree.Update(msg)
 		m.receiver.fileTree = newFileTree.(fileTree.Model)
 		cmds = append(cmds, cmd)
+	case awaitingConnection:
+		switch msg := msg.(type) {
+		case receiverEvent.FileNodeUpdateMsg:
+			m.receiver.state = showingFileNodes
+			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
+			cmds = append(cmds, m.listenForAppMessages())
+		}
 	}
 
 	var spinCmd tea.Cmd

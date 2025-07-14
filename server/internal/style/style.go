@@ -14,6 +14,13 @@ var (
 	colorBlue      = lipgloss.Color("57")
 	colorCyan      = lipgloss.Color("212")
 	colorPurple    = lipgloss.Color("99")
+	colorRed       = lipgloss.Color("196")
+)
+
+
+// --- General Purpose Styles ---
+var (
+	ErrorStyle = lipgloss.NewStyle().Foreground(colorRed)
 )
 
 
