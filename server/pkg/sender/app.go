@@ -3,12 +3,13 @@ package sender
 import (
 	"context"
 	"fmt"
-	"time"
 	"log"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
@@ -22,8 +23,8 @@ type App struct {
 	guard         *concurrency.ConcurrencyGuard
 	discoverer    discovery.Adapter
 	apiClient     *api.Client
-	uiMessages    chan tea.Msg     // Channel to send messages to the UI
-	appEvents     chan sender.AppEvent    // Channel to receive events from the UI
+	uiMessages    chan tea.Msg             // Channel to send messages to the UI
+	appEvents     chan app_events.AppEvent // Channel to receive events from the UI
 	selectedFiles []fileInfo.FileNode
 }
 
@@ -36,7 +37,7 @@ func NewApp() *App {
 		discoverer: &discovery.MDNSAdapter{},
 		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
 		uiMessages: make(chan tea.Msg, 5),
-		appEvents:  make(chan sender.AppEvent),
+		appEvents:  make(chan app_events.AppEvent),
 	}
 }
 
@@ -46,7 +47,7 @@ func (a *App) UIMessages() <-chan tea.Msg {
 }
 
 // AppEvents returns a write-only channel for the TUI to send events to the app.
-func (a *App) AppEvents() chan<- sender.AppEvent {
+func (a *App) AppEvents() chan<- app_events.AppEvent {
 	return a.appEvents
 }
 
@@ -75,6 +76,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		}
 	}
 }
+
 
 // startDiscovery begins the process of finding receivers on the network.
 func (a *App) startDiscovery(ctx context.Context) {

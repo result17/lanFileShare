@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
@@ -24,14 +25,12 @@ type App struct {
 	guard      *concurrency.ConcurrencyGuard
 	registrar  discovery.Adapter
 	api        *api.API
-	uiMessages chan tea.Msg // Channel to send messages TO the UI
+	uiMessages chan tea.Msg             // Channel to send messages TO the UI
+	appEvents  chan app_events.AppEvent // Channel to receive events FROM the UI
 }
 
 // NewApp creates a new receiver application instance.
 func NewApp() *App {
-	// The API layer will now need a way to send messages back to the app,
-	// which will then be forwarded to the UI.
-	// We will pass the uiMessages channel down to the api layer.
 	uiMessages := make(chan tea.Msg, 5)
 	apiHandler := api.NewAPI(uiMessages)
 	dnssdlog.Info.SetOutput(io.Discard)
@@ -41,19 +40,35 @@ func NewApp() *App {
 		registrar:  &discovery.MDNSAdapter{},
 		api:        apiHandler,
 		uiMessages: uiMessages,
+		appEvents:  make(chan app_events.AppEvent),
 	}
 }
 
 // Run starts the application's main event loop and services.
-func (a *App) Run(ctx context.Context, port int) {
-	// // Start the mDNS registration service in the background.
-	a.startRegistration(ctx, port)
-	a.startServer(ctx, port)
-	<-ctx.Done()
+func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
+	// Start the mDNS registration service in the background.
+	a.startRegistration(ctx, 8080) // Assuming a default port for now
+	a.startServer(ctx, 8080)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-a.appEvents:
+			// Handle events from the TUI (e.g., accept/reject transfer)
+			// Placeholder for now
+			log.Printf("Received app event: %#v", event)
+		}
+	}
 }
 
 func (a *App) UIMessages() <-chan tea.Msg {
 	return a.uiMessages
+}
+
+// AppEvents returns a write-only channel for the TUI to send events to the app.
+func (a *App) AppEvents() chan<- app_events.AppEvent {
+	return a.appEvents
 }
 
 // startRegistration announces the receiver's presence on the network.

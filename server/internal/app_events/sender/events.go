@@ -1,29 +1,31 @@
 package sender
 
 import (
+	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 // --- App Events (from TUI to App) ---
 
-// AppEvent defines an event sent from the TUI to the App's logic controller.
-type AppEvent interface {
-	isAppEvent()
-}
-
 // QuitAppMsg is an event sent when the user wants to quit the application.
-type QuitAppMsg struct{}
-
-func (q QuitAppMsg) isAppEvent() {}
+type QuitAppMsg struct {
+	app_events.Event
+}
 
 // SendFilesMsg is an event sent when the user selects a receiver to send files to.
 type SendFilesMsg struct {
+	app_events.Event
 	Receiver discovery.ServiceInfo
 	Files    []fileInfo.FileNode
 }
 
-func (s SendFilesMsg) isAppEvent() {}
+var (
+	// These static checks ensure that our event types correctly implement the AppEvent interface.
+	// The code will not compile if they don't.
+	_ app_events.AppEvent = (*QuitAppMsg)(nil)
+	_ app_events.AppEvent = (*SendFilesMsg)(nil)
+)
 
 // --- UI Messages (from App to TUI) ---
 

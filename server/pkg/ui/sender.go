@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"strconv"
@@ -11,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
-	"github.com/rescp17/lanFileSharer/pkg/sender"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
+
 )
 
 // senderState defines the different states of the sender UI.
@@ -31,7 +30,6 @@ const (
 
 type senderModel struct {
 	state           senderState
-	app             *sender.App // The application logic layer
 	spinner         spinner.Model
 	table           table.Model
 	fp              multiFilePicker.Model
@@ -47,7 +45,7 @@ var columns = []table.Column{
 	{Title: "Port", Width: 10},
 }
 
-func initSenderModel() model {
+func initSenderModel() senderModel {
 	s := style.NewSpinner()
 
 	t := table.New(
@@ -59,29 +57,23 @@ func initSenderModel() model {
 
 	t.SetStyles(style.NewTableStyles())
 
-	return model{
-		mode: Sender,
-		sender: senderModel{
-			spinner: s,
-			fp:      multiFilePicker.InitialModel(),
-			state:   findingReceivers,
-			app:     sender.NewApp(),
-			table:   t,
-		},
+	return senderModel{
+		spinner: s,
+		fp:      multiFilePicker.InitialModel(),
+		state:   findingReceivers,
+		table:   t,
 	}
 }
 
-// listenForSenderAppMessages is a command that listens for messages from the sender app.
-func (m *model) listenForSenderAppMessages() tea.Cmd {
+// listenForAppMessages is a command that listens for messages from the app controller.
+func (m *model) listenForAppMessages() tea.Cmd {
 	return func() tea.Msg {
-		return <-m.sender.app.UIMessages()
+		return <-m.appController.UIMessages()
 	}
 }
 
 func (m *model) initSender() tea.Cmd {
-	ctx, cancel := context.WithCancel(context.Background())
-	go m.sender.app.Run(ctx, cancel)
-	return tea.Batch(m.sender.spinner.Tick, m.listenForSenderAppMessages())
+	return tea.Batch(m.sender.spinner.Tick, m.listenForAppMessages())
 }
 
 func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
@@ -104,7 +96,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
-			m.sender.app.AppEvents() <- senderEvent.QuitAppMsg{}
+			m.appController.AppEvents() <- senderEvent.QuitAppMsg{}
 			return m, tea.Quit
 		}
 	case senderEvent.FoundServicesMsg:
@@ -112,21 +104,21 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sender.state = selectingReceiver
 		}
 		m.updateReceiverTable(msg.Services)
-		return m, m.listenForSenderAppMessages() // Continue listening
+		return m, m.listenForAppMessages() // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
-		return m, m.listenForSenderAppMessages()
+		return m, m.listenForAppMessages()
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
 		log.Println("Status Update:", msg.Message) // For now, just log
-		return m, m.listenForSenderAppMessages()
+		return m, m.listenForAppMessages()
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
-		return m, m.listenForSenderAppMessages()
+		return m, m.listenForAppMessages()
 	case senderEvent.ErrorMsg:
 		m.sender.state = transferFailed
 		m.sender.lastError = msg.Err
-		return m, m.listenForSenderAppMessages()
+		return m, m.listenForAppMessages()
 	}
 
 	// Handle UI events
@@ -151,7 +143,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case multiFilePicker.SelectedFileNodeMsg:
 			// The app will now send messages about the transfer progress
-			m.sender.app.AppEvents() <- senderEvent.SendFilesMsg{
+			m.appController.AppEvents() <- senderEvent.SendFilesMsg{
 				Receiver: m.sender.selectedService,
 				Files:    msg.Files,
 			}
@@ -162,7 +154,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case transferComplete, transferFailed:
 		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
-			*m = initSenderModel()
+			m.sender = initSenderModel()
 			return m, m.initSender()
 		}
 	}

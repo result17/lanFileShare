@@ -1,7 +1,11 @@
 package ui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
+	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
+	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 )
 
 type mode int
@@ -17,25 +21,38 @@ const (
 )
 
 type model struct {
-	mode     mode
-	sender   senderModel
-	receiver receiverModel
+	mode          mode
+	appController AppController
+	sender        senderModel
+	receiver      receiverModel
 }
 
 func InitialModel(m mode, port int) model {
+	var appController AppController
+	var sender senderModel
+	var receiver receiverModel
+
 	switch m {
 	case Sender:
-		return initSenderModel()
+		appController = senderApp.NewApp()
+		sender = initSenderModel()
 	case Receiver:
-		return initReceiverModel(port)
-	default:
-		return model{
-			mode: m,
-		}
+		appController = receiverApp.NewApp()
+		receiver = initReceiverModel(appController, port)
+	}
+
+	return model{
+		mode:          m,
+		appController: appController,
+		sender:        sender,
+		receiver:      receiver,
 	}
 }
 
 func (m model) Init() tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	go m.appController.Run(ctx, cancel)
+
 	switch m.mode {
 	case Sender:
 		return m.initSender()
