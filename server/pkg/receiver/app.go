@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/internal/app"
 	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
@@ -22,27 +23,31 @@ import (
 // App is the main application logic controller for the receiver.
 // It manages state, coordinates services, and communicates with the UI.
 type App struct {
-	guard      *concurrency.ConcurrencyGuard
-	registrar  discovery.Adapter
-	api        *api.API
-	port       int
-	uiMessages chan tea.Msg             // Channel to send messages TO the UI
-	appEvents  chan app_events.AppEvent // Channel to receive events FROM the UI
+	guard        *concurrency.ConcurrencyGuard
+	registrar    discovery.Adapter
+	api          *api.API
+	port         int
+	uiMessages   chan tea.Msg             // Channel to send messages TO the UI
+	appEvents    chan app_events.AppEvent // Channel to receive events FROM the UI
+	stateManager *app.StateManager
 }
 
 // NewApp creates a new receiver application instance.
 func NewApp(port int) *App {
 	uiMessages := make(chan tea.Msg, 5)
-	apiHandler := api.NewAPI(uiMessages)
+	// The stateManager needs to be shared between the API and the App logic.
+	stateManager := app.NewStateManager()
+	apiHandler := api.NewAPI(uiMessages, stateManager)
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
 	return &App{
-		guard:      concurrency.NewConcurrencyGuard(),
-		registrar:  &discovery.MDNSAdapter{},
-		api:        apiHandler,
-		port:       port,
-		uiMessages: uiMessages,
-		appEvents:  make(chan app_events.AppEvent),
+		guard:        concurrency.NewConcurrencyGuard(),
+		registrar:    &discovery.MDNSAdapter{},
+		api:          apiHandler,
+		port:         port,
+		uiMessages:   uiMessages,
+		appEvents:    make(chan app_events.AppEvent),
+		stateManager: stateManager,
 	}
 }
 
@@ -61,12 +66,26 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 			switch event.(type) {
 			case receiver.AcceptFileRequestEvent:
 				log.Println("User accepted file transfer. Preparing to receive...")
-				// TODO: Here you would trigger the actual file receiving logic.
-				// For now, we just log the action.
+				offer := a.stateManager.GetOffer()
+				if offer == "" {
+					log.Println("Error: No offer found in state manager.")
+					// Optionally, send an error message to the UI
+					continue
+				}
+
+				// TODO: Implement WebRTC logic to create a peer connection
+				// and generate an answer from the offer.
+				// For now, we'll use a placeholder answer.
+				placeholderAnswer := "placeholder_webrtc_answer"
+				log.Printf("Generated placeholder answer: %s", placeholderAnswer)
+
+				a.stateManager.SetAnswer(placeholderAnswer)
+				a.stateManager.SetDecision(app.Accepted)
+
 			case receiver.RejectFileRequestEvent:
-				log.Println("User rejected file transfer. Waiting for new connection.")
-				// TODO: Here you might need to inform the sender that the request was rejected.
-				// For now, we just log and the receiver goes back to its initial state.
+				log.Println("User rejected file transfer.")
+				a.stateManager.SetDecision(app.Rejected)
+
 			default:
 				log.Printf("Received unhandled app event: %#v", event)
 			}
