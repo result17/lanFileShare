@@ -57,9 +57,19 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		case <-ctx.Done():
 			return
 		case event := <-a.appEvents:
-			// Handle events from the TUI (e.g., accept/reject transfer)
-			// Placeholder for now
-			log.Printf("Received app event: %#v", event)
+			// Handle events from the TUI
+			switch event.(type) {
+			case receiver.AcceptFileRequestEvent:
+				log.Println("User accepted file transfer. Preparing to receive...")
+				// TODO: Here you would trigger the actual file receiving logic.
+				// For now, we just log the action.
+			case receiver.RejectFileRequestEvent:
+				log.Println("User rejected file transfer. Waiting for new connection.")
+				// TODO: Here you might need to inform the sender that the request was rejected.
+				// For now, we just log and the receiver goes back to its initial state.
+			default:
+				log.Printf("Received unhandled app event: %#v", event)
+			}
 		}
 	}
 }

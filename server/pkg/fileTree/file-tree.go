@@ -6,11 +6,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
-	"github.com/rescp17/lanFileSharer/internal/style"
 )
-
 
 // KeyMap defines the keybindings for the file tree.
 type KeyMap struct {
@@ -125,11 +124,12 @@ func (m Model) View() string {
 	s.WriteString(style.HeaderStyle.Render(util.PadRight("Type", typeWidth)))
 	s.WriteString("\n\n")
 
+	len := len(m.nodes)
 	// File list
 	for i, node := range m.nodes {
-		cursor := style.NoCursorStyle.Render(" ")
+		cursor := style.NoCursorStyle.String()
 		if m.cursor == i {
-			cursor = style.CursorStyle.Render(">")
+			cursor = style.CursorStyle.String()
 		}
 
 		name := node.Name
@@ -152,7 +152,11 @@ func (m Model) View() string {
 
 		row := fmt.Sprintf("%s %s %s %s", cursor, nameCell, sizeCell, typeCell)
 		s.WriteString(row)
-		s.WriteString("\n\n")
+		if i != len-1 {
+			s.WriteString("\n\n")
+		} else {
+			s.WriteString("\n")
+		}
 	}
 
 	// Help view

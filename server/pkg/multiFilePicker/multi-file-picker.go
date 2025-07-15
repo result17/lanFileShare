@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -320,12 +321,6 @@ func (m Model) View() string {
 		end = len(m.items)
 	}
 
-	// Render visible items
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("212")).SetString("> ")
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).SetString("[x] ")
-	deselectedStyle := lipgloss.NewStyle().SetString("[ ] ")
-	dirStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
-
 	// Ensure we don't render a slice with a negative start index
 	if start < 0 {
 		start = 0
@@ -341,16 +336,16 @@ func (m Model) View() string {
 	for i, item := range slice {
 		actualIndex := start + i
 		if m.cursor == actualIndex {
-			s.WriteString(cursorStyle.String())
+			s.WriteString(style.CursorStyle.String())
 		} else {
 			s.WriteString("  ")
 		}
 
 		path := filepath.Join(m.path, item.Name())
 		if _, ok := m.selected[path]; ok {
-			s.WriteString(selectedStyle.String())
+			s.WriteString(style.SelectedStyle.String())
 		} else {
-			s.WriteString(deselectedStyle.String())
+			s.WriteString(style.DeselectedStyle.String())
 		}
 
 		info, err := item.Info()
@@ -382,7 +377,7 @@ func (m Model) View() string {
 		sizeCell := util.PadRight(size, sizeWidth)
 
 		if item.IsDir() {
-			nameCell = dirStyle.Render(nameCell)
+			nameCell = style.DirStyle.Render(nameCell)
 		}
 		// For regular files, don't add nameCol.Render, just output the padded nameCell
 		s.WriteString(nameCell + " " +

@@ -15,14 +15,14 @@ var (
 	colorCyan      = lipgloss.Color("212")
 	colorPurple    = lipgloss.Color("99")
 	colorRed       = lipgloss.Color("196")
+	colorGreen     = lipgloss.Color("42")
 )
-
 
 // --- General Purpose Styles ---
 var (
-	ErrorStyle = lipgloss.NewStyle().Foreground(colorRed)
+	ErrorStyle   = lipgloss.NewStyle().Foreground(colorRed)
+	SuccessStyle = lipgloss.NewStyle().Foreground(colorGreen)
 )
-
 
 // --- Sender Styles ---
 var (
@@ -30,18 +30,19 @@ var (
 	HighlightFontStyle = lipgloss.NewStyle().Foreground(colorCyan)
 )
 
-// --- File Tree Styles ---
+// --- File Tree And Multi File Picker Styles ---
 var (
-	DocStyle      = lipgloss.NewStyle().Margin(1, 2)
-	TitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(colorPink)
-	CursorStyle   = lipgloss.NewStyle().Foreground(colorCyan).SetString("> ")
-	NoCursorStyle = lipgloss.NewStyle().SetString("  ")
-	DirStyle      = lipgloss.NewStyle().Foreground(colorPurple)
-	FileStyle     = lipgloss.NewStyle().Foreground(colorLightGray)
-	HelpStyle     = lipgloss.NewStyle().Faint(true)
-	HeaderStyle   = lipgloss.NewStyle().Bold(true).Padding(0, 1)
+	DocStyle        = lipgloss.NewStyle().Margin(1, 2)
+	TitleStyle      = lipgloss.NewStyle().Bold(true).Foreground(colorPink)
+	CursorStyle     = lipgloss.NewStyle().Foreground(colorCyan).SetString("> ")
+	NoCursorStyle   = lipgloss.NewStyle().SetString("  ")
+	DirStyle        = lipgloss.NewStyle().Foreground(colorPurple)
+	FileStyle       = lipgloss.NewStyle().Foreground(colorLightGray)
+	HelpStyle       = lipgloss.NewStyle().Foreground(colorCyan).Faint(true)
+	HeaderStyle     = lipgloss.NewStyle().Bold(true).Padding(0, 1)
+	SelectedStyle   = lipgloss.NewStyle().Bold(true).Foreground(colorGreen).SetString("[x] ")
+	DeselectedStyle = lipgloss.NewStyle().SetString("[ ] ")
 )
-
 
 // --- Common Components ---
 
