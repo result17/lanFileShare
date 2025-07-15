@@ -74,7 +74,7 @@ func InitialModel() Model {
 	ti := textinput.New()
 	ti.Placeholder = ""
 	ti.Focus()
-	ti.CharLimit = 256
+	ti.CharLimit = 128
 	ti.Width = 80
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
