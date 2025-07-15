@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	receiverEvent "github.com/rescp17/lanFileSharer/internal/app_events/receiver"
@@ -29,6 +30,17 @@ type receiverModel struct {
 	lastError error
 }
 
+type KeyMap struct {
+	Accept key.Binding
+	Reject key.Binding
+}
+
+// DefaultKeyMap provides sensible default keybindings.
+var DefaultKeyMap = KeyMap{
+	Accept:  key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "Accept")),
+	Reject: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "Reject")),
+}
+
 func initReceiverModel(app AppController, port int) receiverModel {
 	s := style.NewSpinner()
 
@@ -51,7 +63,7 @@ func (m model) receiverView() string {
 	case awaitingConnection:
 		return fmt.Sprintf("\n\n %s Awaiting sender connection on port %d...", m.receiver.spinner.View(), m.receiver.port)
 	case showingFileNodes:
-		return m.receiver.fileTree.View()
+		return fmt.Sprintf("%s\nPress Y ", m.receiver.fileTree.View())
 	case receiveFailed:
 		return fmt.Sprintf("\nAn error occurred: %v\n", style.ErrorStyle.Render(m.receiver.lastError.Error()))
 	default:
@@ -86,6 +98,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case showingFileNodes:
 		newFileTree, cmd := m.receiver.fileTree.Update(msg)
 		m.receiver.fileTree = newFileTree.(fileTree.Model)
+		// TODO accept or not accept
 		cmds = append(cmds, cmd)
 	case awaitingConnection:
 		switch msg := msg.(type) {

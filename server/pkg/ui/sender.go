@@ -100,9 +100,19 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case senderEvent.FoundServicesMsg:
+		log.Printf("Discovery Update: Found %d services.", len(msg.Services))
+		for _, s := range msg.Services {
+			log.Printf("  - Service: %s, Addr: %s, Port: %d", s.Name, s.Addr, s.Port)
+		}
+
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
 			m.sender.state = selectingReceiver
 		}
+		// If the list of services becomes empty, go back to the finding state.
+		if len(msg.Services) == 0 && m.sender.state == selectingReceiver {
+			m.sender.state = findingReceivers
+		}
+
 		m.updateReceiverTable(msg.Services)
 		return m, m.listenForAppMessages() // Continue listening
 	case senderEvent.TransferStartedMsg:

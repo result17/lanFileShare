@@ -89,6 +89,13 @@ func (a *App) startDiscovery(ctx context.Context) {
 			return
 		}
 
+		// Ticker to periodically send updates to the UI, even if no new services are found.
+		// This helps in observing when services disappear.
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		var currentServices []discovery.ServiceInfo
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -98,7 +105,14 @@ func (a *App) startDiscovery(ctx context.Context) {
 					// Channel closed, discovery stopped.
 					return
 				}
-				a.uiMessages <- sender.FoundServicesMsg{Services: services}
+				currentServices = services
+				a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
+			case <-ticker.C:
+				// Periodically send the current list to the UI.
+				// This is crucial for noticing when a service disappears from the list.
+				if currentServices != nil {
+					a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
+				}
 			}
 		}
 	}()
