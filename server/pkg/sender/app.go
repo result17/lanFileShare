@@ -136,7 +136,7 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 
 		// 1. Send /ask request and wait for confirmation
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
-		err := a.apiClient.SendAskRequest(ctx, receiverURL, a.selectedFiles)
+		err := a.apiClient.SendAskRequest(ctx, receiverURL, a.selectedFiles, "")
 		if err != nil {
 			return fmt.Errorf("receiver did not accept transfer: %w", err)
 		}

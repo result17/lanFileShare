@@ -50,7 +50,7 @@ func NewClient(serviceID string) *Client {
 
 // SendAskRequest sends the list of files to the receiver and asks for confirmation.
 // It no longer needs to know about the service ID; the transport handles it automatically.
-func (c *Client) SendAskRequest(ctx context.Context, receiverURL string, files []fileInfo.FileNode) error {
+func (c *Client) SendAskRequest(ctx context.Context, receiverURL string, files []fileInfo.FileNode, offer string) error {
 	payload := AskPayload{
 		Files: files,
 	}

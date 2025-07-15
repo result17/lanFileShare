@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/gorilla/websocket"
 	"github.com/rescp17/lanFileSharer/internal/app"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
@@ -82,9 +81,6 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 	})
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
 
 // AskPayload is the structure of the request body for the /ask endpoint.
 type AskPayload struct {
