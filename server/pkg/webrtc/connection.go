@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -79,8 +80,11 @@ func NewConnection(config Config) (*Connection, error) {
 		}
 	}
 
+	settings := webrtc.SettingEngine{}
+	settings.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
+
 	// Using NewAPI is crucial for managing multiple PeerConnections in one application.
-	api := webrtc.NewAPI()
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
 	pc, err := api.NewPeerConnection(webrtc.Configuration{
 		ICEServers: config.ICEServers,
 	})
