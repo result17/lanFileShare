@@ -14,6 +14,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
 // App is the main application logic controller for the sender.
@@ -26,11 +27,14 @@ type App struct {
 	uiMessages    chan tea.Msg             // Channel to send messages to the UI
 	appEvents     chan app_events.AppEvent // Channel to receive events from the UI
 	selectedFiles []fileInfo.FileNode
+	webrtcAPI     *webrtc.WebRTCAPI
+	webrtcConn    *webrtc.Connection
 }
 
 // NewApp creates a new sender application instance.
 func NewApp() *App {
 	serviceID := uuid.New().String()
+	webrtcAPI := webrtc.NewWebRTCAPI()
 	return &App{
 		serviceID:  serviceID,
 		guard:      concurrency.NewConcurrencyGuard(),
@@ -38,6 +42,7 @@ func NewApp() *App {
 		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
 		uiMessages: make(chan tea.Msg, 5),
 		appEvents:  make(chan app_events.AppEvent),
+		webrtcAPI:  webrtcAPI,
 	}
 }
 
@@ -76,7 +81,6 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		}
 	}
 }
-
 
 // startDiscovery begins the process of finding receivers on the network.
 func (a *App) startDiscovery(ctx context.Context) {
@@ -133,16 +137,34 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		defer cancel()
 
 		receiverURL := fmt.Sprintf("http://%s:%d", receiver.Addr.String(), receiver.Port)
+		a.apiClient.SetReceiverURL(receiverURL)
 
-		// 1. Send /ask request and wait for confirmation
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
-		err := a.apiClient.SendAskRequest(ctx, receiverURL, a.selectedFiles, "")
+		err := a.apiClient.SendAskRequest(ctx, a.selectedFiles)
 		if err != nil {
 			return fmt.Errorf("receiver did not accept transfer: %w", err)
 		}
 
-		// 2. Send the files (placeholder for now)
+		signaler := api.NewAPISignaler(ctx, a.apiClient)
+		config := webrtc.Config{
+			Signaler: signaler,
+		}
+		webrtcConn, err := a.webrtcAPI.NewConnection(config)
+		if err != nil {
+			err := fmt.Errorf("failed to create webrtc connection: %w", err)
+			log.Printf("[StartSendProcess] %w", err)
+			return err
+		}
+		a.webrtcConn = webrtcConn
+		defer a.webrtcConn.Close()
+
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}
+		if err := a.webrtcConn.Establish(ctx); err != nil {
+			err := fmt.Errorf("could not establish webrtc connection: ")
+			log.Printf("[StartSendProcess] %w", err)
+			return err
+		}
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Sending files..."}
 		time.Sleep(2 * time.Second) // Simulate file transfer
 
 		return nil // Success

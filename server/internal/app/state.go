@@ -12,10 +12,10 @@ const (
 
 // RequestState holds all the necessary information for a single file transfer request.
 type RequestState struct {
-	Offer         string
-	DecisionChan  chan Decision
-	AnswerChan    chan string
-	TransferDone  chan struct{}
+	Offer        string
+	DecisionChan chan Decision
+	AnswerChan   chan string
+	TransferDone chan struct{}
 }
 
 // StateManager manages the lifecycle of a file transfer request state in a concurrent-safe manner.
@@ -31,7 +31,7 @@ func NewStateManager() *StateManager {
 
 // CreateRequest initializes a new request state, storing the offer and creating a channel to await a decision.
 // It returns the decision channel for the caller to wait on.
-func (m *StateManager) CreateRequest(offer string) (<-chan Decision, error) {
+func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -39,7 +39,6 @@ func (m *StateManager) CreateRequest(offer string) (<-chan Decision, error) {
 	// A more robust implementation might check if m.state is nil.
 
 	m.state = &RequestState{
-		Offer:        offer,
 		DecisionChan: make(chan Decision, 1), // Buffered channel to avoid blocking
 		AnswerChan:   make(chan string, 1),
 		TransferDone: make(chan struct{}),

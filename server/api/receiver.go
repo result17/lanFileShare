@@ -81,11 +81,9 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 	})
 }
 
-
 // AskPayload is the structure of the request body for the /ask endpoint.
 type AskPayload struct {
 	Files []fileInfo.FileNode `json:"files"`
-	Offer string              `json:"offer"`
 }
 
 // AskHandler is the core business logic for handling /ask requests.
@@ -98,7 +96,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("Ask received", "request", req)
 
-	decisionChan, err := s.stateManager.CreateRequest(req.Offer)
+	decisionChan, err := s.stateManager.CreateRequest()
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -142,4 +140,3 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "data: %s\n\n", jsonResponse)
 	flusher.Flush()
 }
-
