@@ -46,7 +46,7 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 		answer, err := conn.HandleOfferAndCreateAnswer(offer)
 		if err != nil {
 			err := fmt.Errorf("failed to create answer: %w", err)
-			log.Printf("[OfferHandler]: %w", err)
+			log.Printf("[OfferHandler]: %v", err)
 			close(h.answerChan)
 			return
 		}
@@ -77,7 +77,7 @@ func (h *SignalingHandler) AnswerStreamHandler(w http.ResponseWriter, r *http.Re
 		}
 		answerJSON, err := json.Marshal(answer)
 		if err != nil {
-			log.Printf("failed to encode answer json %w", err)
+			log.Printf("failed to encode answer json %v", err)
 			return
 		}
 		fmt.Fprintf(w, "event: answer\ndata: %s\n\n", answerJSON)
@@ -104,7 +104,7 @@ func (h *SignalingHandler) ICECandidateHanlder(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err := conn.AddICECandidate(candidate); err != nil {
-		log.Printf("failed to add ICE candidate %w", err)
+		log.Printf("failed to add ICE candidate %v", err)
 	}
 	w.WriteHeader(http.StatusOK)
 }

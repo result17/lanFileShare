@@ -39,14 +39,14 @@ func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescrip
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		err = fmt.Errorf("failed to request answer-stream %w", err)
-		log.Printf("[waitForAnswer] %w", err)
+		log.Printf("[waitForAnswer] %v", err)
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := s.apiClient.HttpClient.Do(req)
 	if err != nil {
 		err = fmt.Errorf("failed to connect to answer stream: %w", err)
-		log.Printf("[waitForAnswer] %w", err)
+		log.Printf("[waitForAnswer] %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -58,18 +58,18 @@ func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescrip
 			var answer webrtc.SessionDescription
 			if err := json.Unmarshal([]byte(jsonData), &answer); err != nil {
 				err = fmt.Errorf("failed to decode sse answer event: %w", err)
-				log.Printf("[waitForAnswer] %w", err)
+				log.Printf("[waitForAnswer] %v", err)
 				return nil, err
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		err = fmt.Errorf("error reading sse stream: %w", err)
-		log.Printf("[waitForAnswer] %w", err)
+		log.Printf("[waitForAnswer] %v", err)
 		return nil, err
 	}
 	err = fmt.Errorf("event stream ended without an answer")
-	log.Printf("[waitForAnswer] %w", err)
+	log.Printf("[waitForAnswer] %v", err)
 	return nil, err
 }
 

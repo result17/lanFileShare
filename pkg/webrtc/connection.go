@@ -10,19 +10,22 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-type SenderConnection interface {
-	Establish(ctx context.Context) error
-	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+type CommonConnection interface {
 	OnDataChannel(f func(*webrtc.DataChannel))
+	OnICECandidate(f func(*webrtc.ICECandidate))
+	AddICECandidate(candidate webrtc.ICECandidateInit) error
 	Close() error
 }
 
+type SenderConnection interface {
+	CommonConnection
+	Establish(ctx context.Context) error
+	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+}
+
 type ReceiverConnection interface {
+	CommonConnection
 	HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error)
-	AddICECandidate(candidate webrtc.ICECandidateInit) error
-	OnDatachannel(f func(*webrtc.DataChannel))
-	OnICECandidate(f func(*webrtc.ICECandidate))
-	Close() error
 }
 
 const (
@@ -79,13 +82,13 @@ func (a *WebRTCAPI) createPeerconnection(config Config) (*webrtc.PeerConnection,
 func (a *WebRTCAPI) NewSenderConnection(config Config, signaler Signaler) (*SenderConn, error) {
 	if signaler == nil {
 		err := fmt.Errorf("Signaler is not configured")
-		log.Printf("[NewSenderConnection] %w", err)
+		log.Printf("[NewSenderConnection] %v", err)
 		return nil, err
 	}
 
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
-		log.Printf("[NewSenderConnection] %w", err)
+		log.Printf("[NewSenderConnection] %v", err)
 		return nil, err
 	}
 
@@ -93,15 +96,14 @@ func (a *WebRTCAPI) NewSenderConnection(config Config, signaler Signaler) (*Send
 		Connection: &Connection{
 			peerConnection: pc,
 		},
-		signaler: 	 signaler,
+		signaler: signaler,
 	}, nil
 }
-
 
 func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
-		log.Printf("[NewSenderConnection] %w", err)
+		log.Printf("[NewSenderConnection] %v", err)
 		return nil, err
 	}
 
@@ -121,18 +123,18 @@ func (c *SenderConn) Establish(ctx context.Context) error {
 	offer, err := c.peerConnection.CreateOffer(nil)
 	if err != nil {
 		err := fmt.Errorf("fail to createOffer %w", err)
-		log.Printf("[Establish] %w", err)
+		log.Printf("[Establish] %v", err)
 		return err
 	}
 	if err := c.peerConnection.SetLocalDescription(offer); err != nil {
 		err := fmt.Errorf("fail to set local description %w", err)
-		log.Printf("[Establish] %w", err)
+		log.Printf("[Establish] %v", err)
 		return err
 	}
 
 	if err := c.signaler.SendOffer(offer); err != nil {
 		err := fmt.Errorf("fail to send offer %w", err)
-		log.Printf("[Establish] %w", err)
+		log.Printf("[Establish] %v", err)
 	}
 	return nil
 }
@@ -141,36 +143,36 @@ func (c *SenderConn) Establish(ctx context.Context) error {
 func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	if err := c.peerConnection.SetRemoteDescription(offer); err != nil {
 		err = fmt.Errorf("failed to set remote description: %w", err)
-		log.Printf("[HandleOfferAndCreateAnswer] %w", err)
+		log.Printf("[HandleOfferAndCreateAnswer] %v", err)
 		return nil, err
 	}
 
 	answer, err := c.peerConnection.CreateAnswer(nil)
 	if err != nil {
 		err = fmt.Errorf("failed to create answer: %w", err)
-		log.Printf("[HandleOfferAndCreateAnswer] %w", err)
+		log.Printf("[HandleOfferAndCreateAnswer] %v", err)
 		return nil, err
 	}
 
 	if err := c.peerConnection.SetLocalDescription(answer); err != nil {
 		err = fmt.Errorf("failed to set local description for answer: %w", err)
-		log.Printf("[HandleOfferAndCreateAnswer] %w", err)
+		log.Printf("[HandleOfferAndCreateAnswer] %v", err)
 		return nil, err
 	}
 	return &answer, nil
 }
 
 // AddICECandidate is called by both peers to add a candidate received from the other peer.
-func (c *ReceiverConn) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 	if err := c.peerConnection.AddICECandidate(candidate); err != nil {
 		err := fmt.Errorf("failed to ice candidate")
-		log.Printf("[AddICECandidate] %w", err)
+		log.Printf("[AddICECandidate] %v", err)
 		return err
 	}
 	return nil
 }
 
-func (c *ReceiverConn) OnICECandidate(f func(*webrtc.ICECandidate)) {
+func (c *Connection) OnICECandidate(f func(*webrtc.ICECandidate)) {
 	c.peerConnection.OnICECandidate(f)
 }
 

@@ -153,7 +153,7 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		webrtcConn, err := a.webrtcAPI.NewSenderConnection(config, signaler)
 		if err != nil {
 			err := fmt.Errorf("failed to create webrtc connection: %w", err)
-			log.Printf("[StartSendProcess] %w", err)
+			log.Printf("[StartSendProcess] %v", err)
 			return err
 		}
 		a.webrtcConn = webrtcConn
@@ -162,7 +162,7 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}
 		if err := a.webrtcConn.Establish(ctx); err != nil {
 			err := fmt.Errorf("could not establish webrtc connection: ")
-			log.Printf("[StartSendProcess] %w", err)
+			log.Printf("[StartSendProcess] %v", err)
 			return err
 		}
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Sending files..."}
