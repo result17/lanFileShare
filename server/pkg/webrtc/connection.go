@@ -98,14 +98,14 @@ func (a *WebRTCAPI) NewSenderConnection(config Config, signaler Signaler) (*Send
 }
 
 
-func (a *WebRTCAPI) NewReceiverConnection(config Config) (*SenderConn, error) {
+func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
 		log.Printf("[NewSenderConnection] %w", err)
 		return nil, err
 	}
 
-	return &SenderConn{
+	return &ReceiverConn{
 		Connection: &Connection{
 			peerConnection: pc,
 		},
@@ -170,7 +170,7 @@ func (c *ReceiverConn) AddICECandidate(candidate webrtc.ICECandidateInit) error 
 	return nil
 }
 
-func (c *SenderConn) OnICECandidate(f func(*webrtc.ICECandidate)) {
+func (c *ReceiverConn) OnICECandidate(f func(*webrtc.ICECandidate)) {
 	c.peerConnection.OnICECandidate(f)
 }
 
