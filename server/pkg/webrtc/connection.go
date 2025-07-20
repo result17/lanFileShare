@@ -3,14 +3,27 @@ package webrtc
 import (
 	"context"
 	"fmt"
+
 	"log"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
 
-// State defines the various states of the WebRTC connection.
-type State int
+type SenderConnection interface {
+	Establish(ctx context.Context) error
+	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+	OnDataChannel(f func(*webrtc.DataChannel))
+	Close() error
+}
+
+type ReceiverConnection interface {
+	HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error)
+	AddICECandidate(candidate webrtc.ICECandidateInit) error
+	OnDatachannel(f func(*webrtc.DataChannel))
+	OnICECandidate(f func(*webrtc.ICECandidate))
+	Close() error
+}
 
 const (
 	MTU uint = 1400
@@ -19,7 +32,15 @@ const (
 // Connection wraps a single WebRTC peer connection and its state.
 type Connection struct {
 	peerConnection *webrtc.PeerConnection
-	signaler       Signaler // Used to send signals to the remote peer
+}
+
+type SenderConn struct {
+	*Connection
+	signaler Signaler // Used to send signals to the remote peer
+}
+
+type ReceiverConn struct {
+	*Connection
 }
 
 type WebRTCAPI struct {
@@ -29,7 +50,6 @@ type WebRTCAPI struct {
 // Config holds the configuration for creating a new Connection.
 type Config struct {
 	ICEServers []webrtc.ICEServer
-	Signaler   Signaler // A Signaler implementation is required.
 }
 
 func NewWebRTCAPI() *WebRTCAPI {
@@ -45,35 +65,54 @@ func NewWebRTCAPI() *WebRTCAPI {
 	}
 }
 
-// NewConnection creates and initializes a new WebRTC connection.
-func (w *WebRTCAPI) NewConnection(config Config) (*Connection, error) {
-	// Use a public STUN server if no ICE servers are provided.
+func (a *WebRTCAPI) createPeerconnection(config Config) (*webrtc.PeerConnection, error) {
 	if len(config.ICEServers) == 0 {
-		config.ICEServers = []webrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		}
+		config.ICEServers = append(config.ICEServers, webrtc.ICEServer{
+			URLs: []string{"stun:stun.l.google.com:19302"},
+		})
 	}
-	pc, err := w.api.NewPeerConnection(webrtc.Configuration{
+	return a.api.NewPeerConnection(webrtc.Configuration{
 		ICEServers: config.ICEServers,
 	})
-	if err != nil {
+}
+
+func (a *WebRTCAPI) NewSenderConnection(config Config, signaler Signaler) (*SenderConn, error) {
+	if signaler == nil {
+		err := fmt.Errorf("Signaler is not configured")
+		log.Printf("[NewSenderConnection] %w", err)
 		return nil, err
 	}
 
-	conn := &Connection{
-		peerConnection: pc,
-		signaler:       config.Signaler,
+	pc, err := a.createPeerconnection(config)
+	if err != nil {
+		log.Printf("[NewSenderConnection] %w", err)
+		return nil, err
 	}
 
-	return conn, nil
+	return &SenderConn{
+		Connection: &Connection{
+			peerConnection: pc,
+		},
+		signaler: 	 signaler,
+	}, nil
 }
 
-func (c *Connection) Establish(ctx context.Context) error {
-	if c.signaler == nil {
-		err := fmt.Errorf("signaler is not configured")
-		log.Printf("[Establish]: %w", err)
-		return err
+
+func (a *WebRTCAPI) NewReceiverConnection(config Config) (*SenderConn, error) {
+	pc, err := a.createPeerconnection(config)
+	if err != nil {
+		log.Printf("[NewSenderConnection] %w", err)
+		return nil, err
 	}
+
+	return &SenderConn{
+		Connection: &Connection{
+			peerConnection: pc,
+		},
+	}, nil
+}
+
+func (c *SenderConn) Establish(ctx context.Context) error {
 	c.peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
 			c.signaler.SendICECandidate(candidate.ToJSON())
@@ -99,7 +138,7 @@ func (c *Connection) Establish(ctx context.Context) error {
 }
 
 // HandleOffer is called by the receiver to process an incoming offer.
-func (c *Connection) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
+func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	if err := c.peerConnection.SetRemoteDescription(offer); err != nil {
 		err = fmt.Errorf("failed to set remote description: %w", err)
 		log.Printf("[HandleOfferAndCreateAnswer] %w", err)
@@ -122,13 +161,17 @@ func (c *Connection) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription)
 }
 
 // AddICECandidate is called by both peers to add a candidate received from the other peer.
-func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+func (c *ReceiverConn) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 	if err := c.peerConnection.AddICECandidate(candidate); err != nil {
 		err := fmt.Errorf("failed to ice candidate")
 		log.Printf("[AddICECandidate] %w", err)
 		return err
 	}
 	return nil
+}
+
+func (c *SenderConn) OnICECandidate(f func(*webrtc.ICECandidate)) {
+	c.peerConnection.OnICECandidate(f)
 }
 
 func (c *Connection) OnDataChannel(f func(*webrtc.DataChannel)) {

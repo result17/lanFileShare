@@ -13,7 +13,7 @@ import (
 
 type SignalingHandler struct {
 	mu sync.Mutex
-	webrtcConn *webrtcPkg.Connection
+	webrtcConn *webrtcPkg.ReceiverConn
 	answerChan chan *webrtc.SessionDescription
 }
 

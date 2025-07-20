@@ -8,13 +8,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
+	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
-	"github.com/rescp17/lanFileSharer/pkg/webrtc"
+	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
 // App is the main application logic controller for the sender.
@@ -27,14 +28,14 @@ type App struct {
 	uiMessages    chan tea.Msg             // Channel to send messages to the UI
 	appEvents     chan app_events.AppEvent // Channel to receive events from the UI
 	selectedFiles []fileInfo.FileNode
-	webrtcAPI     *webrtc.WebRTCAPI
-	webrtcConn    *webrtc.Connection
+	webrtcAPI     *webrtcPkg.WebRTCAPI
+	webrtcConn    *webrtcPkg.SenderConn
 }
 
 // NewApp creates a new sender application instance.
 func NewApp() *App {
 	serviceID := uuid.New().String()
-	webrtcAPI := webrtc.NewWebRTCAPI()
+	webrtcAPI := webrtcPkg.NewWebRTCAPI()
 	return &App{
 		serviceID:  serviceID,
 		guard:      concurrency.NewConcurrencyGuard(),
@@ -146,10 +147,10 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		}
 
 		signaler := api.NewAPISignaler(ctx, a.apiClient)
-		config := webrtc.Config{
-			Signaler: signaler,
+		config := webrtcPkg.Config{
+			ICEServers: []webrtc.ICEServer{},
 		}
-		webrtcConn, err := a.webrtcAPI.NewConnection(config)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(config, signaler)
 		if err != nil {
 			err := fmt.Errorf("failed to create webrtc connection: %w", err)
 			log.Printf("[StartSendProcess] %w", err)
