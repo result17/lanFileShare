@@ -1,6 +1,9 @@
 package app
 
-import "sync"
+import (
+	"github.com/pion/webrtc/v4"
+	"sync"
+)
 
 // Decision is the type for user's decision.
 type Decision bool
@@ -12,9 +15,9 @@ const (
 
 // RequestState holds all the necessary information for a single file transfer request.
 type RequestState struct {
-	Offer         string
+	Offer         webrtc.SessionDescription
 	DecisionChan  chan Decision
-	AnswerChan    chan string
+	AnswerChan    chan webrtc.SessionDescription
 	CandidateChan chan string
 	TransferDone  chan struct{}
 }
@@ -41,7 +44,7 @@ func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 
 	m.state = &RequestState{
 		DecisionChan:  make(chan Decision, 1), // Buffered channel to avoid blocking
-		AnswerChan:    make(chan string, 1),
+		AnswerChan:    make(chan webrtc.SessionDescription, 1),
 		CandidateChan: make(chan string, 10), // Buffer for multiple candidates
 		TransferDone:  make(chan struct{}),
 	}
@@ -50,12 +53,12 @@ func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 }
 
 // GetOffer retrieves the currently stored offer.
-func (m *StateManager) GetOffer() string {
+func (m *StateManager) GetOffer() webrtc.SessionDescription {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.state == nil {
-		return ""
+		return webrtc.SessionDescription{}
 	}
 	return m.state.Offer
 }
@@ -72,7 +75,7 @@ func (m *StateManager) SetDecision(decision Decision) {
 }
 
 // SetAnswer stores the generated answer from the WebRTC peer.
-func (m *StateManager) SetAnswer(answer string) {
+func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -83,13 +86,13 @@ func (m *StateManager) SetAnswer(answer string) {
 }
 
 // GetAnswerChan returns the channel from which the answer can be read.
-func (m *StateManager) GetAnswerChan() <-chan string {
+func (m *StateManager) GetAnswerChan() <-chan webrtc.SessionDescription {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.state == nil {
 		// Return a closed channel if there's no active request
-		ch := make(chan string)
+		ch := make(chan webrtc.SessionDescription)
 		close(ch)
 		return ch
 	}

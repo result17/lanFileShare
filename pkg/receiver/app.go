@@ -18,6 +18,7 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
+	"github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
 // App is the main application logic controller for the receiver.
@@ -30,6 +31,8 @@ type App struct {
 	uiMessages   chan tea.Msg             // Channel to send messages TO the UI
 	appEvents    chan app_events.AppEvent // Channel to receive events FROM the UI
 	stateManager *app.StateManager
+	webRTCAPI    *webrtc.WebRTCAPI
+	receiverConn *webrtc.ReceiverConn
 }
 
 // NewApp creates a new receiver application instance.
@@ -40,6 +43,13 @@ func NewApp(port int) *App {
 	apiHandler := api.NewAPI(uiMessages, stateManager)
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
+
+	webRTCAPI := webrtc.NewWebRTCAPI()
+	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtc.Config{})
+	if err != nil {
+		err := fmt.Errorf("failed to create receiver connection %w", err)
+		log.Printf("[receiver NewApp] %v", err)
+	}
 	return &App{
 		guard:        concurrency.NewConcurrencyGuard(),
 		registrar:    &discovery.MDNSAdapter{},
@@ -48,6 +58,8 @@ func NewApp(port int) *App {
 		uiMessages:   uiMessages,
 		appEvents:    make(chan app_events.AppEvent),
 		stateManager: stateManager,
+		webRTCAPI:    webRTCAPI,
+		receiverConn: receiverConn,
 	}
 }
 
@@ -67,20 +79,22 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 			case receiver.AcceptFileRequestEvent:
 				log.Println("User accepted file transfer. Preparing to receive...")
 				offer := a.stateManager.GetOffer()
-				if offer == "" {
-					log.Println("Error: No offer found in state manager.")
-					// Optionally, send an error message to the UI
+				if offer.SDP == ""  {
+					err := fmt.Errorf("error: No offer found in state manager")
+					log.Println("[receiver run] %w", err)
+					a.uiMessages <- receiver.ErrorMsg{Err: err}
 					continue
 				}
-
-				// TODO: Implement WebRTC logic to create a peer connection
-				// and generate an answer from the offer.
-				// For now, we'll use a placeholder answer.
-				placeholderAnswer := "placeholder_webrtc_answer"
-				log.Printf("Generated placeholder answer: %s", placeholderAnswer)
-
-				a.stateManager.SetAnswer(placeholderAnswer)
 				a.stateManager.SetDecision(app.Accepted)
+				answer, err := a.receiverConn.HandleOfferAndCreateAnswer(offer)
+
+				if err != nil {
+					err := fmt.Errorf("fail to create answer %w", err)
+					log.Fatalf("[receiver run] %v", err)
+					return
+				}
+				log.Printf("Generated placeholder answer: %s", answer)
+				a.stateManager.SetAnswer(*answer)
 
 			case receiver.RejectFileRequestEvent:
 				log.Println("User rejected file transfer.")
