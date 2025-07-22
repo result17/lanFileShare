@@ -149,11 +149,7 @@ func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) 
 	}
 
 	slog.Info("Sending answer to sender", "answer", answer)
-	response := map[string]string{
-		"status": "accepted",
-		"answer": answer,
-	}
-	jsonResponse, err := json.Marshal(response)
+	jsonResponse, err := json.Marshal(answer)
 	if err != nil {
 		return fmt.Errorf("failed to marshal answer: %w", err)
 	}
