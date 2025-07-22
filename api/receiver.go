@@ -87,13 +87,13 @@ type AskPayload struct {
 }
 
 // AskHandler is the core business logic for handling /ask requests.
+// It now orchestrates calls to more specific helper methods.
 func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
-
 	slog.Info("Ask received", "request", req)
 
 	decisionChan, err := s.stateManager.CreateRequest()
@@ -102,10 +102,8 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send file info to the UI
 	s.uiMessages <- receiver.FileNodeUpdateMsg{Nodes: req.Files}
 
-	// Set up SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -115,28 +113,76 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for the user's decision from the UI
 	decision := <-decisionChan
-
 	if decision == app.Rejected {
 		slog.Info("Request rejected by user")
-		fmt.Fprintf(w, "data: %s\n\n", `{"status": "rejected"}`)
-		flusher.Flush()
+		s.sendRejection(w, flusher)
 		return
 	}
 
 	slog.Info("Request accepted by user")
-	// The AppController is now responsible for creating the peer connection
-	// and generating the answer. We just need to wait for the answer.
+	if err := s.sendAnswer(w, flusher); err != nil {
+		slog.Error("Failed to send answer", "error", err)
+		// Don't write an http.Error here as the response has started
+		return
+	}
+
+	if err := s.streamCandidates(w, flusher); err != nil {
+		slog.Error("Failed to stream candidates", "error", err)
+	}
+}
+
+// sendRejection sends a rejection message to the sender.
+func (s *ReceiverGuard) sendRejection(w http.ResponseWriter, flusher http.Flusher) {
+	response := map[string]string{"status": "rejected"}
+	jsonResponse, _ := json.Marshal(response)
+	fmt.Fprintf(w, "event: rejection\ndata: %s\n\n", jsonResponse)
+	flusher.Flush()
+}
+
+// sendAnswer waits for the WebRTC answer and sends it as an SSE event.
+func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) error {
 	answerChan := s.stateManager.GetAnswerChan()
-	answer := <-answerChan
+	answer, ok := <-answerChan
+	if !ok {
+		return fmt.Errorf("answer channel was closed unexpectedly")
+	}
 
 	slog.Info("Sending answer to sender", "answer", answer)
 	response := map[string]string{
 		"status": "accepted",
 		"answer": answer,
 	}
-	jsonResponse, _ := json.Marshal(response)
-	fmt.Fprintf(w, "data: %s\n\n", jsonResponse)
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("failed to marshal answer: %w", err)
+	}
+
+	fmt.Fprintf(w, "event: answer\ndata: %s\n\n", jsonResponse)
 	flusher.Flush()
+	return nil
+}
+
+// streamCandidates waits for ICE candidates and streams them as SSE events.
+func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flusher) error {
+	slog.Info("Now streaming ICE candidates to sender...")
+	candidateChan := s.stateManager.GetCandidateChan()
+
+	for candidate := range candidateChan {
+		slog.Info("Sending candidate to sender", "candidate", candidate)
+		response := map[string]string{"candidate": candidate}
+		jsonResponse, err := json.Marshal(response)
+		if err != nil {
+			slog.Error("Failed to marshal candidate, skipping", "error", err)
+			continue // Don't let one bad candidate stop the stream
+		}
+		fmt.Fprintf(w, "event: candidate\ndata: %s\n\n", jsonResponse)
+		flusher.Flush()
+	}
+
+	slog.Info("Finished streaming candidates.")
+	// Send a final event to signal the end of the stream
+	fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
+	flusher.Flush()
+	return nil
 }

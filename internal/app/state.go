@@ -12,10 +12,11 @@ const (
 
 // RequestState holds all the necessary information for a single file transfer request.
 type RequestState struct {
-	Offer        string
-	DecisionChan chan Decision
-	AnswerChan   chan string
-	TransferDone chan struct{}
+	Offer         string
+	DecisionChan  chan Decision
+	AnswerChan    chan string
+	CandidateChan chan string
+	TransferDone  chan struct{}
 }
 
 // StateManager manages the lifecycle of a file transfer request state in a concurrent-safe manner.
@@ -39,9 +40,10 @@ func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 	// A more robust implementation might check if m.state is nil.
 
 	m.state = &RequestState{
-		DecisionChan: make(chan Decision, 1), // Buffered channel to avoid blocking
-		AnswerChan:   make(chan string, 1),
-		TransferDone: make(chan struct{}),
+		DecisionChan:  make(chan Decision, 1), // Buffered channel to avoid blocking
+		AnswerChan:    make(chan string, 1),
+		CandidateChan: make(chan string, 10), // Buffer for multiple candidates
+		TransferDone:  make(chan struct{}),
 	}
 
 	return m.state.DecisionChan, nil
@@ -92,6 +94,39 @@ func (m *StateManager) GetAnswerChan() <-chan string {
 		return ch
 	}
 	return m.state.AnswerChan
+}
+
+// SetCandidate sends a new ICE candidate to the listening handler.
+func (m *StateManager) SetCandidate(candidate string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state != nil && m.state.CandidateChan != nil {
+		m.state.CandidateChan <- candidate
+	}
+}
+
+// CloseCandidateChan closes the candidate channel to signal completion.
+func (m *StateManager) CloseCandidateChan() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state != nil && m.state.CandidateChan != nil {
+		close(m.state.CandidateChan)
+	}
+}
+
+// GetCandidateChan returns the channel from which ICE candidates can be read.
+func (m *StateManager) GetCandidateChan() <-chan string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state == nil {
+		ch := make(chan string)
+		close(ch)
+		return ch
+	}
+	return m.state.CandidateChan
 }
 
 // CloseRequest cleans up the state of the current request.

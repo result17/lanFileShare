@@ -3,7 +3,6 @@ package webrtc
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -12,31 +11,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mocksignaler's design is correct and remains unchanged.
-type mocksignaler struct {
-	offerChan     chan webrtc.SessionDescription
-	answerChan    chan webrtc.SessionDescription
-	candidateChan chan webrtc.ICECandidateInit
+// mockSignaler now correctly simulates the one-way signaler ownership.
+// It implements the Signaler interface for the Sender, and provides
+// test-only helper methods to simulate the Receiver sending data back.
+type mockSignaler struct {
+	offerChan          chan webrtc.SessionDescription
+	answerChan         chan webrtc.SessionDescription
+	senderCandidates   chan webrtc.ICECandidateInit // Candidates from Sender to Receiver
+	receiverCandidates chan webrtc.ICECandidateInit // Candidates from Receiver to Sender
 }
 
-func newMockSignaler() *mocksignaler {
-	return &mocksignaler{
-		offerChan:     make(chan webrtc.SessionDescription, 1),
-		answerChan:    make(chan webrtc.SessionDescription, 1),
-		candidateChan: make(chan webrtc.ICECandidateInit, 20), // Increased buffer size as both peers will send candidates.
+func newMockSignaler() *mockSignaler {
+	return &mockSignaler{
+		offerChan:          make(chan webrtc.SessionDescription, 1),
+		answerChan:         make(chan webrtc.SessionDescription, 1),
+		senderCandidates:   make(chan webrtc.ICECandidateInit, 10),
+		receiverCandidates: make(chan webrtc.ICECandidateInit, 10),
 	}
 }
 
-func (m *mocksignaler) SendOffer(offer webrtc.SessionDescription) error {
+// --- Methods for the Signaler interface (used by Sender) ---
+
+func (m *mockSignaler) SendOffer(offer webrtc.SessionDescription) error {
 	m.offerChan <- offer
 	return nil
 }
 
-func (m *mocksignaler) SendICECandidate(candidate webrtc.ICECandidateInit) {
-	m.candidateChan <- candidate
+func (m *mockSignaler) SendICECandidate(candidate webrtc.ICECandidateInit) {
+	// This is called by the Sender, so the candidate is for the Receiver.
+	m.senderCandidates <- candidate
 }
 
-func (m *mocksignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
+func (m *mockSignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
 	select {
 	case answer := <-m.answerChan:
 		return &answer, nil
@@ -45,132 +51,151 @@ func (m *mocksignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescri
 	}
 }
 
-func TestConnectionHandShake(t *testing.T) {
-	// 1. Initialization
+// --- Test-only helper methods to simulate Receiver's actions ---
+
+func (m *mockSignaler) SendAnswerFromReceiver(answer webrtc.SessionDescription) {
+	m.answerChan <- answer
+}
+
+func (m *mockSignaler) SendCandidateFromReceiver(candidate webrtc.ICECandidateInit) {
+	m.receiverCandidates <- candidate
+}
+
+func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
+	const testTimeout = 20 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
 	signaler := newMockSignaler()
 	api := NewWebRTCAPI()
 	require.NotNil(t, api)
 	config := Config{}
 
-	senderConn, err := api.NewSenderConnection(config, signaler)
-	require.NoError(t, err)
-	defer senderConn.Close()
+	dataChanMsg := make(chan string, 1)
+	errChan := make(chan error, 3)
 
+	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
 	require.NoError(t, err)
 	defer receiverConn.Close()
 
-	// 2. Setup channels for synchronization and data exchange
-	var wg sync.WaitGroup
-	wg.Add(2) // Wait for both DataChannels to open
-
-	dataChanMsg := make(chan string, 1)
-	// Improvement: Create an error channel to safely report errors from goroutines
-	errChan := make(chan error, 2)
-
-	// 3. Configure Receiver's callbacks
 	receiverConn.OnDataChannel(func(dc *webrtc.DataChannel) {
 		assert.Equal(t, "file-transfer", dc.Label())
-		dc.OnOpen(func() {
-			t.Log("Receiver: DataChannel opened")
-			wg.Done()
-		})
+		dc.OnOpen(func() { t.Log("Receiver: DataChannel opened") })
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			t.Logf("Receiver: Received message: '%s'", string(msg.Data))
 			dataChanMsg <- string(msg.Data)
 		})
 	})
+
+	// The Receiver's OnICECandidate callback will now use the mock's helper method
+	// to simulate sending the candidate back to the sender.
 	receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
-			signaler.SendICECandidate(candidate.ToJSON())
+			t.Log("Receiver: Got ICE candidate, sending via mock helper")
+			signaler.SendCandidateFromReceiver(candidate.ToJSON())
 		}
 	})
 
-	// 4. Improvement: Set OnICECandidate callback for the Sender as well
+	// 2. Setup Sender (gets the signaler)
+	// We pass the mockSignaler, which satisfies the Signaler interface.
+	senderConn, err := api.NewSenderConnection(config, signaler)
+	require.NoError(t, err)
+	defer senderConn.Close()
+
+	// The Sender's OnICECandidate will call the required SendICECandidate method
+	// from the Signaler interface.
 	senderConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
+			t.Log("Sender: Got ICE candidate, sending via Signaler interface")
 			signaler.SendICECandidate(candidate.ToJSON())
 		}
 	})
 
-	// 5. Simulate Receiver's behavior in a goroutine
+	// 3. Run Receiver logic in a goroutine
 	go func() {
-		offer := <-signaler.offerChan
+		var offer webrtc.SessionDescription
+		select {
+		case offer = <-signaler.offerChan:
+			t.Log("Receiver: Got offer")
+		case <-ctx.Done():
+			errChan <- fmt.Errorf("receiver timed out waiting for offer: %w", ctx.Err())
+			return
+		}
+
 		answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 		if err != nil {
 			errChan <- fmt.Errorf("receiver failed to handle offer: %w", err)
 			return
 		}
-		signaler.answerChan <- *answer
+		// Use the test helper to send the answer back
+		signaler.SendAnswerFromReceiver(*answer)
+		t.Log("Receiver: Sent answer via mock helper")
+
+		// Process candidates sent from the Sender
+		for {
+			select {
+			case candidate := <-signaler.senderCandidates:
+				t.Log("Receiver: Adding sender's ICE candidate")
+				if err := receiverConn.AddICECandidate(candidate); err != nil {
+					// Log non-critical errors, as some failures are expected
+					t.Logf("Receiver failed to add ICE candidate: %v", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
-	// 6. Simulate Sender's behavior in a goroutine
+	// 4. Run Sender logic in a goroutine
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-
 		dc, err := senderConn.CreateDataChannel("file-transfer", nil)
 		if err != nil {
 			errChan <- fmt.Errorf("sender failed to create data channel: %w", err)
 			return
 		}
 		dc.OnOpen(func() {
-			t.Log("Sender: DataChannel opened")
+			t.Log("Sender: DataChannel opened, sending message")
 			if err := dc.SendText("Hello, Receiver!"); err != nil {
 				errChan <- fmt.Errorf("sender failed to send text: %w", err)
 			}
-			wg.Done()
 		})
 
+		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx); err != nil {
 			errChan <- fmt.Errorf("sender failed to establish connection: %w", err)
+			return
 		}
-	}()
+		t.Log("Sender: Connection established")
 
-	// 7. !!! KEY FIX: Create a goroutine to consume and distribute ICE Candidates !!!
-	// This loop will run until the DataChannels are open (signaled by closing `done`).
-	done := make(chan struct{})
-	go func() {
+		// Process candidates sent from the Receiver
 		for {
 			select {
-			case candidate := <-signaler.candidateChan:
-				// This is a simplified model where we assume the received candidate is for the other peer.
-				// In this test, we can't easily distinguish the origin of the candidate,
-				// so we attempt to add it to both peers. AddICECandidate will automatically
-				// ignore candidates that don't belong to it. This is a simple and effective testing trick.
-				_ = senderConn.AddICECandidate(candidate)
-				_ = receiverConn.AddICECandidate(candidate)
-			case <-done:
+			case candidate := <-signaler.receiverCandidates:
+				t.Log("Sender: Adding receiver's ICE candidate")
+				if err := senderConn.AddICECandidate(candidate); err != nil {
+					t.Logf("Sender failed to add ICE candidate: %v", err)
+				}
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// 8. Wait for DataChannels to open or for an error to occur
-	waitChan := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(waitChan)
-	}()
-
-	select {
-	case <-waitChan:
-		t.Log("All data channels are ready.")
-		close(done) // DataChannels are open, we can stop the ICE exchange goroutine.
-	case err := <-errChan:
-		t.Fatalf("Test failed with error from goroutine: %v", err)
-	case <-time.After(15 * time.Second):
-		t.Fatal("Timed out waiting for data channels")
-	}
-
-	// 9. Verify message reception and check for any final errors
+	// 5. Wait for the final message or a timeout/error
 	select {
 	case msg := <-dataChanMsg:
 		assert.Equal(t, "Hello, Receiver!", msg)
 		t.Log("SUCCESS: Message received successfully.")
 	case err := <-errChan:
 		t.Fatalf("Test failed with error from goroutine: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("Timed out waiting for message")
+	case <-ctx.Done():
+		// Check for a lingering error before declaring a timeout
+		select {
+		case err := <-errChan:
+			t.Fatalf("Test failed with error from goroutine: %v", err)
+		default:
+			t.Fatal("Test timed out waiting for message")
+		}
 	}
 }

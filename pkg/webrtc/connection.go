@@ -135,7 +135,24 @@ func (c *SenderConn) Establish(ctx context.Context) error {
 	if err := c.signaler.SendOffer(offer); err != nil {
 		err := fmt.Errorf("fail to send offer %w", err)
 		log.Printf("[Establish] %v", err)
+		return err // Return error if sending offer fails
 	}
+
+	// Wait for the answer to be received from the remote peer
+	answer, err := c.signaler.WaitForAnswer(ctx)
+	if err != nil {
+		err := fmt.Errorf("failed to wait for answer: %w", err)
+		log.Printf("[Establish] %v", err)
+		return err
+	}
+
+	// Set the remote description with the received answer
+	if err := c.peerConnection.SetRemoteDescription(*answer); err != nil {
+		err := fmt.Errorf("failed to set remote description for answer: %w", err)
+		log.Printf("[Establish] %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -165,7 +182,7 @@ func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescriptio
 // AddICECandidate is called by both peers to add a candidate received from the other peer.
 func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 	if err := c.peerConnection.AddICECandidate(candidate); err != nil {
-		err := fmt.Errorf("failed to ice candidate")
+		err := fmt.Errorf("failed to add ice candidate, %w", err)
 		log.Printf("[AddICECandidate] %v", err)
 		return err
 	}
