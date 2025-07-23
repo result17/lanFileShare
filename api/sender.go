@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 const serviceIDHeader = "X-Service-ID"
@@ -55,67 +54,10 @@ func (c *Client) SetReceiverURL(receiverURL string) {
 	c.receiverURL = receiverURL
 }
 
-// SendAskRequest sends the list of files to the receiver and asks for confirmation.
-// It no longer needs to know about the service ID; the transport handles it automatically.
-func (c *Client) SendAskRequest(ctx context.Context, files []fileInfo.FileNode) error {
-	if c.receiverURL == "" {
-		log.Printf("receiver can not be empty.")
-	}
-
-	payload := AskPayload{
-		Files: files,
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal ask payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.receiverURL+"/ask", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create ask request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send ask request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("receiver responded with non-OK status: %s", resp.Status)
-	}
-
-	return nil
-}
-
-func (c *Client) SendOfferRequest(ctx context.Context, offer webrtc.SessionDescription) error {
-	if c.receiverURL == "" {
-		log.Printf("receiver can not be empty.")
-	}
-
-	jsonData, err := json.Marshal(offer)
-	if err != nil {
-		return fmt.Errorf("failed to marshal offer payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.receiverURL+"/offer", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create offer request: %w", err)
-	}
-	resp, err := c.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send offer request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("receiver responded with non-OK status: %s", resp.Status)
-	}
-
-	return nil
-}
-
+// TODO: The receiver API currently does not have an endpoint to handle this request.
+// This method is kept as a placeholder for the necessary sender-to-receiver
+// ICE candidate signaling. Implementing the corresponding endpoint on the receiver
+// is required to make WebRTC work in more complex network environments.
 func (c *Client) SendICECandidateRequest(ctx context.Context, candidate webrtc.ICECandidateInit) error {
 	if c.receiverURL == "" {
 		log.Printf("receiver can not be empty.")

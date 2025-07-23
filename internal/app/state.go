@@ -2,7 +2,8 @@ package app
 
 import (
 	"sync"
-
+	"errors"
+	"log"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -39,18 +40,31 @@ func NewStateManager() *StateManager {
 func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// For now, we assume no active request, as ConcurrencyGuard should handle this.
-	// A more robust implementation might check if m.state is nil.
-
-	m.state = &RequestState{
-		DecisionChan:  make(chan Decision, 1), // Buffered channel to avoid blocking
-		AnswerChan:    make(chan webrtc.SessionDescription, 1),
-		CandidateChan: make(chan webrtc.ICECandidateInit, 10), // Buffer for multiple candidates
-		TransferDone:  make(chan struct{}),
+	if m.state != nil || m.state.DecisionChan != nil {
+		err := errors.New("invalid state: request already exists")
+		log.Printf("Failed to create request: %v", err)
+		return nil, err
 	}
+	m.state.DecisionChan = make(chan Decision, 1) // Buffered channel to avoid blocking
+	m.state.AnswerChan = make(chan webrtc.SessionDescription, 1) // Buffered for the answer
+	m.state.CandidateChan = make(chan webrtc.ICECandidateInit, 10) // Buffered for multiple candidates
+	m.state.TransferDone = make(chan struct{}) // Channel to signal
 
 	return m.state.DecisionChan, nil
+}
+
+func (m *StateManager) SetOffer(offer webrtc.SessionDescription) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state != nil {
+		err := errors.New("invalid state: request already exists")
+		log.Printf("Failed to set offer: %v", err)
+		return err
+	}
+	m.state = &RequestState{
+		Offer: offer,
+	}
+	return nil
 }
 
 // GetOffer retrieves the currently stored offer.

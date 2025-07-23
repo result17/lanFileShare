@@ -141,10 +141,7 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		a.apiClient.SetReceiverURL(receiverURL)
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
-		err := a.apiClient.SendAskRequest(ctx, a.selectedFiles)
-		if err != nil {
-			return fmt.Errorf("receiver did not accept transfer: %w", err)
-		}
+	
 
 		config := webrtcPkg.Config{
 			ICEServers: []webrtc.ICEServer{},

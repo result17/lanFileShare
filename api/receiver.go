@@ -40,7 +40,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registerRoutes connects all handlers and middleware.
 func (a *API) registerRoutes() {
 	askHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.AskHandler))
+	candidateHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.CandidateHandler))
+
 	a.mux.Handle("POST /ask", askHandlerWithMiddleware)
+	a.mux.Handle("POST /candidate", candidateHandlerWithMiddleware)
 }
 
 // ReceiverGuard manages the server's state and core logic.
@@ -85,6 +88,7 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 // AskPayload is the structure of the request body for the /ask endpoint.
 type AskPayload struct {
 	Files []fileInfo.FileNode `json:"files"`
+	Offer webrtc.SessionDescription `json:"offer"`
 }
 
 // AskHandler is the core business logic for handling /ask requests.
@@ -96,7 +100,8 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("Ask received", "request", req)
-
+	
+	s.stateManager.SetOffer(req.Offer)
 	decisionChan, err := s.stateManager.CreateRequest()
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -182,4 +187,17 @@ func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flu
 	fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
 	flusher.Flush()
 	return nil
+}
+
+func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request) {
+	var req webrtc.ICECandidateInit
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid candidate payload", http.StatusBadRequest)
+		return
+	}
+	slog.Info("Candidate received", "request", req)
+
+	s.stateManager.SetCandidate(req)
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Candidate received successfully")
 }
