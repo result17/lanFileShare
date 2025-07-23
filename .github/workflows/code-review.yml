@@ -1,0 +1,61 @@
+# .github/workflows/code-review.yml
+
+name: "Gemini Code Review"
+
+# This action will trigger on pull requests that target the 'main' or 'master' branch.
+on: 
+  pull_request:
+    branches:
+      - main
+      - master
+    types: [opened, synchronize]
+
+# Set default permissions for the job, but allow overriding.
+permissions:
+  contents: read
+
+jobs:
+  review:
+    # Grant write permission to the pull-requests scope for this job only.
+    permissions:
+      contents: read          # Required to check out the code.
+      pull-requests: write  # Required to post comments on the PR.
+
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository code.
+      # fetch-depth: 0 is important to fetch all history for a proper diff.
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Step 2: Install the Gemini CLI.
+      # This is a placeholder. You MUST replace this with the actual
+      # command to download and install your specific Gemini CLI tool.
+      - name: Install Gemini CLI
+        run: |
+          echo "⚠️ IMPORTANT: Please replace this placeholder with the actual installation command for your Gemini CLI."
+          # --- EXAMPLE ---
+          # wget https://storage.googleapis.com/your-bucket/gemini-cli-linux-amd64 -O /usr/local/bin/gemini
+          # chmod +x /usr/local/bin/gemini
+          # gemini --version
+          # For this example to run, we'll create a dummy script.
+          echo -e '#!/bin/bash\necho "Gemini CLI (dummy) processed input:"\ncat' > /usr/local/bin/gemini
+          chmod +x /usr/local/bin/gemini
+
+      # Step 3: Run the review script.
+      # We pass necessary GitHub context to the script via environment variables.
+      - name: Run Code Review Script
+        env:
+          # The GITHUB_TOKEN is automatically provided by GitHub Actions.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # You must create a repository secret named GEMINI_API_KEY with your API key.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Pass the PR number to the script.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Pass the base and head commit SHAs for an accurate diff.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./.github/scripts/review.sh
