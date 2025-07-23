@@ -32,8 +32,6 @@ type App struct {
 	uiMessages   chan tea.Msg             // Channel to send messages TO the UI
 	appEvents    chan app_events.AppEvent // Channel to receive events FROM the UI
 	stateManager *app.StateManager
-	webRTCAPI    *webrtcPkg.WebRTCAPI
-	receiverConn *webrtcPkg.ReceiverConn
 }
 
 // NewApp creates a new receiver application instance.
@@ -45,12 +43,6 @@ func NewApp(port int) *App {
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
 
-	webRTCAPI := webrtcPkg.NewWebRTCAPI()
-	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtcPkg.Config{})
-	if err != nil {
-		err := fmt.Errorf("failed to create receiver connection %w", err)
-		log.Printf("[receiver NewApp] %v", err)
-	}
 	return &App{
 		guard:        concurrency.NewConcurrencyGuard(),
 		registrar:    &discovery.MDNSAdapter{},
@@ -59,8 +51,6 @@ func NewApp(port int) *App {
 		uiMessages:   uiMessages,
 		appEvents:    make(chan app_events.AppEvent),
 		stateManager: stateManager,
-		webRTCAPI:    webRTCAPI,
-		receiverConn: receiverConn,
 	}
 }
 
@@ -69,9 +59,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 	// Start the mDNS registration service in the background.
 	a.startRegistration(ctx, a.port)
 	a.startServer(ctx, a.port)
-	a.receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		a.stateManager.SetCandidate(candidate.ToJSON())
-	})
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -81,15 +69,35 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 			switch event.(type) {
 			case receiver.AcceptFileRequestEvent:
 				log.Println("User accepted file transfer. Preparing to receive...")
-				offer := a.stateManager.GetOffer()
+			
+				a.stateManager.SetDecision(app.Accepted)
+				webrtcAPI := webrtcPkg.NewWebRTCAPI()
+				receiverConn, err := webrtcAPI.NewReceiverConnection(webrtcPkg.Config{})
+				if err != nil {
+					err := fmt.Errorf("failed to create receiver connection: %w", err)
+					a.uiMessages <- receiver.ErrorMsg{Err: err}
+					log.Printf("[receiver run] %v", err)
+					continue
+				}
+				receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+					if candidate == nil {
+						log.Println("Receiver: All ICE candidates sent")
+						a.stateManager.CloseCandidateChan()
+						return
+					}
+					candidateJSON := candidate.ToJSON()
+					a.stateManager.SetCandidate(candidateJSON)
+				})
+
+					offer := a.stateManager.GetOffer()
 				if offer.SDP == "" {
 					err := fmt.Errorf("error: No offer found in state manager")
 					log.Printf("[receiver run] %v", err)
 					a.uiMessages <- receiver.ErrorMsg{Err: err}
 					continue
 				}
-				a.stateManager.SetDecision(app.Accepted)
-				answer, err := a.receiverConn.HandleOfferAndCreateAnswer(offer)
+				
+				answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 
 				if err != nil {
 					err := fmt.Errorf("fail to create answer %w", err)
