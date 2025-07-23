@@ -31,22 +31,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Step 2: Install the Gemini CLI.
-      # This is a placeholder. You MUST replace this with the actual
-      # command to download and install your specific Gemini CLI tool.
-      - name: Install Gemini CLI
-        run: |
-          echo "⚠️ IMPORTANT: Please replace this placeholder with the actual installation command for your Gemini CLI."
-          # --- EXAMPLE ---
-          # wget https://storage.googleapis.com/your-bucket/gemini-cli-linux-amd64 -O /usr/local/bin/gemini
-          # chmod +x /usr/local/bin/gemini
-          # gemini --version
-          # For this example to run, we'll create a dummy script.
-          echo -e '#!/bin/bash\necho "Gemini CLI (dummy) processed input:"\ncat' > /usr/local/bin/gemini
-          chmod +x /usr/local/bin/gemini
+      # Step 2: Install Bun using the official action.
+      # This is the recommended and most efficient way to install Bun in a workflow.
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          # You can specify a version or use 'latest'
+          bun-version: latest
 
-      # Step 3: Run the review script.
-      # We pass necessary GitHub context to the script via environment variables.
+      # Step 3: Install the Gemini CLI using Bun.
+      # We use 'bun install -g' to install the package globally.
+      - name: Install Gemini CLI with Bun
+        run: |
+          bun install -g @google/gemini-cli
+          echo "Verifying gemini installation..."
+          gemini --version
+
+      # Step 4: Run the review script.
+      # The 'gemini' command is now available in the PATH.
       - name: Run Code Review Script
         env:
           # The GITHUB_TOKEN is automatically provided by GitHub Actions.
