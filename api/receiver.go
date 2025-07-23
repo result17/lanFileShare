@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/internal/app"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
@@ -166,7 +167,7 @@ func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flu
 
 	for candidate := range candidateChan {
 		slog.Info("Sending candidate to sender", "candidate", candidate)
-		response := map[string]string{"candidate": candidate}
+		response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
 		jsonResponse, err := json.Marshal(response)
 		if err != nil {
 			slog.Error("Failed to marshal candidate, skipping", "error", err)

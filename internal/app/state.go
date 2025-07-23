@@ -1,8 +1,9 @@
 package app
 
 import (
-	"github.com/pion/webrtc/v4"
 	"sync"
+
+	"github.com/pion/webrtc/v4"
 )
 
 // Decision is the type for user's decision.
