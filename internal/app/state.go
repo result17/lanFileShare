@@ -18,7 +18,7 @@ type RequestState struct {
 	Offer         webrtc.SessionDescription
 	DecisionChan  chan Decision
 	AnswerChan    chan webrtc.SessionDescription
-	CandidateChan chan string
+	CandidateChan chan webrtc.ICECandidateInit
 	TransferDone  chan struct{}
 }
 
@@ -45,7 +45,7 @@ func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 	m.state = &RequestState{
 		DecisionChan:  make(chan Decision, 1), // Buffered channel to avoid blocking
 		AnswerChan:    make(chan webrtc.SessionDescription, 1),
-		CandidateChan: make(chan string, 10), // Buffer for multiple candidates
+		CandidateChan: make(chan webrtc.ICECandidateInit, 10), // Buffer for multiple candidates
 		TransferDone:  make(chan struct{}),
 	}
 
@@ -100,7 +100,7 @@ func (m *StateManager) GetAnswerChan() <-chan webrtc.SessionDescription {
 }
 
 // SetCandidate sends a new ICE candidate to the listening handler.
-func (m *StateManager) SetCandidate(candidate string) {
+func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -120,12 +120,12 @@ func (m *StateManager) CloseCandidateChan() {
 }
 
 // GetCandidateChan returns the channel from which ICE candidates can be read.
-func (m *StateManager) GetCandidateChan() <-chan string {
+func (m *StateManager) GetCandidateChan() <-chan webrtc.ICECandidateInit {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.state == nil {
-		ch := make(chan string)
+		ch := make(chan webrtc.ICECandidateInit)
 		close(ch)
 		return ch
 	}

@@ -11,6 +11,7 @@ import (
 
 	dnssdlog "github.com/brutella/dnssd/log"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pion/webrtc/v4"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/internal/app"
@@ -18,7 +19,7 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
-	"github.com/rescp17/lanFileSharer/pkg/webrtc"
+	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
 // App is the main application logic controller for the receiver.
@@ -31,8 +32,8 @@ type App struct {
 	uiMessages   chan tea.Msg             // Channel to send messages TO the UI
 	appEvents    chan app_events.AppEvent // Channel to receive events FROM the UI
 	stateManager *app.StateManager
-	webRTCAPI    *webrtc.WebRTCAPI
-	receiverConn *webrtc.ReceiverConn
+	webRTCAPI    *webrtcPkg.WebRTCAPI
+	receiverConn *webrtcPkg.ReceiverConn
 }
 
 // NewApp creates a new receiver application instance.
@@ -44,8 +45,8 @@ func NewApp(port int) *App {
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
 
-	webRTCAPI := webrtc.NewWebRTCAPI()
-	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtc.Config{})
+	webRTCAPI := webrtcPkg.NewWebRTCAPI()
+	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtcPkg.Config{})
 	if err != nil {
 		err := fmt.Errorf("failed to create receiver connection %w", err)
 		log.Printf("[receiver NewApp] %v", err)
@@ -68,7 +69,9 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 	// Start the mDNS registration service in the background.
 	a.startRegistration(ctx, a.port)
 	a.startServer(ctx, a.port)
-
+	a.receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		a.stateManager.SetCandidate(candidate.ToJSON())
+	})
 	for {
 		select {
 		case <-ctx.Done():
@@ -79,9 +82,9 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 			case receiver.AcceptFileRequestEvent:
 				log.Println("User accepted file transfer. Preparing to receive...")
 				offer := a.stateManager.GetOffer()
-				if offer.SDP == ""  {
+				if offer.SDP == "" {
 					err := fmt.Errorf("error: No offer found in state manager")
-					log.Println("[receiver run] %w", err)
+					log.Printf("[receiver run] %v", err)
 					a.uiMessages <- receiver.ErrorMsg{Err: err}
 					continue
 				}
@@ -93,7 +96,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 					log.Fatalf("[receiver run] %v", err)
 					return
 				}
-				log.Printf("Generated placeholder answer: %s", answer)
+				log.Printf("Generated placeholder answer: %v", answer)
 				a.stateManager.SetAnswer(*answer)
 
 			case receiver.RejectFileRequestEvent:
@@ -101,7 +104,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 				a.stateManager.SetDecision(app.Rejected)
 
 			default:
-				log.Printf("Received unhandled app event: %#v", event)
+				log.Printf("Received unhandled app event: %v", event)
 			}
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 // mockSignaler now correctly simulates the one-way signaler ownership.
@@ -32,7 +33,7 @@ func newMockSignaler() *mockSignaler {
 
 // --- Methods for the Signaler interface (used by Sender) ---
 
-func (m *mockSignaler) SendOffer(offer webrtc.SessionDescription) error {
+func (m *mockSignaler) SendOffer(offer webrtc.SessionDescription, fileNodes []fileInfo.FileNode) error {
 	m.offerChan <- offer
 	return nil
 }
@@ -99,9 +100,10 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 
 	// 2. Setup Sender (gets the signaler)
 	// We pass the mockSignaler, which satisfies the Signaler interface.
-	senderConn, err := api.NewSenderConnection(config, signaler)
+	senderConn, err := api.NewSenderConnection(config)
 	require.NoError(t, err)
 	defer senderConn.Close()
+	senderConn.SetSignaler(signaler)
 
 	// The Sender's OnICECandidate will call the required SendICECandidate method
 	// from the Signaler interface.
@@ -162,7 +164,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		})
 
 		// This will create offer, send it, and wait for the answer
-		if err := senderConn.Establish(ctx); err != nil {
+		if err := senderConn.Establish(ctx, nil); err != nil {
 			errChan <- fmt.Errorf("sender failed to establish connection: %w", err)
 			return
 		}

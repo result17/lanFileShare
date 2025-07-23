@@ -146,11 +146,10 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 			return fmt.Errorf("receiver did not accept transfer: %w", err)
 		}
 
-		signaler := api.NewAPISignaler(ctx, a.apiClient)
 		config := webrtcPkg.Config{
 			ICEServers: []webrtc.ICEServer{},
 		}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(config, signaler)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(config)
 		if err != nil {
 			err := fmt.Errorf("failed to create webrtc connection: %w", err)
 			log.Printf("[StartSendProcess] %v", err)
@@ -159,8 +158,11 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		a.webrtcConn = webrtcConn
 		defer a.webrtcConn.Close()
 
+		signaler := api.NewAPISignaler(ctx, a.apiClient, a.webrtcConn.AddICECandidate)
+		webrtcConn.SetSignaler(signaler)
+
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}
-		if err := a.webrtcConn.Establish(ctx); err != nil {
+		if err := a.webrtcConn.Establish(ctx, a.selectedFiles); err != nil {
 			err := fmt.Errorf("could not establish webrtc connection: ")
 			log.Printf("[StartSendProcess] %v", err)
 			return err

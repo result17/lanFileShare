@@ -8,6 +8,7 @@ import (
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
+	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 type CommonConnection interface {
@@ -79,13 +80,7 @@ func (a *WebRTCAPI) createPeerconnection(config Config) (*webrtc.PeerConnection,
 	})
 }
 
-func (a *WebRTCAPI) NewSenderConnection(config Config, signaler Signaler) (*SenderConn, error) {
-	if signaler == nil {
-		err := fmt.Errorf("Signaler is not configured")
-		log.Printf("[NewSenderConnection] %v", err)
-		return nil, err
-	}
-
+func (a *WebRTCAPI) NewSenderConnection(config Config) (*SenderConn, error) {
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
 		log.Printf("[NewSenderConnection] %v", err)
@@ -96,8 +91,12 @@ func (a *WebRTCAPI) NewSenderConnection(config Config, signaler Signaler) (*Send
 		Connection: &Connection{
 			peerConnection: pc,
 		},
-		signaler: signaler,
+		// signaler is left nil initially
 	}, nil
+}
+
+func (c *SenderConn) SetSignaler(signaler Signaler) {
+	c.signaler = signaler
 }
 
 func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
@@ -114,7 +113,12 @@ func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) 
 	}, nil
 }
 
-func (c *SenderConn) Establish(ctx context.Context) error {
+func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error {
+	if c.signaler == nil {
+		err := fmt.Errorf("signaler is not set for SenderConn")
+		log.Printf("[Establish] %v", err)
+		return err
+	}
 	c.peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
 			c.signaler.SendICECandidate(candidate.ToJSON())
@@ -132,7 +136,7 @@ func (c *SenderConn) Establish(ctx context.Context) error {
 		return err
 	}
 
-	if err := c.signaler.SendOffer(offer); err != nil {
+	if err := c.signaler.SendOffer(offer, fileNodes); err != nil {
 		err := fmt.Errorf("fail to send offer %w", err)
 		log.Printf("[Establish] %v", err)
 		return err // Return error if sending offer fails
