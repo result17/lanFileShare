@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
+	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 // mockSignaler now correctly simulates the one-way signaler ownership.
@@ -68,7 +68,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	defer cancel()
 
 	signaler := newMockSignaler()
-	api := NewWebRTCAPI()
+	api := NewWebrtcAPI()
 	require.NotNil(t, api)
 	config := Config{}
 

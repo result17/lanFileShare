@@ -28,14 +28,14 @@ type App struct {
 	uiMessages    chan tea.Msg             // Channel to send messages to the UI
 	appEvents     chan app_events.AppEvent // Channel to receive events from the UI
 	selectedFiles []fileInfo.FileNode
-	webrtcAPI     *webrtcPkg.WebRTCAPI
+	WebrtcAPI     *webrtcPkg.WebrtcAPI
 	webrtcConn    *webrtcPkg.SenderConn
 }
 
 // NewApp creates a new sender application instance.
 func NewApp() *App {
 	serviceID := uuid.New().String()
-	webrtcAPI := webrtcPkg.NewWebRTCAPI()
+	WebrtcAPI := webrtcPkg.NewWebrtcAPI()
 	return &App{
 		serviceID:  serviceID,
 		guard:      concurrency.NewConcurrencyGuard(),
@@ -43,7 +43,7 @@ func NewApp() *App {
 		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
 		uiMessages: make(chan tea.Msg, 5),
 		appEvents:  make(chan app_events.AppEvent),
-		webrtcAPI:  webrtcAPI,
+		WebrtcAPI:  WebrtcAPI,
 	}
 }
 
@@ -141,12 +141,11 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		a.apiClient.SetReceiverURL(receiverURL)
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
-	
 
 		config := webrtcPkg.Config{
 			ICEServers: []webrtc.ICEServer{},
 		}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(config)
+		webrtcConn, err := a.WebrtcAPI.NewSenderConnection(config)
 		if err != nil {
 			err := fmt.Errorf("failed to create webrtc connection: %w", err)
 			log.Printf("[StartSendProcess] %v", err)

@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	dnssdlog "github.com/brutella/dnssd/log"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/pion/webrtc/v4"
 	"github.com/google/uuid"
+	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/internal/app"
 	"github.com/rescp17/lanFileSharer/internal/app_events"
@@ -23,40 +25,49 @@ import (
 )
 
 // App is the main application logic controller for the receiver.
-// It manages state, coordinates services, and communicates with the UI.
 type App struct {
-	guard        *concurrency.ConcurrencyGuard
-	registrar    discovery.Adapter
-	api          *api.API
-	port         int
-	uiMessages   chan tea.Msg             // Channel to send messages TO the UI
-	appEvents    chan app_events.AppEvent // Channel to receive events FROM the UI
-	stateManager *app.StateManager
+	guard                *concurrency.ConcurrencyGuard
+	registrar            discovery.Adapter
+	api                  *api.API
+	port                 int
+	uiMessages           chan tea.Msg
+	appEvents            chan app_events.AppEvent
+	stateManager         *app.StateManager
+	inboundCandidateChan chan webrtc.ICECandidateInit
+	activeConn           *webrtcPkg.ReceiverConn
+	connMu               sync.Mutex
 }
 
 // NewApp creates a new receiver application instance.
 func NewApp(port int) *App {
-	uiMessages := make(chan tea.Msg, 5)
-	// The stateManager needs to be shared between the API and the App logic.
+	uiMessages := make(chan tea.Msg, 10)
 	stateManager := app.NewStateManager()
+
+	// We will pass a reference to App itself later to solve the dependency cycle.
 	apiHandler := api.NewAPI(uiMessages, stateManager)
+
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
 
 	return &App{
-		guard:        concurrency.NewConcurrencyGuard(),
-		registrar:    &discovery.MDNSAdapter{},
-		api:          apiHandler,
-		port:         port,
-		uiMessages:   uiMessages,
-		appEvents:    make(chan app_events.AppEvent),
-		stateManager: stateManager,
+		guard:                concurrency.NewConcurrencyGuard(),
+		registrar:            &discovery.MDNSAdapter{},
+		api:                  apiHandler,
+		port:                 port,
+		uiMessages:           uiMessages,
+		appEvents:            make(chan app_events.AppEvent),
+		stateManager:         stateManager,
+		inboundCandidateChan: make(chan webrtc.ICECandidateInit, 10),
 	}
+}
+
+// InboundCandidateChan provides a channel for the API layer to send candidates to the app logic.
+func (a *App) InboundCandidateChan() chan<- webrtc.ICECandidateInit {
+	return a.inboundCandidateChan
 }
 
 // Run starts the application's main event loop and services.
 func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
-	// Start the mDNS registration service in the background.
 	a.startRegistration(ctx, a.port)
 	a.startServer(ctx, a.port)
 
@@ -64,53 +75,21 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		select {
 		case <-ctx.Done():
 			return
+		case candidate := <-a.inboundCandidateChan:
+			a.connMu.Lock()
+			if a.activeConn != nil {
+				if err := a.activeConn.AddICECandidate(candidate); err != nil {
+					slog.Warn("Failed to add inbound ICE candidate", "error", err)
+				}
+			}
+			a.connMu.Unlock()
 		case event := <-a.appEvents:
-			// Handle events from the TUI
 			switch event.(type) {
 			case receiver.AcceptFileRequestEvent:
-				log.Println("User accepted file transfer. Preparing to receive...")
-			
-				a.stateManager.SetDecision(app.Accepted)
-				webrtcAPI := webrtcPkg.NewWebRTCAPI()
-				receiverConn, err := webrtcAPI.NewReceiverConnection(webrtcPkg.Config{})
-				if err != nil {
-					err := fmt.Errorf("failed to create receiver connection: %w", err)
-					a.uiMessages <- receiver.ErrorMsg{Err: err}
-					log.Printf("[receiver run] %v", err)
-					continue
-				}
-				receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-					if candidate == nil {
-						log.Println("Receiver: All ICE candidates sent")
-						a.stateManager.CloseCandidateChan()
-						return
-					}
-					candidateJSON := candidate.ToJSON()
-					a.stateManager.SetCandidate(candidateJSON)
-				})
-
-					offer := a.stateManager.GetOffer()
-				if offer.SDP == "" {
-					err := fmt.Errorf("error: No offer found in state manager")
-					log.Printf("[receiver run] %v", err)
-					a.uiMessages <- receiver.ErrorMsg{Err: err}
-					continue
-				}
-				
-				answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
-
-				if err != nil {
-					err := fmt.Errorf("fail to create answer %w", err)
-					log.Fatalf("[receiver run] %v", err)
-					return
-				}
-				log.Printf("Generated placeholder answer: %v", answer)
-				a.stateManager.SetAnswer(*answer)
-
+				go a.handleAcceptFileRequest()
 			case receiver.RejectFileRequestEvent:
 				log.Println("User rejected file transfer.")
 				a.stateManager.SetDecision(app.Rejected)
-
 			default:
 				log.Printf("Received unhandled app event: %v", event)
 			}
@@ -118,16 +97,70 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 	}
 }
 
+// handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
+func (a *App) handleAcceptFileRequest() {
+	slog.Info("[handleAcceptFileRequest] User accepted file transfer. Preparing to receive...")
+	a.stateManager.SetDecision(app.Accepted)
+
+	WebrtcAPI := webrtcPkg.NewWebrtcAPI()
+	receiverConn, err := WebrtcAPI.NewReceiverConnection(webrtcPkg.Config{})
+	if err != nil {
+		a.uiMessages <- receiver.ErrorMsg{Err: fmt.Errorf("failed to create receiver connection: %w", err)}
+		return
+	}
+
+	// Store the connection so it can be accessed by the candidate handler
+	a.connMu.Lock()
+	a.activeConn = receiverConn
+	a.connMu.Unlock()
+
+	// Ensure the connection is closed and cleaned up when this session is over.
+	defer func() {
+		a.connMu.Lock()
+		if a.activeConn != nil {
+			a.activeConn.Close()
+			a.activeConn = nil
+		}
+		a.connMu.Unlock()
+	}()
+
+	receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			slog.Info("All local ICE candidates gathered.")
+			a.stateManager.CloseCandidateChan()
+			return
+		}
+		slog.Info("Got a local ICE candidate", "candidate", candidate.ToJSON().Candidate)
+		a.stateManager.SetCandidate(candidate.ToJSON())
+	})
+
+	offer := a.stateManager.GetOffer()
+	if offer.SDP == "" {
+		err := fmt.Errorf("failed to get offer from state manager")
+		log.Printf("[handleAcceptFileRequest] %v", err)
+		a.uiMessages <- receiver.ErrorMsg{Err: err}
+		return
+	}
+
+	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
+	if err != nil {
+		err = fmt.Errorf("fail to create answer: %w", err)
+		a.uiMessages <- receiver.ErrorMsg{Err: err}
+		return
+	}
+
+	a.stateManager.SetAnswer(*answer)
+	slog.Info("Answer created and sent to state manager.")
+}
+
 func (a *App) UIMessages() <-chan tea.Msg {
 	return a.uiMessages
 }
 
-// AppEvents returns a write-only channel for the TUI to send events to the app.
 func (a *App) AppEvents() chan<- app_events.AppEvent {
 	return a.appEvents
 }
 
-// startRegistration announces the receiver's presence on the network.
 func (a *App) startRegistration(ctx context.Context, port int) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -141,7 +174,7 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 		Name:   fmt.Sprintf("%s-%s", hostname, serviceUUID[:8]),
 		Type:   discovery.DefaultServerType,
 		Domain: discovery.DefaultDomain,
-		Addr:   nil, // This will be set by the discovery package.
+		Addr:   nil,
 		Port:   port,
 	}
 
@@ -155,7 +188,6 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 	}()
 }
 
-// startServer starts the HTTP server in a goroutine.
 func (a *App) startServer(ctx context.Context, port int) {
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -169,7 +201,6 @@ func (a *App) startServer(ctx context.Context, port int) {
 		}
 	}()
 
-	// Listen for context cancellation to gracefully shut down the server.
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

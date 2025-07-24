@@ -47,7 +47,7 @@ type ReceiverConn struct {
 	*Connection
 }
 
-type WebRTCAPI struct {
+type WebrtcAPI struct {
 	api *webrtc.API
 }
 
@@ -56,7 +56,7 @@ type Config struct {
 	ICEServers []webrtc.ICEServer
 }
 
-func NewWebRTCAPI() *WebRTCAPI {
+func NewWebrtcAPI() *WebrtcAPI {
 
 	settings := webrtc.SettingEngine{}
 	settings.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
@@ -64,12 +64,12 @@ func NewWebRTCAPI() *WebRTCAPI {
 
 	// Using NewAPI is crucial for managing multiple PeerConnections in one application.
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
-	return &WebRTCAPI{
+	return &WebrtcAPI{
 		api: api,
 	}
 }
 
-func (a *WebRTCAPI) createPeerconnection(config Config) (*webrtc.PeerConnection, error) {
+func (a *WebrtcAPI) createPeerconnection(config Config) (*webrtc.PeerConnection, error) {
 	if len(config.ICEServers) == 0 {
 		config.ICEServers = append(config.ICEServers, webrtc.ICEServer{
 			URLs: []string{"stun:stun.l.google.com:19302"},
@@ -80,7 +80,7 @@ func (a *WebRTCAPI) createPeerconnection(config Config) (*webrtc.PeerConnection,
 	})
 }
 
-func (a *WebRTCAPI) NewSenderConnection(config Config) (*SenderConn, error) {
+func (a *WebrtcAPI) NewSenderConnection(config Config) (*SenderConn, error) {
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
 		log.Printf("[NewSenderConnection] %v", err)
@@ -99,7 +99,7 @@ func (c *SenderConn) SetSignaler(signaler Signaler) {
 	c.signaler = signaler
 }
 
-func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
+func (a *WebrtcAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
 		log.Printf("[NewSenderConnection] %v", err)
