@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -42,8 +41,6 @@ type App struct {
 func NewApp(port int) *App {
 	uiMessages := make(chan tea.Msg, 10)
 	stateManager := app.NewStateManager()
-
-	// We will pass a reference to App itself later to solve the dependency cycle.
 	apiHandler := api.NewAPI(uiMessages, stateManager)
 
 	dnssdlog.Info.SetOutput(io.Discard)
@@ -86,38 +83,53 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		case event := <-a.appEvents:
 			switch event.(type) {
 			case receiver.AcceptFileRequestEvent:
-				go a.handleAcceptFileRequest()
+				go a.handleAcceptFileRequest(ctx)
 			case receiver.RejectFileRequestEvent:
 				slog.Info("User rejected file transfer.")
 				a.stateManager.SetDecision(app.Rejected)
 			default:
-				log.Printf("Received unhandled app event: %v", event)
+				slog.Warn("Received unhandled app event", "event", event)
 			}
 		}
 	}
 }
 
+// sendAndLogError is a helper function to both log an error and send it to the UI.
+func (a *App) sendAndLogError(baseMessage string, err error) {
+	slog.Error(baseMessage, "error", err)
+	a.uiMessages <- receiver.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+}
+
 // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
-func (a *App) handleAcceptFileRequest() {
-	slog.Info("[handleAcceptFileRequest] User accepted file transfer. Preparing to receive...")
+func (a *App) handleAcceptFileRequest(ctx context.Context) {
+	slog.Info("User accepted file transfer. Preparing to receive...")
+	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	a.stateManager.SetDecision(app.Accepted)
 
-	WebrtcAPI := webrtcPkg.NewWebrtcAPI()
-	receiverConn, err := WebrtcAPI.NewReceiverConnection(webrtcPkg.Config{})
+	webRTCAPI := webrtcPkg.NewWebrtcAPI()
+	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtcPkg.Config{})
 	if err != nil {
-		a.uiMessages <- receiver.ErrorMsg{Err: fmt.Errorf("failed to create receiver connection: %w", err)}
+		a.sendAndLogError("Failed to create receiver connection", err)
 		return
 	}
 
-	// Store the connection so it can be accessed by the candidate handler
 	a.connMu.Lock()
 	a.activeConn = receiverConn
 	a.connMu.Unlock()
+	defer func() {
+		a.connMu.Lock()
+		if a.activeConn != nil {
+			a.activeConn.Close()
+			a.activeConn = nil
+		}
+		a.connMu.Unlock()
+	}()
 
-	// Ensure the connection is closed and cleaned up when this session is over.
 	receiverConn.Peer().OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		slog.Info("Peer Connection state has changed", "state", state)
-		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateDisconnected {
+		slog.Info("Peer Connection State has changed", "state", state.String())
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateDisconnected {
 			slog.Info("Closing active connection due to state change.")
 			a.connMu.Lock()
 			if a.activeConn != nil {
@@ -138,23 +150,26 @@ func (a *App) handleAcceptFileRequest() {
 		a.stateManager.SetCandidate(candidate.ToJSON())
 	})
 
-	offer := a.stateManager.GetOffer()
-	if offer.SDP == "" {
-		err := fmt.Errorf("failed to get offer from state manager")
-		log.Printf("[handleAcceptFileRequest] %v", err)
-		a.uiMessages <- receiver.ErrorMsg{Err: err}
+	offer, err := a.stateManager.GetOffer()
+	if err != nil {
+		a.sendAndLogError("Could not get offer from state", err)
 		return
 	}
 
 	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 	if err != nil {
-		err = fmt.Errorf("fail to create answer: %w", err)
-		a.uiMessages <- receiver.ErrorMsg{Err: err}
+		a.sendAndLogError("Failed to create answer", err)
 		return
 	}
 
-	a.stateManager.SetAnswer(*answer)
-	slog.Info("Answer created and sent to state manager.")
+	select {
+	case <-hctx.Done():
+		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", hctx.Err())
+		return
+	default:
+		a.stateManager.SetAnswer(*answer)
+		slog.Info("Answer created and sent to state manager.")
+	}
 }
 
 func (a *App) UIMessages() <-chan tea.Msg {
@@ -168,8 +183,7 @@ func (a *App) AppEvents() chan<- app_events.AppEvent {
 func (a *App) startRegistration(ctx context.Context, port int) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Printf("Could not get hostname %v", err)
-		a.uiMessages <- receiver.ErrorMsg{Err: err}
+		a.sendAndLogError("Could not get hostname", err)
 		return
 	}
 	serviceUUID := uuid.New().String()
@@ -185,9 +199,7 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 	go func() {
 		err := a.registrar.Announce(ctx, serviceInfo)
 		if err != nil {
-			err := fmt.Errorf("failed to start announce: %w", err)
-			log.Printf("[Discover announce]: %v", err)
-			a.uiMessages <- receiver.ErrorMsg{Err: err}
+			a.sendAndLogError("Failed to start mDNS announcement", err)
 		}
 	}()
 }
@@ -200,8 +212,7 @@ func (a *App) startServer(ctx context.Context, port int) {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server ListenAndServe: %v", err)
-			a.uiMessages <- receiver.ErrorMsg{Err: fmt.Errorf("failed to create http server %v", err)}
+			a.sendAndLogError("HTTP server failed", err)
 		}
 	}()
 
@@ -210,7 +221,7 @@ func (a *App) startServer(ctx context.Context, port int) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Printf("HTTP server shutdown error: %v", err)
+			slog.Error("HTTP server shutdown error", "error", err)
 		}
 	}()
 }

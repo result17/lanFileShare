@@ -39,10 +39,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registerRoutes connects all handlers and middleware.
 func (a *API) registerRoutes() {
 	askHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.AskHandler))
-	candidateHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.CandidateHandler))
-
 	a.mux.Handle("POST /ask", askHandlerWithMiddleware)
-	a.mux.Handle("POST /candidate", candidateHandlerWithMiddleware)
+	a.mux.Handle("POST /candidate", http.HandlerFunc(a.server.CandidateHandler))
 }
 
 // ReceiverGuard manages the server's state and core logic.
@@ -65,9 +63,7 @@ func NewReceiverGuard(uiMessages chan<- tea.Msg, stateManager *app.StateManager)
 func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		task := func() error {
-			defer s.stateManager.CloseRequest() // Ensure state is cleaned up
 			next.ServeHTTP(w, r)
-			// Block until the transfer is fully complete
 			<-s.stateManager.WaitForTransferDone()
 			return nil
 		}
@@ -91,16 +87,19 @@ type AskPayload struct {
 }
 
 // AskHandler is the core business logic for handling /ask requests.
-// It now orchestrates calls to more specific helper methods.
 func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
-	slog.Info("Ask received", "request", req)
+	slog.Info("Ask received", "offer_type", req.Offer.Type)
 
-	s.stateManager.SetOffer(req.Offer)
+	if err := s.stateManager.SetOffer(req.Offer); err != nil {
+		http.Error(w, "Server is busy or failed to set offer", http.StatusServiceUnavailable)
+		return
+	}
+
 	decisionChan, err := s.stateManager.CreateRequest()
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -122,19 +121,21 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	if decision == app.Rejected {
 		slog.Info("Request rejected by user")
 		s.sendRejection(w, flusher)
+		s.stateManager.CloseRequest()
 		return
 	}
 
 	slog.Info("Request accepted by user")
 	if err := s.sendAnswer(w, flusher); err != nil {
 		slog.Error("Failed to send answer", "error", err)
-		// Don't write an http.Error here as the response has started
+		s.stateManager.CloseRequest()
 		return
 	}
 
 	if err := s.streamCandidates(w, flusher); err != nil {
 		slog.Error("Failed to stream candidates", "error", err)
 	}
+	s.stateManager.CloseRequest()
 }
 
 // sendRejection sends a rejection message to the sender.
@@ -153,8 +154,11 @@ func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) 
 		return fmt.Errorf("answer channel was closed unexpectedly")
 	}
 
-	slog.Info("Sending answer to sender", "answer", answer)
-	jsonResponse, err := json.Marshal(answer)
+	slog.Info("Sending answer to sender", "answer_type", answer.Type)
+	
+	// **Corrected logic**: Marshal the received struct into a JSON object
+	response := map[string]webrtc.SessionDescription{"answer": answer}
+	jsonResponse, err := json.Marshal(response)
 	if err != nil {
 		return fmt.Errorf("failed to marshal answer: %w", err)
 	}
@@ -170,19 +174,19 @@ func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flu
 	candidateChan := s.stateManager.GetCandidateChan()
 
 	for candidate := range candidateChan {
-		slog.Info("Sending candidate to sender", "candidate", candidate)
+		slog.Info("Sending candidate to sender", "candidate", candidate.Candidate)
+		
 		response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
 		jsonResponse, err := json.Marshal(response)
 		if err != nil {
 			slog.Error("Failed to marshal candidate, skipping", "error", err)
-			continue // Don't let one bad candidate stop the stream
+			continue
 		}
 		fmt.Fprintf(w, "event: candidate\ndata: %s\n\n", jsonResponse)
 		flusher.Flush()
 	}
 
 	slog.Info("Finished streaming candidates.")
-	// Send a final event to signal the end of the stream
 	fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
 	flusher.Flush()
 	return nil
@@ -196,7 +200,7 @@ func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request)
 	}
 	slog.Info("Candidate received", "request", req)
 
-	s.stateManager.SetCandidate(req)
+	// This will be changed in a later step.
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Candidate received successfully")
 }
