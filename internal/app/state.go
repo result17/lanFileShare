@@ -1,9 +1,9 @@
 package app
 
 import (
-	"sync"
 	"errors"
-	"log"
+	"sync"
+
 	"github.com/pion/webrtc/v4"
 )
 
@@ -35,47 +35,46 @@ func NewStateManager() *StateManager {
 	return &StateManager{}
 }
 
-// CreateRequest initializes a new request state, storing the offer and creating a channel to await a decision.
+// SetOffer is the first step in creating a request. It stores the offer
+// and initializes a partial state. It fails if a request is already active.
+func (m *StateManager) SetOffer(offer webrtc.SessionDescription) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state != nil {
+		return errors.New("a request is already in progress")
+	}
+	m.state = &RequestState{Offer: offer}
+	return nil
+}
+
+// CreateRequest finishes initializing the request state created by SetOffer.
 // It returns the decision channel for the caller to wait on.
 func (m *StateManager) CreateRequest() (<-chan Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.state != nil || m.state.DecisionChan != nil {
-		err := errors.New("invalid state: request already exists")
-		log.Printf("Failed to create request: %v", err)
-		return nil, err
+
+	if m.state == nil || m.state.DecisionChan != nil {
+		return nil, errors.New("invalid state: SetOffer must be called first and exactly once")
 	}
-	m.state.DecisionChan = make(chan Decision, 1) // Buffered channel to avoid blocking
-	m.state.AnswerChan = make(chan webrtc.SessionDescription, 1) // Buffered for the answer
-	m.state.CandidateChan = make(chan webrtc.ICECandidateInit, 10) // Buffered for multiple candidates
-	m.state.TransferDone = make(chan struct{}) // Channel to signal
+
+	m.state.DecisionChan = make(chan Decision, 1)
+	m.state.AnswerChan = make(chan webrtc.SessionDescription, 1) // Correct type
+	m.state.CandidateChan = make(chan webrtc.ICECandidateInit, 10)
+	m.state.TransferDone = make(chan struct{})
 
 	return m.state.DecisionChan, nil
 }
 
-func (m *StateManager) SetOffer(offer webrtc.SessionDescription) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.state != nil {
-		err := errors.New("invalid state: request already exists")
-		log.Printf("Failed to set offer: %v", err)
-		return err
-	}
-	m.state = &RequestState{
-		Offer: offer,
-	}
-	return nil
-}
-
 // GetOffer retrieves the currently stored offer.
-func (m *StateManager) GetOffer() webrtc.SessionDescription {
+func (m *StateManager) GetOffer() (webrtc.SessionDescription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.state == nil {
-		return webrtc.SessionDescription{}
+		return webrtc.SessionDescription{}, errors.New("no active request state")
 	}
-	return m.state.Offer
+	return m.state.Offer, nil
 }
 
 // SetDecision records the user's decision and sends it to the waiting handler.
@@ -84,6 +83,13 @@ func (m *StateManager) SetDecision(decision Decision) {
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.DecisionChan != nil {
+		select {
+		case _, ok := <-m.state.DecisionChan:
+			if !ok {
+				return
+			}
+		default:
+		}
 		m.state.DecisionChan <- decision
 		close(m.state.DecisionChan)
 	}
@@ -96,7 +102,7 @@ func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) {
 
 	if m.state != nil && m.state.AnswerChan != nil {
 		m.state.AnswerChan <- answer
-		close(m.state.AnswerChan)
+		close(m.state.AnswerChan) // Answer is sent only once
 	}
 }
 
@@ -106,7 +112,6 @@ func (m *StateManager) GetAnswerChan() <-chan webrtc.SessionDescription {
 	defer m.mu.Unlock()
 
 	if m.state == nil {
-		// Return a closed channel if there's no active request
 		ch := make(chan webrtc.SessionDescription)
 		close(ch)
 		return ch
@@ -120,6 +125,11 @@ func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) {
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.CandidateChan != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore "send on closed channel" panic
+			}
+		}()
 		m.state.CandidateChan <- candidate
 	}
 }
@@ -130,7 +140,14 @@ func (m *StateManager) CloseCandidateChan() {
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.CandidateChan != nil {
-		close(m.state.CandidateChan)
+		select {
+		case _, ok := <-m.state.CandidateChan:
+			if !ok {
+				return
+			}
+		default:
+			close(m.state.CandidateChan)
+		}
 	}
 }
 
@@ -153,8 +170,13 @@ func (m *StateManager) CloseRequest() {
 	defer m.mu.Unlock()
 
 	if m.state != nil {
-		// Signal that the transfer process is complete.
-		close(m.state.TransferDone)
+		select {
+		case _, ok := <-m.state.TransferDone:
+			if !ok {
+			}
+		default:
+			close(m.state.TransferDone)
+		}
 	}
 	m.state = nil
 }

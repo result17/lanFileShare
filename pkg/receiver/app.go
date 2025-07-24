@@ -89,9 +89,8 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 					a.stateManager.SetCandidate(candidateJSON)
 				})
 
-					offer := a.stateManager.GetOffer()
-				if offer.SDP == "" {
-					err := fmt.Errorf("error: No offer found in state manager")
+				offer, err := a.stateManager.GetOffer()
+				if err != nil {
 					log.Printf("[receiver run] %v", err)
 					a.uiMessages <- receiver.ErrorMsg{Err: err}
 					continue
