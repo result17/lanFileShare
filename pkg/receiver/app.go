@@ -78,7 +78,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		case candidate := <-a.inboundCandidateChan:
 			a.connMu.Lock()
 			if a.activeConn != nil {
-				if err := a.activeConn.AddICECandidate(candidate); err != nil {
+				if err := a.activeConn.Peer().AddICECandidate(candidate); err != nil {
 					slog.Warn("Failed to add inbound ICE candidate", "error", err)
 				}
 			}
@@ -88,7 +88,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 			case receiver.AcceptFileRequestEvent:
 				go a.handleAcceptFileRequest()
 			case receiver.RejectFileRequestEvent:
-				log.Println("User rejected file transfer.")
+				slog.Info("User rejected file transfer.")
 				a.stateManager.SetDecision(app.Rejected)
 			default:
 				log.Printf("Received unhandled app event: %v", event)
@@ -115,16 +115,20 @@ func (a *App) handleAcceptFileRequest() {
 	a.connMu.Unlock()
 
 	// Ensure the connection is closed and cleaned up when this session is over.
-	defer func() {
-		a.connMu.Lock()
-		if a.activeConn != nil {
-			a.activeConn.Close()
-			a.activeConn = nil
+	receiverConn.Peer().OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		slog.Info("Peer Connection state has changed", "state", state)
+		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateDisconnected {
+			slog.Info("Closing active connection due to state change.")
+			a.connMu.Lock()
+			if a.activeConn != nil {
+				a.activeConn.Close()
+				a.activeConn = nil
+			}
+			a.connMu.Unlock()
 		}
-		a.connMu.Unlock()
-	}()
+	})
 
-	receiverConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+	receiverConn.Peer().OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			slog.Info("All local ICE candidates gathered.")
 			a.stateManager.CloseCandidateChan()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -12,14 +13,14 @@ import (
 )
 
 type SignalingHandler struct {
-	mu sync.Mutex
+	mu         sync.Mutex
 	webrtcConn *webrtcPkg.ReceiverConn
 	answerChan chan *webrtc.SessionDescription
 }
 
 func NewSignalingHandler() *SignalingHandler {
 	return &SignalingHandler{
-		answerChan:  make(chan *webrtc.SessionDescription, 1),
+		answerChan: make(chan *webrtc.SessionDescription, 1),
 	}
 }
 
@@ -37,7 +38,7 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 	h.mu.Unlock()
 
 	var offer webrtc.SessionDescription
-	if err:= json.NewDecoder(r.Body).Decode(&offer); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
 		log.Printf("[offerHandler]: failed to decode offer")
 		return
 	}
@@ -50,7 +51,7 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 			close(h.answerChan)
 			return
 		}
-		h.answerChan <-answer
+		h.answerChan <- answer
 	}()
 
 	w.WriteHeader(http.StatusOK)
@@ -60,14 +61,14 @@ func (h *SignalingHandler) AnswerStreamHandler(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
 
-	log.Println("SSE Connected. Waiting for answer.")
+	slog.Info("SSE Connected. Waiting for answer.")
 
 	select {
 	case answer := <-h.answerChan:
@@ -103,7 +104,7 @@ func (h *SignalingHandler) ICECandidateHanlder(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	if err := conn.AddICECandidate(candidate); err != nil {
+	if err := conn.Peer().AddICECandidate(candidate); err != nil {
 		log.Printf("failed to add ICE candidate %v", err)
 	}
 	w.WriteHeader(http.StatusOK)

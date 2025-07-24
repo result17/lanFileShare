@@ -3,16 +3,16 @@ package ui
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
-	"github.com/rescp17/lanFileSharer/internal/style"
-	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
-
 )
 
 // senderState defines the different states of the sender UI.
@@ -120,7 +120,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.listenForAppMessages()
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
-		log.Println("Status Update:", msg.Message) // For now, just log
+		slog.Info("Status Update:", msg.Message) // For now, just log
 		return m, m.listenForAppMessages()
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete

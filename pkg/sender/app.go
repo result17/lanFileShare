@@ -154,7 +154,7 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		a.webrtcConn = webrtcConn
 		defer a.webrtcConn.Close()
 
-		signaler := api.NewAPISignaler(ctx, a.apiClient, a.webrtcConn.AddICECandidate)
+		signaler := api.NewAPISignaler(ctx, a.apiClient, a.webrtcConn.Peer().AddICECandidate)
 		webrtcConn.SetSignaler(signaler)
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}

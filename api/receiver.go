@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 
@@ -75,7 +74,7 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 
 		err := s.guard.Execute(task)
 		if errors.Is(err, concurrency.ErrBusy) {
-			log.Println("Request rejected, server is busy!")
+			slog.Info("Request rejected, server is busy!")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -87,7 +86,7 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 
 // AskPayload is the structure of the request body for the /ask endpoint.
 type AskPayload struct {
-	Files []fileInfo.FileNode `json:"files"`
+	Files []fileInfo.FileNode       `json:"files"`
 	Offer webrtc.SessionDescription `json:"offer"`
 }
 
@@ -100,7 +99,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("Ask received", "request", req)
-	
+
 	s.stateManager.SetOffer(req.Offer)
 	decisionChan, err := s.stateManager.CreateRequest()
 	if err != nil {
