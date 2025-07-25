@@ -21,5 +21,6 @@ type RejectFileRequestEvent struct {
 
 // FileNodeUpdateMsg is a message sent to the UI to update it with file info.
 type FileNodeUpdateMsg struct {
+	app_events.UIMsg
 	Nodes []fileInfo.FileNode
 }

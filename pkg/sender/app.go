@@ -27,6 +27,7 @@ type App struct {
 	appEvents     chan app_events.AppEvent
 	selectedFiles []fileInfo.FileNode
 	webrtcAPI     *webrtcPkg.WebrtcAPI
+	transferTimeout time.Duration
 }
 
 // NewApp creates a new sender application instance.
@@ -41,6 +42,7 @@ func NewApp() *App {
 		uiMessages: make(chan tea.Msg, 10),
 		appEvents:  make(chan app_events.AppEvent),
 		webrtcAPI:  webrtcAPI,
+		transferTimeout: 2 * time.Minute,
 	}
 }
 
@@ -84,9 +86,6 @@ func (a *App) startDiscovery(ctx context.Context) {
 			return
 		}
 
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-
 		var currentServices []discovery.ServiceInfo
 
 		for {
@@ -99,10 +98,7 @@ func (a *App) startDiscovery(ctx context.Context) {
 				}
 				currentServices = services
 				a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
-			case <-ticker.C:
-				if currentServices != nil {
-					a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
-				}
+
 			}
 		}
 	}()
@@ -124,7 +120,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 	task := func() error {
 		a.uiMessages <- sender.TransferStartedMsg{}
 
-		tctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		tctx, cancel := context.WithTimeout(ctx, a.transferTimeout)
 		defer cancel()
 
 		receiverURL := fmt.Sprintf("http://%s:%d", receiver.Addr.String(), receiver.Port)

@@ -36,6 +36,7 @@ type senderModel struct {
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
 	lastError       error
+	viewError       error
 }
 
 var columns = []table.Column{
@@ -118,6 +119,9 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
 		return m, m.listenForAppMessages()
+	case senderEvent.ReceiverAcceptedMsg:
+		m.sender.state = sendingFiles
+		return m, m.listenForAppMessages()
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
 		slog.Info("Status Update", "message", msg.Message) // For now, just log
@@ -136,7 +140,8 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case selectingReceiver:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			if msg.String() == "enter" {
+			switch msg.Type {
+			case tea.KeyEnter:
 				if len(m.sender.table.SelectedRow()) > 0 {
 					selectedIndex, err := strconv.Atoi(m.sender.table.SelectedRow()[0])
 					if err != nil {
@@ -146,14 +151,14 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if selectedIndex < 0 || selectedIndex >= len(m.sender.services) {
 						err := fmt.Errorf("selected index %d out of range (0-%d)", selectedIndex, len(m.sender.services)-1)
 						slog.Error("Selected index out of range", "error", err)
+						m.sender.viewError = err
 						return m, nil
 					}
+					m.sender.viewError = nil // Reset any previous error
 					m.sender.selectedService = m.sender.services[selectedIndex]
 					m.sender.state = selectingFiles
 					return m, nil
-
 				}
-
 			}
 		}
 		var cmd tea.Cmd
@@ -194,6 +199,9 @@ func (m *model) senderView() string {
 	case selectingReceiver:
 		s := fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
 		s += style.BaseStyle.Render(m.sender.table.View()) + "\n"
+		if m.sender.viewError != nil {
+			s += style.ErrorStyle.Render(m.sender.viewError.Error()) + "\n"
+		}
 		s += "Use arrow keys to navigate, Enter to select."
 		return s
 	case selectingFiles:

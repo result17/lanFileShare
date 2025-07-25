@@ -24,13 +24,17 @@ func NewSignalingHandler() *SignalingHandler {
 	}
 }
 
-func (h *SignalingHandler) RegisterHandler(mux *http.ServeMux) {}
+func (h *SignalingHandler) RegisterHandler(mux *http.ServeMux) {
+	mux.Handle("POST /offer", http.HandlerFunc(h.OfferHandler))
+	mux.Handle("POST /answer-stream", http.HandlerFunc(h.AnswerStreamHandler))
+	mux.Handle("POST /candidate", http.HandlerFunc(h.ICECandidateHanlder))
+}
 
 func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	if h.webrtcConn == nil {
 		h.mu.Unlock()
-		log.Printf("[offerHandler]: webrtc connection is null")
+		slog.Info("[offerHandler]: webrtc connection is null")
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -39,7 +43,8 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 
 	var offer webrtc.SessionDescription
 	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
-		log.Printf("[offerHandler]: failed to decode offer")
+		slog.Info("[offerHandler]: failed to decode offer")
+		http.Error(w, "Bad Request: could not decode offer", http.StatusBadRequest)
 		return
 	}
 
@@ -47,8 +52,8 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 		answer, err := conn.HandleOfferAndCreateAnswer(offer)
 		if err != nil {
 			err := fmt.Errorf("failed to create answer: %w", err)
-			log.Printf("[OfferHandler]: %v", err)
-			close(h.answerChan)
+			slog.Info("[OfferHandler]: %v", err)
+			http.Error(w, "Failed to add ICE candidate", http.StatusInternalServerError)
 			return
 		}
 		h.answerChan <- answer
@@ -73,17 +78,17 @@ func (h *SignalingHandler) AnswerStreamHandler(w http.ResponseWriter, r *http.Re
 	select {
 	case answer := <-h.answerChan:
 		if answer == nil {
-			log.Printf("SSE answer channel closed, stop connection.")
+			slog.Info("SSE answer channel closed, stop connection.")
 			return
 		}
 		answerJSON, err := json.Marshal(answer)
 		if err != nil {
-			log.Printf("failed to encode answer json %v", err)
+			slog.Info("failed to encode answer json %v", err)
 			return
 		}
 		fmt.Fprintf(w, "event: answer\ndata: %s\n\n", answerJSON)
 		flusher.Flush()
-		log.Printf("SSE answer had sent")
+		slog.Info("SSE answer had sent")
 	case <-r.Context().Done():
 		log.Print("SSE client connection closed")
 		return
@@ -105,7 +110,7 @@ func (h *SignalingHandler) ICECandidateHanlder(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err := conn.Peer().AddICECandidate(candidate); err != nil {
-		log.Printf("failed to add ICE candidate %v", err)
+		slog.Info("failed to add ICE candidate %v", err)
 	}
 	w.WriteHeader(http.StatusOK)
 }

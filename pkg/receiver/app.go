@@ -66,7 +66,7 @@ func (a *App) InboundCandidateChan() chan<- webrtc.ICECandidateInit {
 // Run starts the application's main event loop and services.
 func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 	a.startRegistration(ctx, a.port)
-	a.startServer(ctx, a.port)
+	a.startServer(ctx, a.port, cancel)
 
 	for {
 		select {
@@ -83,7 +83,9 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 		case event := <-a.appEvents:
 			switch event.(type) {
 			case receiver.AcceptFileRequestEvent:
-				go a.handleAcceptFileRequest(ctx)
+				go a.guard.Execute(func() error {
+					return a.handleAcceptFileRequest(ctx)
+				})
 			case receiver.RejectFileRequestEvent:
 				slog.Info("User rejected file transfer.")
 				a.stateManager.SetDecision(app.Rejected)
@@ -101,7 +103,7 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 }
 
 // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
-func (a *App) handleAcceptFileRequest(ctx context.Context) {
+func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	slog.Info("User accepted file transfer. Preparing to receive...")
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -112,31 +114,14 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) {
 	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtcPkg.Config{})
 	if err != nil {
 		a.sendAndLogError("Failed to create receiver connection", err)
-		return
+		return err
 	}
-
-	a.connMu.Lock()
-	a.activeConn = receiverConn
-	a.connMu.Unlock()
-	defer func() {
-		a.connMu.Lock()
-		if a.activeConn != nil {
-			a.activeConn.Close()
-			a.activeConn = nil
-		}
-		a.connMu.Unlock()
-	}()
 
 	receiverConn.Peer().OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		slog.Info("Peer Connection State has changed", "state", state.String())
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateDisconnected {
 			slog.Info("Closing active connection due to state change.")
-			a.connMu.Lock()
-			if a.activeConn != nil {
-				a.activeConn.Close()
-				a.activeConn = nil
-			}
-			a.connMu.Unlock()
+			a.closeActiveConnection()
 		}
 	})
 
@@ -153,23 +138,25 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) {
 	offer, err := a.stateManager.GetOffer()
 	if err != nil {
 		a.sendAndLogError("Could not get offer from state", err)
-		return
+		return err
 	}
 
 	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 	if err != nil {
 		a.sendAndLogError("Failed to create answer", err)
-		return
+		return err
 	}
 
 	select {
 	case <-hctx.Done():
 		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", hctx.Err())
-		return
+		return hctx.Err()
 	default:
 		a.stateManager.SetAnswer(*answer)
 		slog.Info("Answer created and sent to state manager.")
+		return nil
 	}
+
 }
 
 func (a *App) UIMessages() <-chan tea.Msg {
@@ -200,11 +187,14 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 		err := a.registrar.Announce(ctx, serviceInfo)
 		if err != nil {
 			a.sendAndLogError("Failed to start mDNS announcement", err)
+			// exit the app if we can't announce
+			<-ctx.Done()
+			return
 		}
 	}()
 }
 
-func (a *App) startServer(ctx context.Context, port int) {
+func (a *App) startServer(ctx context.Context, port int, cancel context.CancelFunc) {
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: a.api,
@@ -213,6 +203,7 @@ func (a *App) startServer(ctx context.Context, port int) {
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			a.sendAndLogError("HTTP server failed", err)
+			cancel()
 		}
 	}()
 
@@ -224,4 +215,16 @@ func (a *App) startServer(ctx context.Context, port int) {
 			slog.Error("HTTP server shutdown error", "error", err)
 		}
 	}()
+}
+
+func (a *App) closeActiveConnection() {
+	a.connMu.Lock()
+
+	if a.activeConn != nil {
+		slog.Info("Closing active connection.")
+		a.activeConn.Close()
+		a.activeConn = nil
+	}
+	defer a.connMu.Unlock()
+
 }

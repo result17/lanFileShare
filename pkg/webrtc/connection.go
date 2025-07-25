@@ -71,14 +71,15 @@ func NewWebrtcAPI() *WebrtcAPI {
 }
 
 func (a *WebrtcAPI) createPeerconnection(config Config) (*webrtc.PeerConnection, error) {
-	if len(config.ICEServers) == 0 {
-		config.ICEServers = append(config.ICEServers, webrtc.ICEServer{
-			URLs: []string{"stun:stun.l.google.com:19302"},
-		})
-	}
-	return a.api.NewPeerConnection(webrtc.Configuration{
+	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: config.ICEServers,
-	})
+	}
+	if len(config.ICEServers) == 0 {
+		peerConnectionConfig.ICEServers = []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		}
+	}
+	return a.api.NewPeerConnection(peerConnectionConfig)
 }
 
 func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (*SenderConn, error) {
@@ -94,13 +95,13 @@ func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiC
 	}
 
 	signaler := api.NewAPISignaler(ctx, apiClient, conn.Peer().AddICECandidate)
-	conn.SetSignaler(signaler)
+	conn.setSignaler(signaler)
 
 	return conn, nil
 
 }
 
-func (c *SenderConn) SetSignaler(signaler Signaler) {
+func (c *SenderConn) setSignaler(signaler Signaler) {
 	c.signaler = signaler
 }
 
@@ -180,7 +181,7 @@ func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescriptio
 	return &answer, nil
 }
 
-func (c *Connection) CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
+func (c *SenderConn) CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
 	return c.peerConnection.CreateDataChannel(label, options)
 }
 

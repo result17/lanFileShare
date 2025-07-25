@@ -89,13 +89,13 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.listenForAppMessages()
 
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
 		switch m.receiver.state {
 		case receiveFailed:
-			if msg.String() == "enter" {
-				*m = InitialModel(Receiver, m.receiver.port)
+			if msg.Type == tea.KeyEnter {
+				 m.receiver = initReceiverModel(m.appController, m.receiver.port)
 				return m, m.Init()
 			}
 		case awaitingConfirmation:
@@ -106,7 +106,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForAppMessages()
 			case key.Matches(msg, DefaultKeyMap.Reject):
 				m.appController.AppEvents() <- receiverEvent.RejectFileRequestEvent{}
-				*m = InitialModel(Receiver, m.receiver.port)
+				 m.receiver = initReceiverModel(m.appController, m.receiver.port)
 				return m, m.Init()
 			default:
 				newFileTree, cmd := m.receiver.fileTree.Update(msg)
@@ -117,13 +117,12 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case receiverEvent.FileNodeUpdateMsg:
 		if m.receiver.state == awaitingConnection {
-			m.receiver.state = awaitingConfirmation // 直接进入等待确认状态
+			m.receiver.state = awaitingConfirmation // Transition to confirmation state
 			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 			cmds = append(cmds, m.listenForAppMessages())
 		}
 	}
 
-	// 为 spinner 更新这样的通用组件传递消息
 	var spinCmd tea.Cmd
 	m.receiver.spinner, spinCmd = m.receiver.spinner.Update(msg)
 	cmds = append(cmds, spinCmd)

@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -61,6 +62,24 @@ func (m *mockSignaler) SendCandidateFromReceiver(candidate webrtc.ICECandidateIn
 	m.receiverCandidates <- candidate
 }
 
+func processCandidates(t *testing.T, ctx context.Context, conn *Connection, candidateChan <-chan webrtc.ICECandidateInit, done <-chan struct{}, side string) {
+	for {
+		select {
+		case candidate := <-candidateChan:
+			t.Logf("%s: Adding peer's ICE candidate", side)
+			if err := conn.Peer().AddICECandidate(candidate); err != nil {
+				// Log non-critical errors, as some failures are expected
+				t.Logf("%s failed to add ICE candidate: %v", side, err)
+			}
+		case <-ctx.Done():
+			return
+		case <-done:
+			t.Logf("%s: Stopping candidate processing due to done signal", side)
+			return
+		}
+	}
+}
+
 func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	const testTimeout = 20 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -71,6 +90,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	require.NotNil(t, api)
 	config := Config{}
 
+	errChan := make(chan error, 2)
 	dataChanMsg := make(chan string, 1)
 	done := make(chan struct{})
 	defer close(done)
@@ -126,7 +146,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 
 		answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 		if err != nil {
-			t.Errorf("receiver failed to handle offer: %w", err)
+			errChan <- fmt.Errorf("receiver failed to handle offer: %w", err)
 			return
 		}
 		// Use the test helper to send the answer back
@@ -134,21 +154,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		t.Log("Receiver: Sent answer via mock helper")
 
 		// Process candidates sent from the Sender
-		for {
-			select {
-			case candidate := <-signaler.senderCandidates:
-				t.Log("Receiver: Adding sender's ICE candidate")
-				if err := receiverConn.Peer().AddICECandidate(candidate); err != nil {
-					// Log non-critical errors, as some failures are expected
-					t.Logf("Receiver failed to add ICE candidate: %v", err)
-				}
-			case <-ctx.Done():
-				return
-			case <-done:
-				t.Log("Receiver: Stopping candidate processing due to done signal")
-				return
-			}
-		}
+		processCandidates(t, ctx, receiverConn.Connection, signaler.senderCandidates, done, "Receiver")
 	}()
 
 	// 4. Run Sender logic in a goroutine
@@ -167,26 +173,13 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 
 		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx, nil); err != nil {
-			t.Errorf("sender failed to establish connection: %w", err)
+			errChan <- fmt.Errorf("sender failed to establish connection: %w", err)
 			return
 		}
 		t.Log("Sender: Connection established")
 
 		// Process candidates sent from the Receiver
-		for {
-			select {
-			case candidate := <-signaler.receiverCandidates:
-				t.Log("Sender: Adding receiver's ICE candidate")
-				if err := senderConn.Peer().AddICECandidate(candidate); err != nil {
-					t.Logf("Sender failed to add ICE candidate: %v", err)
-				}
-			case <-ctx.Done():
-				return
-			case <-done:
-				t.Log("Sender: Stopping candidate processing due to done signal")
-				return
-			}
-		}
+		processCandidates(t, ctx, senderConn.Connection, signaler.receiverCandidates, done, "Sender")
 	}()
 
 	// 5. Wait for the final message or a timeout/error
@@ -194,7 +187,10 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case msg := <-dataChanMsg:
 		assert.Equal(t, "Hello, Receiver!", msg)
 		t.Log("SUCCESS: Message received successfully.")
+	case err := <-errChan:
+		t.Fatalf("A goroutine reported an error: %v", err)
 	case <-ctx.Done():
 		t.Fatal("Test timed out waiting for message")
 	}
 }
+

@@ -120,7 +120,7 @@ func (m *StateManager) GetAnswerChan() <-chan webrtc.SessionDescription {
 }
 
 // SetCandidate sends a new ICE candidate to the listening handler.
-func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) {
+func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -132,6 +132,7 @@ func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) {
 		}()
 		m.state.CandidateChan <- candidate
 	}
+	return errors.New("no active request state or candidate channel is not initialized")
 }
 
 // CloseCandidateChan closes the candidate channel to signal completion.

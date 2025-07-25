@@ -13,13 +13,24 @@ type Event struct{}
 // isAppEvent is the marker method that makes a struct an AppEvent.
 func (Event) isAppEvent() {}
 
+type UIMessage interface {
+	isUIMsg()
+}
+
+type UIMsg struct{}
+
+func (UIMsg) isUIMsg() {}
+
 // --- App Events (from TUI to App) ---
 
 // QuitAppMsg is an event sent when the user wants to quit the application.
-type QuitAppMsg struct{}
+type QuitAppMsg struct{
+	Event
+}
 
 func (q QuitAppMsg) isAppEvent() {}
 
 type ErrorMsg struct {
+	Event
 	Err error
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,6 +89,8 @@ type AskPayload struct {
 
 // AskHandler is the core business logic for handling /ask requests.
 func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
+	defer s.stateManager.CloseRequest()
+
 	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -116,47 +119,62 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-
-	decision := <-decisionChan
-	if decision == app.Rejected {
-		slog.Info("Request rejected by user")
-		s.sendRejection(w, flusher)
-		s.stateManager.CloseRequest()
+	select {
+	case <-r.Context().Done():
+		slog.Warn("Request context cancelled before processing")
 		return
+	case <-decisionChan:
+		decision := <-decisionChan
+		if decision == app.Rejected {
+			slog.Info("Request rejected by user")
+			s.sendRejection(w, flusher)
+			return
+		}
 	}
 
 	slog.Info("Request accepted by user")
-	if err := s.sendAnswer(w, flusher); err != nil {
+	if err := s.sendAnswer(w, flusher, r.Context()); err != nil {
 		slog.Error("Failed to send answer", "error", err)
-		s.stateManager.CloseRequest()
 		return
 	}
 
-	if err := s.streamCandidates(w, flusher); err != nil {
+	if err := s.streamCandidates(w, flusher, r.Context()); err != nil {
 		slog.Error("Failed to stream candidates", "error", err)
 	}
-	s.stateManager.CloseRequest()
 }
 
 // sendRejection sends a rejection message to the sender.
 func (s *ReceiverGuard) sendRejection(w http.ResponseWriter, flusher http.Flusher) {
 	response := map[string]string{"status": "rejected"}
-	jsonResponse, _ := json.Marshal(response)
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		slog.Error("Failed to marshal rejection response", "error", err)
+		http.Error(w, "Failed to process rejection", http.StatusInternalServerError)
+		return
+	}
 	fmt.Fprintf(w, "event: rejection\ndata: %s\n\n", jsonResponse)
+
 	flusher.Flush()
 }
 
 // sendAnswer waits for the WebRTC answer and sends it as an SSE event.
-func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) error {
+func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
 	answerChan := s.stateManager.GetAnswerChan()
-	answer, ok := <-answerChan
-	if !ok {
-		return fmt.Errorf("answer channel was closed unexpectedly")
+
+	var answer webrtc.SessionDescription
+	var ok bool
+
+	select {
+	case answer, ok = <-answerChan:
+		if !ok {
+			return fmt.Errorf("answer channel was closed unexpectedly")
+		}
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	slog.Info("Sending answer to sender", "answer_type", answer.Type)
-	
-	// **Corrected logic**: Marshal the received struct into a JSON object
+
 	response := map[string]webrtc.SessionDescription{"answer": answer}
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
@@ -169,13 +187,13 @@ func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) 
 }
 
 // streamCandidates waits for ICE candidates and streams them as SSE events.
-func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flusher) error {
+func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
 	slog.Info("Now streaming ICE candidates to sender...")
 	candidateChan := s.stateManager.GetCandidateChan()
 
 	for candidate := range candidateChan {
 		slog.Info("Sending candidate to sender", "candidate", candidate.Candidate)
-		
+
 		response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
 		jsonResponse, err := json.Marshal(response)
 		if err != nil {
@@ -199,6 +217,13 @@ func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	slog.Info("Candidate received", "request", req)
+
+	if err := s.stateManager.SetCandidate(req); err != nil {
+		slog.Error("Failed to add ICE candidate", "error", err)
+		// Consider what status code is appropriate here, e.g., 500
+		http.Error(w, "Failed to process ICE candidate", http.StatusInternalServerError)
+		return
+	}
 
 	// This will be changed in a later step.
 	w.WriteHeader(http.StatusOK)
