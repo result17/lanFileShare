@@ -7,6 +7,7 @@ import (
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
+	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
@@ -80,18 +81,23 @@ func (a *WebrtcAPI) createPeerconnection(config Config) (*webrtc.PeerConnection,
 	})
 }
 
-func (a *WebrtcAPI) NewSenderConnection(config Config) (*SenderConn, error) {
+func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (*SenderConn, error) {
 	pc, err := a.createPeerconnection(config)
 	if err != nil {
 		slog.Error("Failed to create peer connection for sender", "error", err)
 		return nil, err
 	}
-
-	return &SenderConn{
+	conn := &SenderConn{
 		Connection: &Connection{
 			peerConnection: pc,
 		},
-	}, nil
+	}
+
+	signaler := api.NewAPISignaler(ctx, apiClient, conn.Peer().AddICECandidate)
+	conn.SetSignaler(signaler)
+
+	return conn, nil
+
 }
 
 func (c *SenderConn) SetSignaler(signaler Signaler) {

@@ -3,12 +3,11 @@ package sender
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
-	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/sender"
@@ -19,31 +18,29 @@ import (
 )
 
 // App is the main application logic controller for the sender.
-// It manages state, coordinates services, and communicates with the UI.
 type App struct {
 	serviceID     string
 	guard         *concurrency.ConcurrencyGuard
 	discoverer    discovery.Adapter
 	apiClient     *api.Client
-	uiMessages    chan tea.Msg             // Channel to send messages to the UI
-	appEvents     chan app_events.AppEvent // Channel to receive events from the UI
+	uiMessages    chan tea.Msg
+	appEvents     chan app_events.AppEvent
 	selectedFiles []fileInfo.FileNode
-	WebrtcAPI     *webrtcPkg.WebrtcAPI
-	webrtcConn    *webrtcPkg.SenderConn
+	webrtcAPI     *webrtcPkg.WebrtcAPI
 }
 
 // NewApp creates a new sender application instance.
 func NewApp() *App {
 	serviceID := uuid.New().String()
-	WebrtcAPI := webrtcPkg.NewWebrtcAPI()
+	webrtcAPI := webrtcPkg.NewWebrtcAPI()
 	return &App{
 		serviceID:  serviceID,
 		guard:      concurrency.NewConcurrencyGuard(),
 		discoverer: &discovery.MDNSAdapter{},
-		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
-		uiMessages: make(chan tea.Msg, 5),
+		apiClient:  api.NewClient(serviceID),
+		uiMessages: make(chan tea.Msg, 10),
 		appEvents:  make(chan app_events.AppEvent),
-		WebrtcAPI:  WebrtcAPI,
+		webrtcAPI:  webrtcAPI,
 	}
 }
 
@@ -58,26 +55,21 @@ func (a *App) AppEvents() chan<- app_events.AppEvent {
 }
 
 // Run starts the application's main event loop.
-// It listens for events from the TUI and manages the application's lifecycle.
 func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 	a.startDiscovery(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Context was cancelled, so we are shutting down.
 			return
 		case event := <-a.appEvents:
-			// Process events from the TUI
 			switch e := event.(type) {
 			case sender.QuitAppMsg:
-				// TUI requested to quit, cancel the context to trigger shutdown.
 				cancel()
 				return
 			case sender.SendFilesMsg:
-				// TUI requested to send files to a specific receiver.
 				a.SelectFiles(e.Files)
-				a.StartSendProcess(e.Receiver)
+				a.StartSendProcess(ctx, e.Receiver)
 			}
 		}
 	}
@@ -88,14 +80,10 @@ func (a *App) startDiscovery(ctx context.Context) {
 	go func() {
 		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 		if err != nil {
-			err := fmt.Errorf("failed to start discovery: %w", err)
-			log.Printf("[Discover discover]: %v", err)
-			a.uiMessages <- sender.ErrorMsg{Err: err}
+			a.sendAndLogError("Failed to start discovery", err)
 			return
 		}
 
-		// Ticker to periodically send updates to the UI, even if no new services are found.
-		// This helps in observing when services disappear.
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
@@ -107,14 +95,11 @@ func (a *App) startDiscovery(ctx context.Context) {
 				return
 			case services, ok := <-serviceChan:
 				if !ok {
-					// Channel closed, discovery stopped.
 					return
 				}
 				currentServices = services
 				a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
 			case <-ticker.C:
-				// Periodically send the current list to the UI.
-				// This is crucial for noticing when a service disappears from the list.
 				if currentServices != nil {
 					a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
 				}
@@ -123,48 +108,44 @@ func (a *App) startDiscovery(ctx context.Context) {
 	}()
 }
 
+// sendAndLogError is a helper function to both log an error and send it to the UI.
+func (a *App) sendAndLogError(baseMessage string, err error) {
+	slog.Error(baseMessage, "error", err)
+	a.uiMessages <- sender.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+}
+
 // SelectFiles sets the files that the user has chosen.
 func (a *App) SelectFiles(files []fileInfo.FileNode) {
 	a.selectedFiles = files
 }
 
 // StartSendProcess is the main entry point for starting a file transfer.
-// It is protected by a concurrency guard to prevent multiple simultaneous sends.
-func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
+func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo) {
 	task := func() error {
 		a.uiMessages <- sender.TransferStartedMsg{}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		tctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 
 		receiverURL := fmt.Sprintf("http://%s:%d", receiver.Addr.String(), receiver.Port)
 		a.apiClient.SetReceiverURL(receiverURL)
 
-		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
-		config := webrtcPkg.Config{
-			ICEServers: []webrtc.ICEServer{},
-		}
-		webrtcConn, err := a.WebrtcAPI.NewSenderConnection(config)
+		config := webrtcPkg.Config{}
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(tctx, config, a.apiClient)
 		if err != nil {
-			err := fmt.Errorf("failed to create webrtc connection: %w", err)
-			log.Printf("[StartSendProcess] %v", err)
-			return err
+			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
-		a.webrtcConn = webrtcConn
-		defer a.webrtcConn.Close()
+		defer webrtcConn.Close()
 
-		signaler := api.NewAPISignaler(ctx, a.apiClient, a.webrtcConn.Peer().AddICECandidate)
-		webrtcConn.SetSignaler(signaler)
-
-		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}
-		if err := a.webrtcConn.Establish(ctx, a.selectedFiles); err != nil {
-			err := fmt.Errorf("could not establish webrtc connection: ")
-			log.Printf("[StartSendProcess] %v", err)
-			return err
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
+		if err := webrtcConn.Establish(tctx, a.selectedFiles); err != nil {
+			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
-		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Sending files..."}
-		time.Sleep(2 * time.Second) // Simulate file transfer
+
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
+		time.Sleep(2 * time.Second) // Simulate file transfer preparation
 
 		return nil // Success
 	}
@@ -173,9 +154,9 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		err := a.guard.Execute(task)
 		if err != nil {
 			if err == concurrency.ErrBusy {
-				a.uiMessages <- sender.ErrorMsg{Err: fmt.Errorf("a transfer is already in progress")}
+				a.sendAndLogError("A transfer is already in progress", err)
 			} else {
-				a.uiMessages <- sender.ErrorMsg{Err: err}
+				a.sendAndLogError("Transfer failed", err)
 			}
 		} else {
 			a.uiMessages <- sender.TransferCompleteMsg{}

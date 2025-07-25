@@ -19,3 +19,7 @@ func (Event) isAppEvent() {}
 type QuitAppMsg struct{}
 
 func (q QuitAppMsg) isAppEvent() {}
+
+type ErrorMsg struct {
+	Err error
+}

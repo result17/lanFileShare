@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rescp17/lanFileSharer/internal/app_events"
 	receiverEvent "github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileTree"
@@ -82,7 +83,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case receiverEvent.ErrorMsg:
+	case app_events.ErrorMsg:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
 		return m, m.listenForAppMessages()

@@ -100,10 +100,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 
 	// 2. Setup Sender (gets the signaler)
 	// We pass the mockSignaler, which satisfies the Signaler interface.
-	senderConn, err := api.NewSenderConnection(config)
+	senderConn, err := api.NewSenderConnection(ctx, config, nil)
 	require.NoError(t, err)
 	defer senderConn.Close()
-	senderConn.SetSignaler(signaler)
 
 	// The Sender's OnICECandidate will call the required SendICECandidate method
 	// from the Signaler interface.

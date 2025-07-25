@@ -97,7 +97,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 // sendAndLogError is a helper function to both log an error and send it to the UI.
 func (a *App) sendAndLogError(baseMessage string, err error) {
 	slog.Error(baseMessage, "error", err)
-	a.uiMessages <- receiver.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+	a.uiMessages <- app_events.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.

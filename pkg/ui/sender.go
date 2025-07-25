@@ -120,7 +120,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.listenForAppMessages()
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
-		slog.Info("Status Update:", msg.Message) // For now, just log
+		slog.Info("Status Update", "message", msg.Message) // For now, just log
 		return m, m.listenForAppMessages()
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
@@ -138,11 +138,22 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			if msg.String() == "enter" {
 				if len(m.sender.table.SelectedRow()) > 0 {
-					selectedIndex, _ := strconv.Atoi(m.sender.table.SelectedRow()[0])
+					selectedIndex, err := strconv.Atoi(m.sender.table.SelectedRow()[0])
+					if err != nil {
+						slog.Error("Failed to parse selected index", "error", err)
+						return m, nil
+					}
+					if selectedIndex < 0 || selectedIndex >= len(m.sender.services) {
+						err := fmt.Errorf("selected index %d out of range (0-%d)", selectedIndex, len(m.sender.services)-1)
+						slog.Error("Selected index out of range", "error", err)
+						return m, nil
+					}
 					m.sender.selectedService = m.sender.services[selectedIndex]
 					m.sender.state = selectingFiles
+					return m, nil
+
 				}
-				return m, nil
+
 			}
 		}
 		var cmd tea.Cmd
