@@ -2,7 +2,6 @@ package webrtc
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -73,7 +72,8 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	config := Config{}
 
 	dataChanMsg := make(chan string, 1)
-	errChan := make(chan error, 3)
+	done := make(chan struct{})
+	defer close(done)
 
 	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
@@ -120,13 +120,13 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		case offer = <-signaler.offerChan:
 			t.Log("Receiver: Got offer")
 		case <-ctx.Done():
-			errChan <- fmt.Errorf("receiver timed out waiting for offer: %w", ctx.Err())
+			t.Errorf("receiver timed out waiting for offer: %w", ctx.Err())
 			return
 		}
 
 		answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 		if err != nil {
-			errChan <- fmt.Errorf("receiver failed to handle offer: %w", err)
+			t.Errorf("receiver failed to handle offer: %w", err)
 			return
 		}
 		// Use the test helper to send the answer back
@@ -144,6 +144,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 				}
 			case <-ctx.Done():
 				return
+			case <-done:
+				t.Log("Receiver: Stopping candidate processing due to done signal")
+				return
 			}
 		}
 	}()
@@ -152,19 +155,19 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	go func() {
 		dc, err := senderConn.Peer().CreateDataChannel("file-transfer", nil)
 		if err != nil {
-			errChan <- fmt.Errorf("sender failed to create data channel: %w", err)
+			t.Errorf("sender failed to create data channel: %w", err)
 			return
 		}
 		dc.OnOpen(func() {
 			t.Log("Sender: DataChannel opened, sending message")
 			if err := dc.SendText("Hello, Receiver!"); err != nil {
-				errChan <- fmt.Errorf("sender failed to send text: %w", err)
+				t.Errorf("sender failed to send text: %w", err)
 			}
 		})
 
 		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx, nil); err != nil {
-			errChan <- fmt.Errorf("sender failed to establish connection: %w", err)
+			t.Errorf("sender failed to establish connection: %w", err)
 			return
 		}
 		t.Log("Sender: Connection established")
@@ -179,6 +182,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 				}
 			case <-ctx.Done():
 				return
+			case <-done:
+				t.Log("Sender: Stopping candidate processing due to done signal")
+				return
 			}
 		}
 	}()
@@ -188,15 +194,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case msg := <-dataChanMsg:
 		assert.Equal(t, "Hello, Receiver!", msg)
 		t.Log("SUCCESS: Message received successfully.")
-	case err := <-errChan:
-		t.Fatalf("Test failed with error from goroutine: %v", err)
 	case <-ctx.Done():
-		// Check for a lingering error before declaring a timeout
-		select {
-		case err := <-errChan:
-			t.Fatalf("Test failed with error from goroutine: %v", err)
-		default:
-			t.Fatal("Test timed out waiting for message")
-		}
+		t.Fatal("Test timed out waiting for message")
 	}
 }
