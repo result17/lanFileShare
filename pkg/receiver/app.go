@@ -2,6 +2,7 @@ package receiver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -30,11 +31,12 @@ type App struct {
 	api                  *api.API
 	port                 int
 	uiMessages           chan tea.Msg
-	appEvents            chan app_events.AppEvent
+	appEvents            chan appevents.AppEvent
 	stateManager         *app.StateManager
 	inboundCandidateChan chan webrtc.ICECandidateInit
 	activeConn           *webrtcPkg.ReceiverConn
 	connMu               sync.Mutex
+	errChan              chan error
 }
 
 // NewApp creates a new receiver application instance.
@@ -52,9 +54,10 @@ func NewApp(port int) *App {
 		api:                  apiHandler,
 		port:                 port,
 		uiMessages:           uiMessages,
-		appEvents:            make(chan app_events.AppEvent),
+		appEvents:            make(chan appevents.AppEvent),
 		stateManager:         stateManager,
 		inboundCandidateChan: make(chan webrtc.ICECandidateInit, 10),
+		errChan:              make(chan error, 1),
 	}
 }
 
@@ -64,35 +67,49 @@ func (a *App) InboundCandidateChan() chan<- webrtc.ICECandidateInit {
 }
 
 // Run starts the application's main event loop and services.
-func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
+func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error {
 	a.startRegistration(ctx, a.port, cancel)
 	a.startServer(ctx, a.port, cancel)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
+		case err := <-a.errChan:
+			return fmt.Errorf("file acceptance handler failed: %w", err)
 		case candidate := <-a.inboundCandidateChan:
 			a.connMu.Lock()
 			if a.activeConn != nil {
 				if err := a.activeConn.Peer().AddICECandidate(candidate); err != nil {
 					slog.Warn("Failed to add inbound ICE candidate", "error", err)
+					return err
 				}
 			} else {
-				 slog.Warn("Received an ICE candidate but there is no active connection.")
+				slog.Warn("Received an ICE candidate but there is no active connection.")
+				return errors.New("received an ICE candidate but there is no active connection")
 			}
 			a.connMu.Unlock()
 		case event := <-a.appEvents:
 			switch event.(type) {
 			case receiver.AcceptFileRequestEvent:
-				go a.guard.Execute(func() error {
-					return a.handleAcceptFileRequest(ctx)
-				})
+				go func() {
+					if err := a.guard.Execute(func() error {
+						return a.handleAcceptFileRequest(ctx)
+					}); err != nil {
+						slog.Error("File acceptance handler failed", "error", err)
+						select {
+						case a.errChan <- err:
+						default:
+							slog.Error("Error channel full, dropping error", "error", err)
+						}
+					}
+				}()
 			case receiver.RejectFileRequestEvent:
 				slog.Info("User rejected file transfer.")
 				a.stateManager.SetDecision(app.Rejected)
 			default:
 				slog.Warn("Received unhandled app event", "event", event)
+				return errors.New("received unhandled app event")
 			}
 		}
 	}
@@ -101,7 +118,7 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 // sendAndLogError is a helper function to both log an error and send it to the UI.
 func (a *App) sendAndLogError(baseMessage string, err error) {
 	slog.Error(baseMessage, "error", err)
-	a.uiMessages <- app_events.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+	a.uiMessages <- appevents.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
@@ -124,7 +141,9 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		slog.Info("Peer Connection State has changed", "state", state.String())
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateDisconnected {
 			slog.Info("Closing active connection due to state change.")
-			a.closeActiveConnection()
+
+			// Only close and nil out the connection if it's the one this callback is for.
+			a.closeActiveConnectionIfSameConn(receiverConn)
 		}
 	})
 
@@ -135,7 +154,9 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 			return
 		}
 		slog.Info("Got a local ICE candidate", "candidate", candidate.ToJSON().Candidate)
-		a.stateManager.SetCandidate(candidate.ToJSON())
+		if err := a.stateManager.SetCandidate(candidate.ToJSON()); err != nil {
+			slog.Error("Failed to send ICE candidate", "error", err)
+		}
 	})
 
 	offer, err := a.stateManager.GetOffer()
@@ -150,15 +171,13 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		return err
 	}
 
-	select {
-	case <-hctx.Done():
-		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", hctx.Err())
-		return hctx.Err()
-	default:
-		a.stateManager.SetAnswer(*answer)
-		slog.Info("Answer created and sent to state manager.")
-		return nil
+	if err := hctx.Err(); err != nil {
+		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", err)
+		return err
 	}
+	a.stateManager.SetAnswer(*answer)
+	slog.Info("Answer created and sent to state manager.")
+	return nil
 
 }
 
@@ -166,7 +185,7 @@ func (a *App) UIMessages() <-chan tea.Msg {
 	return a.uiMessages
 }
 
-func (a *App) AppEvents() chan<- app_events.AppEvent {
+func (a *App) AppEvents() chan<- appevents.AppEvent {
 	return a.appEvents
 }
 
@@ -220,11 +239,11 @@ func (a *App) startServer(ctx context.Context, port int, cancel context.CancelFu
 	}()
 }
 
-func (a *App) closeActiveConnection() {
+func (a *App) closeActiveConnectionIfSameConn(receiverConn *webrtcPkg.ReceiverConn) {
 	a.connMu.Lock()
 	defer a.connMu.Unlock()
 
-	if a.activeConn != nil {
+	if a.activeConn != nil && a.activeConn == receiverConn {
 		slog.Info("Closing active connection.")
 		a.activeConn.Close()
 		a.activeConn = nil

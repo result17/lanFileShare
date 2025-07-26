@@ -10,12 +10,12 @@ import (
 
 // QuitAppMsg is an event sent when the user wants to quit the application.
 type QuitAppMsg struct {
-	app_events.Event
+	appevents.Event
 }
 
 // SendFilesMsg is an event sent when the user selects a receiver to send files to.
 type SendFilesMsg struct {
-	app_events.Event
+	appevents.Event
 	Receiver discovery.ServiceInfo
 	Files    []fileInfo.FileNode
 }
@@ -23,7 +23,7 @@ type SendFilesMsg struct {
 var (
 	// These static checks ensure that our event types correctly implement the AppEvent interface.
 	// The code will not compile if they don't.
-	_ app_events.AppEvent = (*SendFilesMsg)(nil)
+	_ appevents.AppEvent = (*SendFilesMsg)(nil)
 )
 
 // --- UI Messages (from App to TUI) ---

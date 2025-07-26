@@ -81,11 +81,16 @@ func (m model) receiverView() string {
 	}
 }
 
+func (m *model) resetReceiver() (tea.Model, tea.Cmd) {
+	m.receiver = initReceiverModel(m.receiver.port)
+	return m, m.Init()
+}
+
 func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case app_events.ErrorMsg:
+	case appevents.ErrorMsg:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
 		return m, m.listenForAppMessages()
@@ -97,8 +102,11 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.receiver.state {
 		case receiveFailed:
 			if msg.Type == tea.KeyEnter {
-				 m.receiver = initReceiverModel(m.receiver.port)
-				return m, m.Init()
+				 return m.resetReceiver()
+			}
+		case receiveComplete:
+			if msg.Type == tea.KeyEnter {
+				return m, tea.Quit
 			}
 		case awaitingConfirmation:
 			switch {
@@ -108,8 +116,8 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForAppMessages()
 			case key.Matches(msg, DefaultKeyMap.Reject):
 				m.appController.AppEvents() <- receiverEvent.RejectFileRequestEvent{}
-				 m.receiver = initReceiverModel(m.receiver.port)
-				return m, m.Init()
+				m.receiver = initReceiverModel(m.receiver.port)
+				return m.resetReceiver()
 			default:
 				newFileTree, cmd := m.receiver.fileTree.Update(msg)
 				m.receiver.fileTree = newFileTree.(fileTree.Model)

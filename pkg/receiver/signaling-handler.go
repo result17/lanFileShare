@@ -20,7 +20,7 @@ type answerResult struct {
 type SignalingHandler struct {
 	mu         sync.Mutex
 	webrtcConn *webrtcPkg.ReceiverConn
-	answerChan     chan answerResult
+	answerChan chan answerResult
 }
 
 func NewSignalingHandler() *SignalingHandler {
@@ -55,16 +55,16 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		answer, err := conn.HandleOfferAndCreateAnswer(offer)
-		if err != nil {
-			err := fmt.Errorf("failed to create answer: %w", err)
-			slog.Error("[OfferHandler]: %v", err)
-			h.answerChan <- answerResult{
-				err: err,
-			}
-			return
-		}
-		h.answerChan <- answerResult{
+		answerResult := answerResult {
+			err: err,
 			answer: answer,
+		}
+		
+		select {
+		case h.answerChan <- answerResult:
+			slog.Info("sent answer successful")
+		default:
+			slog.Warn("answer channel was full, dropping answer")
 		}
 	}()
 
@@ -88,11 +88,13 @@ func (h *SignalingHandler) AnswerStreamHandler(w http.ResponseWriter, r *http.Re
 	case answerResult := <-h.answerChan:
 		if answerResult.answer == nil {
 			slog.Error("SSE answer channel closed, stop connection.")
+			http.Error(w, "Failed to create WebRTC answer", http.StatusInternalServerError)
 			return
 		}
 		answerJSON, err := json.Marshal(answerResult.answer)
 		if err != nil {
-			slog.Error("failed to encode answer json %v", err)
+			slog.Error("failed to encode answer json", "error", err)
+			http.Error(w, "Failed to encode answer", http.StatusInternalServerError)
 			return
 		}
 		fmt.Fprintf(w, "event: answer\ndata: %s\n\n", answerJSON)

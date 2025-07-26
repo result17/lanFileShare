@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,14 +20,14 @@ import (
 
 // App is the main application logic controller for the sender.
 type App struct {
-	serviceID     string
-	guard         *concurrency.ConcurrencyGuard
-	discoverer    discovery.Adapter
-	apiClient     *api.Client
-	uiMessages    chan tea.Msg
-	appEvents     chan app_events.AppEvent
-	selectedFiles []fileInfo.FileNode
-	webrtcAPI     *webrtcPkg.WebrtcAPI
+	serviceID       string
+	guard           *concurrency.ConcurrencyGuard
+	discoverer      discovery.Adapter
+	apiClient       *api.Client
+	uiMessages      chan tea.Msg
+	appEvents       chan appevents.AppEvent
+	selectedFiles   []fileInfo.FileNode
+	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
 }
 
@@ -35,13 +36,13 @@ func NewApp(adapter discovery.Adapter) *App {
 	serviceID := uuid.New().String()
 	webrtcAPI := webrtcPkg.NewWebrtcAPI()
 	return &App{
-		serviceID:  serviceID,
-		guard:      concurrency.NewConcurrencyGuard(),
-		discoverer: adapter,
-		apiClient:  api.NewClient(serviceID),
-		uiMessages: make(chan tea.Msg, 10),
-		appEvents:  make(chan app_events.AppEvent),
-		webrtcAPI:  webrtcAPI,
+		serviceID:       serviceID,
+		guard:           concurrency.NewConcurrencyGuard(),
+		discoverer:      adapter,
+		apiClient:       api.NewClient(serviceID),
+		uiMessages:      make(chan tea.Msg, 10),
+		appEvents:       make(chan appevents.AppEvent),
+		webrtcAPI:       webrtcAPI,
 		transferTimeout: 2 * time.Minute,
 	}
 }
@@ -52,37 +53,44 @@ func (a *App) UIMessages() <-chan tea.Msg {
 }
 
 // AppEvents returns a write-only channel for the TUI to send events to the app.
-func (a *App) AppEvents() chan<- app_events.AppEvent {
+func (a *App) AppEvents() chan<- appevents.AppEvent {
 	return a.appEvents
 }
 
 // Run starts the application's main event loop.
-func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
-	a.startDiscovery(ctx)
+func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error { 
+	if err := a.startDiscovery(ctx); err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case event := <-a.appEvents:
 			switch e := event.(type) {
 			case sender.QuitAppMsg:
 				cancel()
-				return
+				return nil
 			case sender.SendFilesMsg:
+				// show files to users
 				a.SelectFiles(e.Files)
 				a.StartSendProcess(ctx, e.Receiver)
+				return nil
 			}
 		}
 	}
 }
 
 // startDiscovery begins the process of finding receivers on the network.
-func (a *App) startDiscovery(ctx context.Context) {
+func (a *App) startDiscovery(ctx context.Context) error {
+	errChan := make(chan error, 1)
+
 	go func() {
 		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 		if err != nil {
 			a.sendAndLogError("Failed to start discovery", err)
+			errChan <- err
 			return
 		}
 
@@ -102,6 +110,15 @@ func (a *App) startDiscovery(ctx context.Context) {
 			}
 		}
 	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <- errChan:
+			return err
+		}
+	}
 }
 
 // sendAndLogError is a helper function to both log an error and send it to the UI.
@@ -120,34 +137,30 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 	task := func() error {
 		a.uiMessages <- sender.TransferStartedMsg{}
 
-		tctx, cancel := context.WithTimeout(ctx, a.transferTimeout)
-		defer cancel()
-
-		receiverURL := fmt.Sprintf("http://%s:%d", receiver.Addr.String(), receiver.Port)
+		receiverURL := fmt.Sprintf("http://%s", net.JoinHostPort(receiver.Addr.String(), fmt.Sprintf("%d", receiver.Port)))
 		a.apiClient.SetReceiverURL(receiverURL)
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
 		config := webrtcPkg.Config{}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(tctx, config, a.apiClient)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(ctx, config, a.apiClient)
 		if err != nil {
 			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
 		defer webrtcConn.Close()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
-		if err := webrtcConn.Establish(tctx, a.selectedFiles); err != nil {
+		if err := webrtcConn.Establish(ctx, a.selectedFiles); err != nil {
 			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
-		
-// TODO: Add actual file transfer logic over the webrtcConn.
 
-if err := webrtcConn.SendFiles(tctx, a.selectedFiles); err != nil {
-    return fmt.Errorf("failed to send files: %w", err)
-}
+		// TODO: Add actual file transfer logic over the webrtcConn.
 
+		if err := webrtcConn.SendFiles(ctx, a.selectedFiles); err != nil {
+			return fmt.Errorf("failed to send files: %w", err)
+		}
 
 		return nil // Success
 	}

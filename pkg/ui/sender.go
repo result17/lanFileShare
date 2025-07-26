@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 	"strconv"
 
@@ -95,15 +94,18 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle messages from the app logic layer first
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			if m.cancel != nil {
+				m.cancel()
+			}
 			m.appController.AppEvents() <- senderEvent.QuitAppMsg{}
 			return m, tea.Quit
 		}
 	case senderEvent.FoundServicesMsg:
 		slog.Info("Discovery update", "service_count", len(msg.Services))
 		for _, s := range msg.Services {
-			log.Printf("  - Service: %s, Addr: %s, Port: %d", s.Name, s.Addr, s.Port)
+			slog.Debug("Found service", "name", s.Name, "addr", s.Addr, "port", s.Port)
 		}
 
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
@@ -175,7 +177,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 	case transferComplete, transferFailed:
-		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
+		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
 			m.sender.reset()
 			m.sender.state = findingReceivers // Explicitly set state
 			return m, m.initSender()
@@ -217,11 +219,5 @@ func (m *model) senderView() string {
 }
 
 func (m *senderModel) reset() {
-	// Logic from initSenderModel, but applied to the existing struct
-	initial := initSenderModel()
-	m.state = initial.state
-	m.fp = initial.fp
-	m.table = initial.table
-	m.spinner = initial.spinner
-	// etc.
+	*m = initSenderModel()
 }

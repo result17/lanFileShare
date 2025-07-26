@@ -23,6 +23,8 @@ type RequestState struct {
 	AnswerChan    chan webrtc.SessionDescription
 	CandidateChan chan webrtc.ICECandidateInit
 	TransferDone  chan struct{}
+	decisionSent  bool
+	answerSent    bool
 }
 
 // StateManager manages the lifecycle of a file transfer request state in a concurrent-safe manner.
@@ -51,18 +53,21 @@ func (m *StateManager) SetOffer(offer webrtc.SessionDescription) error {
 
 // CreateRequest finishes initializing the request state created by SetOffer.
 // It returns the decision channel for the caller to wait on.
-func (m *StateManager) CreateRequest() (<-chan Decision, error) {
+func (m *StateManager) CreateRequest(offer webrtc.SessionDescription) (<-chan Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state == nil || m.state.DecisionChan != nil {
-		return nil, errors.New("invalid state: SetOffer must be called first and exactly once")
+	if m.state != nil {
+		return nil, errors.New("a request is already in progress")
 	}
 
-	m.state.DecisionChan = make(chan Decision, 1)
-	m.state.AnswerChan = make(chan webrtc.SessionDescription, 1) // Correct type
-	m.state.CandidateChan = make(chan webrtc.ICECandidateInit, 10)
-	m.state.TransferDone = make(chan struct{})
+	m.state = &RequestState{
+		Offer:         offer,
+		DecisionChan:  make(chan Decision, 1),
+		AnswerChan:    make(chan webrtc.SessionDescription, 1),
+		CandidateChan: make(chan webrtc.ICECandidateInit, 10),
+		TransferDone:  make(chan struct{}),
+	}
 
 	return m.state.DecisionChan, nil
 }
@@ -79,21 +84,17 @@ func (m *StateManager) GetOffer() (webrtc.SessionDescription, error) {
 }
 
 // SetDecision records the user's decision and sends it to the waiting handler.
-func (m *StateManager) SetDecision(decision Decision) {
+func (m *StateManager) SetDecision(decision Decision) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.DecisionChan != nil {
-		select {
-		case _, ok := <-m.state.DecisionChan:
-			if !ok {
-				return
-			}
-		default:
-		}
-		m.state.DecisionChan <- decision
-		close(m.state.DecisionChan)
+		return errors.New("no active request")
 	}
+	m.state.DecisionChan <- decision
+	m.state.decisionSent = true
+	close(m.state.DecisionChan)
+	return nil
 }
 
 // SetAnswer stores the generated answer from the WebRTC peer.

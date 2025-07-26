@@ -1,4 +1,4 @@
-package app_events
+package appevents
 
 // AppEvent is a marker interface for events sent from the TUI to the App's logic controller.
 // It uses an unexported method to ensure that only types from this package (by embedding Event)
@@ -14,13 +14,13 @@ type Event struct{}
 func (Event) isAppEvent() {}
 
 // UIMsg is a marker interface for messages sent from the App's logic controller to the TUI.
-type UIMessage interface {
-	isUIMsg()
-}
+ type AppUIMessage interface {
+	isUIMessage()
+ }
 // UIMsg is a base struct that can be embedded in other types to implement the UIMessage interface.
-type UIMsg struct{}
+type UIMessage struct{}
 
-func (UIMsg) isUIMsg() {}
+func (UIMessage) isUIMessage() {}
 
 // --- App Events (from TUI to App) ---
 
@@ -39,4 +39,6 @@ var (
 	// These static checks ensure that our event types correctly implement the AppEvent interface.
 	// The code will not compile if they don't.
 	_ AppEvent = (*QuitAppMsg)(nil)
+	_ AppEvent = (*ErrorMsg)(nil)
+	
 )

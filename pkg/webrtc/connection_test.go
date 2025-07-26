@@ -170,6 +170,8 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 			}
 		})
 
+		go processCandidates(t, ctx, senderConn.Connection, signaler.receiverCandidates, done, "Sender")
+
 		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx, nil); err != nil {
 			errChan <- fmt.Errorf("sender failed to establish connection: %w", err)
@@ -177,8 +179,6 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		}
 		t.Log("Sender: Connection established")
 
-		// Process candidates sent from the Receiver
-		processCandidates(t, ctx, senderConn.Connection, signaler.receiverCandidates, done, "Sender")
 	}()
 
 	// 5. Wait for the final message or a timeout/error
@@ -191,6 +191,5 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Test timed out waiting for message")
 	}
-	close(done)
 }
 

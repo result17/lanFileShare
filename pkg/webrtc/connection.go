@@ -154,7 +154,7 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 
 	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
 		slog.Error("Failed to set remote description for answer", "error", err)
-		return fmt.Errorf("failed toet remote description for answer: %w", err)
+		return fmt.Errorf("failed to set remote description for answer: %w", err)
 	}
 
 	return nil

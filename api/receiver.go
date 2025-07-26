@@ -65,7 +65,6 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		task := func() error {
 			next.ServeHTTP(w, r)
-			<-s.stateManager.WaitForTransferDone()
 			return nil
 		}
 
@@ -98,12 +97,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("Ask received", "offer_type", req.Offer.Type)
 
-	if err := s.stateManager.SetOffer(req.Offer); err != nil {
-		http.Error(w, "Server is busy or failed to set offer", http.StatusServiceUnavailable)
-		return
-	}
-
-	decisionChan, err := s.stateManager.CreateRequest()
+	decisionChan, err := s.stateManager.CreateRequest(req.Offer)
 	if err != nil {
 		slog.Error("failed to create request", "error", err) 
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -128,7 +122,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	case decision := <-decisionChan:
 		if decision == app.Rejected {
 			slog.Info("Request rejected by user")
-			s.sendRejection(w, flusher)
+			s.sendRejection(w)
 			return
 		}
 	}
@@ -145,7 +139,12 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendRejection sends a rejection message to the sender.
-func (s *ReceiverGuard) sendRejection(w http.ResponseWriter, flusher http.Flusher) {
+func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		slog.Error("failed to support streaming for rejection")
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+	}
 	response := map[string]string{"status": "rejected"}
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
@@ -192,9 +191,9 @@ func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flu
 	slog.Info("Now streaming ICE candidates to sender...")
 	candidateChan := s.stateManager.GetCandidateChan()
 
+	// Ensure that the implementation guarantees that will always be closed after the peer connection is established or has failed
 	for candidate := range candidateChan {
 		slog.Info("Sending candidate to sender", "candidate", candidate.Candidate)
-
 		response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
 		jsonResponse, err := json.Marshal(response)
 		if err != nil {
