@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -11,25 +12,34 @@ import (
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
+type answerResult struct {
+	answer *webrtc.SessionDescription
+	err    error
+}
+
 type SignalingHandler struct {
-	mu sync.Mutex
+	mu         sync.Mutex
 	webrtcConn *webrtcPkg.ReceiverConn
-	answerChan chan *webrtc.SessionDescription
+	answerChan chan answerResult
 }
 
 func NewSignalingHandler() *SignalingHandler {
 	return &SignalingHandler{
-		answerChan:  make(chan *webrtc.SessionDescription, 1),
+		answerChan: make(chan answerResult, 1),
 	}
 }
 
-func (h *SignalingHandler) RegisterHandler(mux *http.ServeMux) {}
+func (h *SignalingHandler) RegisterHandler(mux *http.ServeMux) {
+	mux.Handle("POST /offer", http.HandlerFunc(h.OfferHandler))
+	mux.Handle("POST /answer-stream", http.HandlerFunc(h.AnswerStreamHandler))
+	mux.Handle("POST /candidate", http.HandlerFunc(h.ICECandidateHanlder))
+}
 
 func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	if h.webrtcConn == nil {
 		h.mu.Unlock()
-		log.Printf("[offerHandler]: webrtc connection is null")
+		slog.Info("[offerHandler]: webrtc connection is null")
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -37,20 +47,25 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 	h.mu.Unlock()
 
 	var offer webrtc.SessionDescription
-	if err:= json.NewDecoder(r.Body).Decode(&offer); err != nil {
-		log.Printf("[offerHandler]: failed to decode offer")
+	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
+		slog.Info("[offerHandler]: failed to decode offer")
+		http.Error(w, "Bad Request: could not decode offer", http.StatusBadRequest)
 		return
 	}
 
 	go func() {
 		answer, err := conn.HandleOfferAndCreateAnswer(offer)
-		if err != nil {
-			err := fmt.Errorf("failed to create answer: %w", err)
-			log.Printf("[OfferHandler]: %v", err)
-			close(h.answerChan)
-			return
+		answerResult := answerResult {
+			err: err,
+			answer: answer,
 		}
-		h.answerChan <-answer
+		
+		select {
+		case h.answerChan <- answerResult:
+			slog.Info("sent answer successful")
+		default:
+			slog.Warn("answer channel was full, dropping answer")
+		}
 	}()
 
 	w.WriteHeader(http.StatusOK)
@@ -60,29 +75,31 @@ func (h *SignalingHandler) AnswerStreamHandler(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
 
-	log.Println("SSE Connected. Waiting for answer.")
+	slog.Info("SSE Connected. Waiting for answer.")
 
 	select {
-	case answer := <-h.answerChan:
-		if answer == nil {
-			log.Printf("SSE answer channel closed, stop connection.")
+	case answerResult := <-h.answerChan:
+		if answerResult.answer == nil {
+			slog.Error("SSE answer channel closed, stop connection.")
+			http.Error(w, "Failed to create WebRTC answer", http.StatusInternalServerError)
 			return
 		}
-		answerJSON, err := json.Marshal(answer)
+		answerJSON, err := json.Marshal(answerResult.answer)
 		if err != nil {
-			log.Printf("failed to encode answer json %v", err)
+			slog.Error("failed to encode answer json", "error", err)
+			http.Error(w, "Failed to encode answer", http.StatusInternalServerError)
 			return
 		}
 		fmt.Fprintf(w, "event: answer\ndata: %s\n\n", answerJSON)
 		flusher.Flush()
-		log.Printf("SSE answer had sent")
+		slog.Info("SSE answer had sent")
 	case <-r.Context().Done():
 		log.Print("SSE client connection closed")
 		return
@@ -103,8 +120,10 @@ func (h *SignalingHandler) ICECandidateHanlder(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	if err := conn.AddICECandidate(candidate); err != nil {
-		log.Printf("failed to add ICE candidate %v", err)
+	if err := conn.Peer().AddICECandidate(candidate); err != nil {
+		slog.Info("failed to add ICE candidate %v", err)
+		http.Error(w, "Failed to add ICE candidate", http.StatusInternalServerError)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }

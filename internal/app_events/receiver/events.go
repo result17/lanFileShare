@@ -9,22 +9,22 @@ import (
 
 // AcceptFileRequestEvent is sent when the user agrees to receive the files.
 type AcceptFileRequestEvent struct {
-	app_events.Event
+	appevents.Event
 }
 
 // RejectFileRequestEvent is sent when the user rejects the file transfer.
 type RejectFileRequestEvent struct {
-	app_events.Event
+	appevents.Event
 }
 
 // --- App to UI Messages ---
 
-// ErrorMsg is a message that carries an error.
-type ErrorMsg struct {
-	Err error
-}
-
 // FileNodeUpdateMsg is a message sent to the UI to update it with file info.
 type FileNodeUpdateMsg struct {
+	appevents.AppUIMessage
 	Nodes []fileInfo.FileNode
+}
+
+type TransferCompleteMsg struct {
+	appevents.AppUIMessage
 }

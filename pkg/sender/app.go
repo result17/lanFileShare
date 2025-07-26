@@ -3,12 +3,12 @@ package sender
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"net"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
-	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/sender"
@@ -19,31 +19,31 @@ import (
 )
 
 // App is the main application logic controller for the sender.
-// It manages state, coordinates services, and communicates with the UI.
 type App struct {
-	serviceID     string
-	guard         *concurrency.ConcurrencyGuard
-	discoverer    discovery.Adapter
-	apiClient     *api.Client
-	uiMessages    chan tea.Msg             // Channel to send messages to the UI
-	appEvents     chan app_events.AppEvent // Channel to receive events from the UI
-	selectedFiles []fileInfo.FileNode
-	webrtcAPI     *webrtcPkg.WebRTCAPI
-	webrtcConn    *webrtcPkg.SenderConn
+	serviceID       string
+	guard           *concurrency.ConcurrencyGuard
+	discoverer      discovery.Adapter
+	apiClient       *api.Client
+	uiMessages      chan tea.Msg
+	appEvents       chan appevents.AppEvent
+	selectedFiles   []fileInfo.FileNode
+	webrtcAPI       *webrtcPkg.WebrtcAPI
+	transferTimeout time.Duration
 }
 
 // NewApp creates a new sender application instance.
-func NewApp() *App {
+func NewApp(adapter discovery.Adapter) *App {
 	serviceID := uuid.New().String()
-	webrtcAPI := webrtcPkg.NewWebRTCAPI()
+	webrtcAPI := webrtcPkg.NewWebrtcAPI()
 	return &App{
-		serviceID:  serviceID,
-		guard:      concurrency.NewConcurrencyGuard(),
-		discoverer: &discovery.MDNSAdapter{},
-		apiClient:  api.NewClient(serviceID), // Pass the serviceID to the client
-		uiMessages: make(chan tea.Msg, 5),
-		appEvents:  make(chan app_events.AppEvent),
-		webrtcAPI:  webrtcAPI,
+		serviceID:       serviceID,
+		guard:           concurrency.NewConcurrencyGuard(),
+		discoverer:      adapter,
+		apiClient:       api.NewClient(serviceID),
+		uiMessages:      make(chan tea.Msg, 10),
+		appEvents:       make(chan appevents.AppEvent),
+		webrtcAPI:       webrtcAPI,
+		transferTimeout: 2 * time.Minute,
 	}
 }
 
@@ -53,51 +53,46 @@ func (a *App) UIMessages() <-chan tea.Msg {
 }
 
 // AppEvents returns a write-only channel for the TUI to send events to the app.
-func (a *App) AppEvents() chan<- app_events.AppEvent {
+func (a *App) AppEvents() chan<- appevents.AppEvent {
 	return a.appEvents
 }
 
 // Run starts the application's main event loop.
-// It listens for events from the TUI and manages the application's lifecycle.
-func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
-	a.startDiscovery(ctx)
+func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error { 
+	if err := a.startDiscovery(ctx); err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Context was cancelled, so we are shutting down.
-			return
+			return nil
 		case event := <-a.appEvents:
-			// Process events from the TUI
 			switch e := event.(type) {
 			case sender.QuitAppMsg:
-				// TUI requested to quit, cancel the context to trigger shutdown.
 				cancel()
-				return
+				return nil
 			case sender.SendFilesMsg:
-				// TUI requested to send files to a specific receiver.
+				// show files to users
 				a.SelectFiles(e.Files)
-				a.StartSendProcess(e.Receiver)
+				a.StartSendProcess(ctx, e.Receiver)
+				return nil
 			}
 		}
 	}
 }
 
 // startDiscovery begins the process of finding receivers on the network.
-func (a *App) startDiscovery(ctx context.Context) {
+func (a *App) startDiscovery(ctx context.Context) error {
+	errChan := make(chan error, 1)
+
 	go func() {
 		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 		if err != nil {
-			err := fmt.Errorf("failed to start discovery: %w", err)
-			log.Printf("[Discover discover]: %v", err)
-			a.uiMessages <- sender.ErrorMsg{Err: err}
+			a.sendAndLogError("Failed to start discovery", err)
+			errChan <- err
 			return
 		}
-
-		// Ticker to periodically send updates to the UI, even if no new services are found.
-		// This helps in observing when services disappear.
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
 
 		var currentServices []discovery.ServiceInfo
 
@@ -107,20 +102,29 @@ func (a *App) startDiscovery(ctx context.Context) {
 				return
 			case services, ok := <-serviceChan:
 				if !ok {
-					// Channel closed, discovery stopped.
 					return
 				}
 				currentServices = services
 				a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
-			case <-ticker.C:
-				// Periodically send the current list to the UI.
-				// This is crucial for noticing when a service disappears from the list.
-				if currentServices != nil {
-					a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
-				}
+
 			}
 		}
 	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <- errChan:
+			return err
+		}
+	}
+}
+
+// sendAndLogError is a helper function to both log an error and send it to the UI.
+func (a *App) sendAndLogError(baseMessage string, err error) {
+	slog.Error(baseMessage, "error", err)
+	a.uiMessages <- sender.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // SelectFiles sets the files that the user has chosen.
@@ -129,43 +133,34 @@ func (a *App) SelectFiles(files []fileInfo.FileNode) {
 }
 
 // StartSendProcess is the main entry point for starting a file transfer.
-// It is protected by a concurrency guard to prevent multiple simultaneous sends.
-func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
+func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo) {
 	task := func() error {
 		a.uiMessages <- sender.TransferStartedMsg{}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-
-		receiverURL := fmt.Sprintf("http://%s:%d", receiver.Addr.String(), receiver.Port)
+		receiverURL := fmt.Sprintf("http://%s", net.JoinHostPort(receiver.Addr.String(), fmt.Sprintf("%d", receiver.Port)))
 		a.apiClient.SetReceiverURL(receiverURL)
 
-		a.uiMessages <- sender.StatusUpdateMsg{Message: "Waiting for receiver's confirmation..."}
-	
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
-		config := webrtcPkg.Config{
-			ICEServers: []webrtc.ICEServer{},
-		}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(config)
+		config := webrtcPkg.Config{}
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(ctx, config, a.apiClient)
 		if err != nil {
-			err := fmt.Errorf("failed to create webrtc connection: %w", err)
-			log.Printf("[StartSendProcess] %v", err)
-			return err
+			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
-		a.webrtcConn = webrtcConn
-		defer a.webrtcConn.Close()
+		defer webrtcConn.Close()
 
-		signaler := api.NewAPISignaler(ctx, a.apiClient, a.webrtcConn.AddICECandidate)
-		webrtcConn.SetSignaler(signaler)
-
-		a.uiMessages <- sender.StatusUpdateMsg{Message: "Sending files..."}
-		if err := a.webrtcConn.Establish(ctx, a.selectedFiles); err != nil {
-			err := fmt.Errorf("could not establish webrtc connection: ")
-			log.Printf("[StartSendProcess] %v", err)
-			return err
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
+		if err := webrtcConn.Establish(ctx, a.selectedFiles); err != nil {
+			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
-		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Sending files..."}
-		time.Sleep(2 * time.Second) // Simulate file transfer
+
+		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
+
+		// TODO: Add actual file transfer logic over the webrtcConn.
+
+		if err := webrtcConn.SendFiles(ctx, a.selectedFiles); err != nil {
+			return fmt.Errorf("failed to send files: %w", err)
+		}
 
 		return nil // Success
 	}
@@ -174,9 +169,9 @@ func (a *App) StartSendProcess(receiver discovery.ServiceInfo) {
 		err := a.guard.Execute(task)
 		if err != nil {
 			if err == concurrency.ErrBusy {
-				a.uiMessages <- sender.ErrorMsg{Err: fmt.Errorf("a transfer is already in progress")}
+				a.sendAndLogError("A transfer is already in progress", err)
 			} else {
-				a.uiMessages <- sender.ErrorMsg{Err: err}
+				a.sendAndLogError("Transfer failed", err)
 			}
 		} else {
 			a.uiMessages <- sender.TransferCompleteMsg{}

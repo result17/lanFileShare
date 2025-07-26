@@ -1,10 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 
@@ -40,8 +40,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registerRoutes connects all handlers and middleware.
 func (a *API) registerRoutes() {
 	askHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.AskHandler))
-	a.mux.Handle("POST /ask", askHandlerWithMiddleware)
-	a.mux.Handle("POST /candidate", http.HandlerFunc(a.server.CandidateHandler))
+	a.mux.HandleFunc("POST /ask", askHandlerWithMiddleware.ServeHTTP)
+	a.mux.HandleFunc("POST /candidate", a.server.CandidateHandler)
 }
 
 // ReceiverGuard manages the server's state and core logic.
@@ -65,13 +65,12 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		task := func() error {
 			next.ServeHTTP(w, r)
-			<-s.stateManager.WaitForTransferDone()
 			return nil
 		}
 
 		err := s.guard.Execute(task)
 		if errors.Is(err, concurrency.ErrBusy) {
-			log.Println("Request rejected, server is busy!")
+			slog.Info("Request rejected, server is busy!")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -83,12 +82,14 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 
 // AskPayload is the structure of the request body for the /ask endpoint.
 type AskPayload struct {
-	Files []fileInfo.FileNode         `json:"files"`
+	Files []fileInfo.FileNode       `json:"files"`
 	Offer webrtc.SessionDescription `json:"offer"`
 }
 
 // AskHandler is the core business logic for handling /ask requests.
 func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
+	defer s.stateManager.CloseRequest()
+
 	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -96,13 +97,9 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("Ask received", "offer_type", req.Offer.Type)
 
-	if err := s.stateManager.SetOffer(req.Offer); err != nil {
-		http.Error(w, "Server is busy or failed to set offer", http.StatusServiceUnavailable)
-		return
-	}
-
-	decisionChan, err := s.stateManager.CreateRequest()
+	decisionChan, err := s.stateManager.CreateRequest(req.Offer)
 	if err != nil {
+		slog.Error("failed to create request", "error", err) 
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
 	}
@@ -114,50 +111,70 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		slog.Error("failed to support streaming")
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-
-	decision := <-decisionChan
-	if decision == app.Rejected {
-		slog.Info("Request rejected by user")
-		s.sendRejection(w, flusher)
-		s.stateManager.CloseRequest()
+	select {
+	case <-r.Context().Done():
+		slog.Warn("Request context cancelled before processing")
 		return
+	case decision := <-decisionChan:
+		if decision == app.Rejected {
+			slog.Info("Request rejected by user")
+			s.sendRejection(w)
+			return
+		}
 	}
 
 	slog.Info("Request accepted by user")
-	if err := s.sendAnswer(w, flusher); err != nil {
+	if err := s.sendAnswer(w, flusher, r.Context()); err != nil {
 		slog.Error("Failed to send answer", "error", err)
-		s.stateManager.CloseRequest()
 		return
 	}
 
-	if err := s.streamCandidates(w, flusher); err != nil {
+	if err := s.streamCandidates(w, flusher, r.Context()); err != nil {
 		slog.Error("Failed to stream candidates", "error", err)
 	}
-	s.stateManager.CloseRequest()
 }
 
 // sendRejection sends a rejection message to the sender.
-func (s *ReceiverGuard) sendRejection(w http.ResponseWriter, flusher http.Flusher) {
+func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		slog.Error("failed to support streaming for rejection")
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+	}
 	response := map[string]string{"status": "rejected"}
-	jsonResponse, _ := json.Marshal(response)
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		slog.Error("Failed to marshal rejection response", "error", err)
+		http.Error(w, "Failed to process rejection", http.StatusInternalServerError)
+		return
+	}
 	fmt.Fprintf(w, "event: rejection\ndata: %s\n\n", jsonResponse)
+
 	flusher.Flush()
 }
 
 // sendAnswer waits for the WebRTC answer and sends it as an SSE event.
-func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) error {
+func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
 	answerChan := s.stateManager.GetAnswerChan()
-	answer, ok := <-answerChan
-	if !ok {
-		return fmt.Errorf("answer channel was closed unexpectedly")
+
+	var answer webrtc.SessionDescription
+	var ok bool
+
+	select {
+	case answer, ok = <-answerChan:
+		if !ok {
+			return fmt.Errorf("answer channel was closed unexpectedly")
+		}
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	slog.Info("Sending answer to sender", "answer_type", answer.Type)
-	
-	// **Corrected logic**: Marshal the received struct into a JSON object
+
 	response := map[string]webrtc.SessionDescription{"answer": answer}
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
@@ -170,13 +187,13 @@ func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher) 
 }
 
 // streamCandidates waits for ICE candidates and streams them as SSE events.
-func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flusher) error {
+func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
 	slog.Info("Now streaming ICE candidates to sender...")
 	candidateChan := s.stateManager.GetCandidateChan()
 
+	// Ensure that the implementation guarantees that will always be closed after the peer connection is established or has failed
 	for candidate := range candidateChan {
 		slog.Info("Sending candidate to sender", "candidate", candidate.Candidate)
-		
 		response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
 		jsonResponse, err := json.Marshal(response)
 		if err != nil {
@@ -201,7 +218,14 @@ func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request)
 	}
 	slog.Info("Candidate received", "request", req)
 
-	// This will be changed in a later step.
+	if err := s.stateManager.SetCandidate(req); err != nil {
+		slog.Error("Failed to add ICE candidate", "error", err)
+		// Consider what status code is appropriate here, e.g., 500
+		http.Error(w, "Failed to process ICE candidate", http.StatusInternalServerError)
+		return
+	}
+
+	// TODO This will be changed in a later step.
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Candidate received successfully")
 }

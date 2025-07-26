@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rescp17/lanFileSharer/internal/app_events"
 	receiverEvent "github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileTree"
@@ -42,7 +43,7 @@ var DefaultKeyMap = KeyMap{
 	Reject: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "Reject")),
 }
 
-func initReceiverModel(app AppController, port int) receiverModel {
+func initReceiverModel(port int) receiverModel {
 	s := style.NewSpinner()
 
 	return receiverModel{
@@ -71,6 +72,8 @@ func (m model) receiverView() string {
 		return fmt.Sprintf("%s\n%s", m.receiver.fileTree.View(), style.HelpStyle.Render(help))
 	case receivingFiles:
 		return fmt.Sprintf("\n\n %s Receiving files...", m.receiver.spinner.View())
+	case receiveComplete: // Add this new case
+		return "\nFile transfer complete!\n\nPress Enter to exit."
 	case receiveFailed:
 		return fmt.Sprintf("\nAn error occurred: %v\n\nPress Enter to restart.", style.ErrorStyle.Render(m.receiver.lastError.Error()))
 	default:
@@ -78,24 +81,32 @@ func (m model) receiverView() string {
 	}
 }
 
+func (m *model) resetReceiver() (tea.Model, tea.Cmd) {
+	m.receiver = initReceiverModel(m.receiver.port)
+	return m, m.Init()
+}
+
 func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case receiverEvent.ErrorMsg:
+	case appevents.ErrorMsg:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
 		return m, m.listenForAppMessages()
 
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
 		switch m.receiver.state {
 		case receiveFailed:
-			if msg.String() == "enter" {
-				*m = InitialModel(Receiver, m.receiver.port)
-				return m, m.Init()
+			if msg.Type == tea.KeyEnter {
+				 return m.resetReceiver()
+			}
+		case receiveComplete:
+			if msg.Type == tea.KeyEnter {
+				return m, tea.Quit
 			}
 		case awaitingConfirmation:
 			switch {
@@ -105,8 +116,8 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForAppMessages()
 			case key.Matches(msg, DefaultKeyMap.Reject):
 				m.appController.AppEvents() <- receiverEvent.RejectFileRequestEvent{}
-				*m = InitialModel(Receiver, m.receiver.port)
-				return m, m.Init()
+				m.receiver = initReceiverModel(m.receiver.port)
+				return m.resetReceiver()
 			default:
 				newFileTree, cmd := m.receiver.fileTree.Update(msg)
 				m.receiver.fileTree = newFileTree.(fileTree.Model)
@@ -116,13 +127,15 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case receiverEvent.FileNodeUpdateMsg:
 		if m.receiver.state == awaitingConnection {
-			m.receiver.state = awaitingConfirmation // 直接进入等待确认状态
+			m.receiver.state = awaitingConfirmation // Transition to confirmation state
 			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 			cmds = append(cmds, m.listenForAppMessages())
 		}
+	case receiverEvent.TransferCompleteMsg:
+		m.receiver.state = receiveComplete
+		return m, nil // Stop listening for other app messages
 	}
 
-	// 为 spinner 更新这样的通用组件传递消息
 	var spinCmd tea.Cmd
 	m.receiver.spinner, spinCmd = m.receiver.spinner.Update(msg)
 	cmds = append(cmds, spinCmd)

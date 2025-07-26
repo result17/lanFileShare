@@ -2,17 +2,16 @@ package ui
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
-	"github.com/rescp17/lanFileSharer/internal/style"
-	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
-
 )
 
 // senderState defines the different states of the sender UI.
@@ -36,6 +35,7 @@ type senderModel struct {
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
 	lastError       error
+	viewError       error
 }
 
 var columns = []table.Column{
@@ -94,15 +94,18 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle messages from the app logic layer first
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			if m.cancel != nil {
+				m.cancel()
+			}
 			m.appController.AppEvents() <- senderEvent.QuitAppMsg{}
 			return m, tea.Quit
 		}
 	case senderEvent.FoundServicesMsg:
-		log.Printf("Discovery Update: Found %d services.", len(msg.Services))
+		slog.Info("Discovery update", "service_count", len(msg.Services))
 		for _, s := range msg.Services {
-			log.Printf("  - Service: %s, Addr: %s, Port: %d", s.Name, s.Addr, s.Port)
+			slog.Debug("Found service", "name", s.Name, "addr", s.Addr, "port", s.Port)
 		}
 
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
@@ -118,9 +121,12 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
 		return m, m.listenForAppMessages()
+	case senderEvent.ReceiverAcceptedMsg:
+		m.sender.state = sendingFiles
+		return m, m.listenForAppMessages()
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
-		log.Println("Status Update:", msg.Message) // For now, just log
+		slog.Info("Status Update", "message", msg.Message) // For now, just log
 		return m, m.listenForAppMessages()
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
@@ -136,13 +142,21 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case selectingReceiver:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			if msg.String() == "enter" {
-				if len(m.sender.table.SelectedRow()) > 0 {
-					selectedIndex, _ := strconv.Atoi(m.sender.table.SelectedRow()[0])
-					m.sender.selectedService = m.sender.services[selectedIndex]
-					m.sender.state = selectingFiles
+			switch msg.Type {
+			case tea.KeyEnter:
+				if len(m.sender.services) > 0 {
+					selectedIndex := m.sender.table.Cursor()
+					if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
+						m.sender.viewError = nil // Reset any previous error
+						m.sender.selectedService = m.sender.services[selectedIndex]
+						m.sender.state = selectingFiles
+						return m, nil
+					}
+					// This case should ideally not be hit, but good to have for safety
+					err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
+					slog.Error("Cursor out of sync", "error", err)
+					m.sender.viewError = err
 				}
-				return m, nil
 			}
 		}
 		var cmd tea.Cmd
@@ -163,8 +177,9 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 	case transferComplete, transferFailed:
-		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
-			m.sender = initSenderModel()
+		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
+			m.sender.reset()
+			m.sender.state = findingReceivers // Explicitly set state
 			return m, m.initSender()
 		}
 	}
@@ -183,6 +198,9 @@ func (m *model) senderView() string {
 	case selectingReceiver:
 		s := fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
 		s += style.BaseStyle.Render(m.sender.table.View()) + "\n"
+		if m.sender.viewError != nil {
+			s += style.ErrorStyle.Render(m.sender.viewError.Error()) + "\n"
+		}
 		s += "Use arrow keys to navigate, Enter to select."
 		return s
 	case selectingFiles:
@@ -198,4 +216,8 @@ func (m *model) senderView() string {
 	default:
 		return "Internal error: unknown sender state"
 	}
+}
+
+func (m *senderModel) reset() {
+	*m = initSenderModel()
 }
