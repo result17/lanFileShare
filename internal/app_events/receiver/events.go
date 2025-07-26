@@ -2,7 +2,6 @@ package receiver
 
 import (
 	"github.com/rescp17/lanFileSharer/internal/app_events"
-	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
