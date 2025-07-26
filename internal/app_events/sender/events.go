@@ -23,7 +23,6 @@ type SendFilesMsg struct {
 var (
 	// These static checks ensure that our event types correctly implement the AppEvent interface.
 	// The code will not compile if they don't.
-	_ app_events.AppEvent = (*QuitAppMsg)(nil)
 	_ app_events.AppEvent = (*SendFilesMsg)(nil)
 )
 

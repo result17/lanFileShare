@@ -65,7 +65,7 @@ func (a *App) InboundCandidateChan() chan<- webrtc.ICECandidateInit {
 
 // Run starts the application's main event loop and services.
 func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
-	a.startRegistration(ctx, a.port)
+	a.startRegistration(ctx, a.port, cancel)
 	a.startServer(ctx, a.port, cancel)
 
 	for {
@@ -78,6 +78,8 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) {
 				if err := a.activeConn.Peer().AddICECandidate(candidate); err != nil {
 					slog.Warn("Failed to add inbound ICE candidate", "error", err)
 				}
+			} else {
+				 slog.Warn("Received an ICE candidate but there is no active connection.")
 			}
 			a.connMu.Unlock()
 		case event := <-a.appEvents:
@@ -112,6 +114,7 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 
 	webRTCAPI := webrtcPkg.NewWebrtcAPI()
 	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtcPkg.Config{})
+	a.setActiveConn(receiverConn)
 	if err != nil {
 		a.sendAndLogError("Failed to create receiver connection", err)
 		return err
@@ -167,7 +170,7 @@ func (a *App) AppEvents() chan<- app_events.AppEvent {
 	return a.appEvents
 }
 
-func (a *App) startRegistration(ctx context.Context, port int) {
+func (a *App) startRegistration(ctx context.Context, port int, cancel context.CancelFunc) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		a.sendAndLogError("Could not get hostname", err)
@@ -188,7 +191,7 @@ func (a *App) startRegistration(ctx context.Context, port int) {
 		if err != nil {
 			a.sendAndLogError("Failed to start mDNS announcement", err)
 			// exit the app if we can't announce
-			<-ctx.Done()
+			cancel()
 			return
 		}
 	}()
@@ -219,12 +222,22 @@ func (a *App) startServer(ctx context.Context, port int, cancel context.CancelFu
 
 func (a *App) closeActiveConnection() {
 	a.connMu.Lock()
+	defer a.connMu.Unlock()
 
 	if a.activeConn != nil {
 		slog.Info("Closing active connection.")
 		a.activeConn.Close()
 		a.activeConn = nil
 	}
-	defer a.connMu.Unlock()
+}
+
+func (a *App) setActiveConn(conn *webrtcPkg.ReceiverConn) {
+	a.connMu.Lock()
+	if a.activeConn != nil {
+		slog.Warn("An active connection already exits. Closing it before creating a new one.")
+		a.activeConn.Close()
+	}
+	a.activeConn = conn
+	a.connMu.Unlock()
 
 }

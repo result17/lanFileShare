@@ -2,6 +2,7 @@ package receiver
 
 import (
 	"github.com/rescp17/lanFileSharer/internal/app_events"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
@@ -23,4 +24,8 @@ type RejectFileRequestEvent struct {
 type FileNodeUpdateMsg struct {
 	app_events.UIMsg
 	Nodes []fileInfo.FileNode
+}
+
+type TransferCompleteMsg struct {
+	app_events.UIMsg
 }

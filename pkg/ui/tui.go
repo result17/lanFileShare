@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
+	"github.com/rescp17/lanFileSharer/pkg/discovery"
 )
 
 type mode int
@@ -34,11 +35,11 @@ func InitialModel(m mode, port int) model {
 
 	switch m {
 	case Sender:
-		appController = senderApp.NewApp()
+		appController = senderApp.NewApp(&discovery.MDNSAdapter{})
 		sender = initSenderModel()
 	case Receiver:
 		appController = receiverApp.NewApp(port)
-		receiver = initReceiverModel(appController, port)
+		receiver = initReceiverModel(port)
 	}
 
 	return model{

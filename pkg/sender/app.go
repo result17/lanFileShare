@@ -31,13 +31,13 @@ type App struct {
 }
 
 // NewApp creates a new sender application instance.
-func NewApp() *App {
+func NewApp(adapter discovery.Adapter) *App {
 	serviceID := uuid.New().String()
 	webrtcAPI := webrtcPkg.NewWebrtcAPI()
 	return &App{
 		serviceID:  serviceID,
 		guard:      concurrency.NewConcurrencyGuard(),
-		discoverer: &discovery.MDNSAdapter{},
+		discoverer: adapter,
 		apiClient:  api.NewClient(serviceID),
 		uiMessages: make(chan tea.Msg, 10),
 		appEvents:  make(chan app_events.AppEvent),
@@ -141,7 +141,13 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		}
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
-		time.Sleep(2 * time.Second) // Simulate file transfer preparation
+		
+// TODO: Add actual file transfer logic over the webrtcConn.
+
+if err := webrtcConn.SendFiles(tctx, a.selectedFiles); err != nil {
+    return fmt.Errorf("failed to send files: %w", err)
+}
+
 
 		return nil // Success
 	}

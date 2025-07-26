@@ -3,6 +3,7 @@ package webrtc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/pion/ice/v4"
@@ -95,15 +96,12 @@ func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiC
 	}
 
 	signaler := api.NewAPISignaler(ctx, apiClient, conn.Peer().AddICECandidate)
-	conn.setSignaler(signaler)
+	conn.signaler = signaler
 
 	return conn, nil
 
 }
 
-func (c *SenderConn) setSignaler(signaler Signaler) {
-	c.signaler = signaler
-}
 
 func (a *WebrtcAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
 	pc, err := a.createPeerconnection(config)
@@ -135,28 +133,28 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 	offer, err := c.Peer().CreateOffer(nil)
 	if err != nil {
 		slog.Error("Failed to create offer", "error", err)
-		return err
+		return fmt.Errorf("failed to create offer: %w", err)
 	}
 
 	if err := c.Peer().SetLocalDescription(offer); err != nil {
 		slog.Error("Failed to set local description", "error", err)
-		return err
+		return fmt.Errorf("failed to set local description: %w", err)
 	}
 
 	if err := c.signaler.SendOffer(offer, fileNodes); err != nil {
 		slog.Error("Failed to send offer via signaler", "error", err)
-		return err
+		return fmt.Errorf("failed to send offer via signaler: %w", err)
 	}
 
 	answer, err := c.signaler.WaitForAnswer(ctx)
 	if err != nil {
 		slog.Error("Failed to wait for answer", "error", err)
-		return err
+		return fmt.Errorf("failed to wait for answer: %w", err)
 	}
 
 	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
 		slog.Error("Failed to set remote description for answer", "error", err)
-		return err
+		return fmt.Errorf("failed toet remote description for answer: %w", err)
 	}
 
 	return nil
@@ -190,5 +188,10 @@ func (c *Connection) Close() error {
 		slog.Info("Closing WebRTC connection")
 		return c.peerConnection.Close()
 	}
+	return nil
+}
+
+func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode) error {
+	// TODO
 	return nil
 }

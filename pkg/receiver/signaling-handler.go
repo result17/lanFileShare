@@ -12,15 +12,20 @@ import (
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
+type answerResult struct {
+	answer *webrtc.SessionDescription
+	err    error
+}
+
 type SignalingHandler struct {
 	mu         sync.Mutex
 	webrtcConn *webrtcPkg.ReceiverConn
-	answerChan chan *webrtc.SessionDescription
+	answerChan     chan answerResult
 }
 
 func NewSignalingHandler() *SignalingHandler {
 	return &SignalingHandler{
-		answerChan: make(chan *webrtc.SessionDescription, 1),
+		answerChan: make(chan answerResult, 1),
 	}
 }
 
@@ -52,11 +57,15 @@ func (h *SignalingHandler) OfferHandler(w http.ResponseWriter, r *http.Request) 
 		answer, err := conn.HandleOfferAndCreateAnswer(offer)
 		if err != nil {
 			err := fmt.Errorf("failed to create answer: %w", err)
-			slog.Info("[OfferHandler]: %v", err)
-			http.Error(w, "Failed to add ICE candidate", http.StatusInternalServerError)
+			slog.Error("[OfferHandler]: %v", err)
+			h.answerChan <- answerResult{
+				err: err,
+			}
 			return
 		}
-		h.answerChan <- answer
+		h.answerChan <- answerResult{
+			answer: answer,
+		}
 	}()
 
 	w.WriteHeader(http.StatusOK)
@@ -76,14 +85,14 @@ func (h *SignalingHandler) AnswerStreamHandler(w http.ResponseWriter, r *http.Re
 	slog.Info("SSE Connected. Waiting for answer.")
 
 	select {
-	case answer := <-h.answerChan:
-		if answer == nil {
-			slog.Info("SSE answer channel closed, stop connection.")
+	case answerResult := <-h.answerChan:
+		if answerResult.answer == nil {
+			slog.Error("SSE answer channel closed, stop connection.")
 			return
 		}
-		answerJSON, err := json.Marshal(answer)
+		answerJSON, err := json.Marshal(answerResult.answer)
 		if err != nil {
-			slog.Info("failed to encode answer json %v", err)
+			slog.Error("failed to encode answer json %v", err)
 			return
 		}
 		fmt.Fprintf(w, "event: answer\ndata: %s\n\n", answerJSON)
@@ -111,6 +120,8 @@ func (h *SignalingHandler) ICECandidateHanlder(w http.ResponseWriter, r *http.Re
 	}
 	if err := conn.Peer().AddICECandidate(candidate); err != nil {
 		slog.Info("failed to add ICE candidate %v", err)
+		http.Error(w, "Failed to add ICE candidate", http.StatusInternalServerError)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }

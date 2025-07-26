@@ -101,7 +101,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case senderEvent.FoundServicesMsg:
-		log.Printf("Discovery Update: Found %d services.", len(msg.Services))
+		slog.Info("Discovery update", "service_count", len(msg.Services))
 		for _, s := range msg.Services {
 			log.Printf("  - Service: %s, Addr: %s, Port: %d", s.Name, s.Addr, s.Port)
 		}
@@ -142,22 +142,18 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.Type {
 			case tea.KeyEnter:
-				if len(m.sender.table.SelectedRow()) > 0 {
-					selectedIndex, err := strconv.Atoi(m.sender.table.SelectedRow()[0])
-					if err != nil {
-						slog.Error("Failed to parse selected index", "error", err)
+				if len(m.sender.services) > 0 {
+					selectedIndex := m.sender.table.Cursor()
+					if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
+						m.sender.viewError = nil // Reset any previous error
+						m.sender.selectedService = m.sender.services[selectedIndex]
+						m.sender.state = selectingFiles
 						return m, nil
 					}
-					if selectedIndex < 0 || selectedIndex >= len(m.sender.services) {
-						err := fmt.Errorf("selected index %d out of range (0-%d)", selectedIndex, len(m.sender.services)-1)
-						slog.Error("Selected index out of range", "error", err)
-						m.sender.viewError = err
-						return m, nil
-					}
-					m.sender.viewError = nil // Reset any previous error
-					m.sender.selectedService = m.sender.services[selectedIndex]
-					m.sender.state = selectingFiles
-					return m, nil
+					// This case should ideally not be hit, but good to have for safety
+					err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
+					slog.Error("Cursor out of sync", "error", err)
+					m.sender.viewError = err
 				}
 			}
 		}
@@ -180,7 +176,8 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case transferComplete, transferFailed:
 		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
-			m.sender = initSenderModel()
+			m.sender.reset()
+			m.sender.state = findingReceivers // Explicitly set state
 			return m, m.initSender()
 		}
 	}
@@ -217,4 +214,14 @@ func (m *model) senderView() string {
 	default:
 		return "Internal error: unknown sender state"
 	}
+}
+
+func (m *senderModel) reset() {
+	// Logic from initSenderModel, but applied to the existing struct
+	initial := initSenderModel()
+	m.state = initial.state
+	m.fp = initial.fp
+	m.table = initial.table
+	m.spinner = initial.spinner
+	// etc.
 }

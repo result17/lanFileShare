@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -101,6 +102,12 @@ func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) {
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.AnswerChan != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore "send on closed channel" panic
+				slog.Warn("Attempted to send answer on closed channel", "error", r)
+			}
+		}()
 		m.state.AnswerChan <- answer
 		close(m.state.AnswerChan) // Answer is sent only once
 	}
@@ -128,9 +135,11 @@ func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) error {
 		defer func() {
 			if r := recover(); r != nil {
 				// Ignore "send on closed channel" panic
+				slog.Warn("Attempted to send candidate on closed channel", "error", r)
 			}
 		}()
 		m.state.CandidateChan <- candidate
+		return nil
 	}
 	return errors.New("no active request state or candidate channel is not initialized")
 }
@@ -141,14 +150,13 @@ func (m *StateManager) CloseCandidateChan() {
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.CandidateChan != nil {
-		select {
-		case _, ok := <-m.state.CandidateChan:
-			if !ok {
-				return
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore "send on closed channel" panic
+				slog.Warn("Attempted to send candidate on closed channel", "error", r)
 			}
-		default:
-			close(m.state.CandidateChan)
-		}
+		}()
+		close(m.state.CandidateChan)
 	}
 }
 
@@ -171,13 +179,10 @@ func (m *StateManager) CloseRequest() {
 	defer m.mu.Unlock()
 
 	if m.state != nil {
-		select {
-		case _, ok := <-m.state.TransferDone:
-			if !ok {
-			}
-		default:
-			close(m.state.TransferDone)
-		}
+		defer func() {
+			recover()
+		}()
+		close(m.state.TransferDone)
 	}
 	m.state = nil
 }

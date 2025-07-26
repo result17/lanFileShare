@@ -40,8 +40,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // registerRoutes connects all handlers and middleware.
 func (a *API) registerRoutes() {
 	askHandlerWithMiddleware := a.server.ConcurrencyControlMiddleware(http.HandlerFunc(a.server.AskHandler))
-	a.mux.Handle("POST /ask", askHandlerWithMiddleware)
-	a.mux.Handle("POST /candidate", http.HandlerFunc(a.server.CandidateHandler))
+	a.mux.HandleFunc("POST /ask", askHandlerWithMiddleware.ServeHTTP)
+	a.mux.HandleFunc("POST /candidate", a.server.CandidateHandler)
 }
 
 // ReceiverGuard manages the server's state and core logic.
@@ -105,6 +105,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 
 	decisionChan, err := s.stateManager.CreateRequest()
 	if err != nil {
+		slog.Error("failed to create request", "error", err) 
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
 	}
@@ -116,6 +117,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		slog.Error("failed to support streaming")
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
@@ -123,8 +125,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 		slog.Warn("Request context cancelled before processing")
 		return
-	case <-decisionChan:
-		decision := <-decisionChan
+	case decision := <-decisionChan:
 		if decision == app.Rejected {
 			slog.Info("Request rejected by user")
 			s.sendRejection(w, flusher)
@@ -225,7 +226,7 @@ func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// This will be changed in a later step.
+	// TODO This will be changed in a later step.
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Candidate received successfully")
 }

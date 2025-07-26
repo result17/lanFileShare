@@ -93,7 +93,6 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	errChan := make(chan error, 2)
 	dataChanMsg := make(chan string, 1)
 	done := make(chan struct{})
-	defer close(done)
 
 	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
@@ -140,7 +139,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		case offer = <-signaler.offerChan:
 			t.Log("Receiver: Got offer")
 		case <-ctx.Done():
-			t.Errorf("receiver timed out waiting for offer: %w", ctx.Err())
+			errChan <- fmt.Errorf("receiver timed out waiting for offer: %w", ctx.Err())
 			return
 		}
 
@@ -161,13 +160,13 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	go func() {
 		dc, err := senderConn.Peer().CreateDataChannel("file-transfer", nil)
 		if err != nil {
-			t.Errorf("sender failed to create data channel: %w", err)
+			errChan <- fmt.Errorf("sender failed to create data channel: %w", err)
 			return
 		}
 		dc.OnOpen(func() {
 			t.Log("Sender: DataChannel opened, sending message")
 			if err := dc.SendText("Hello, Receiver!"); err != nil {
-				t.Errorf("sender failed to send text: %w", err)
+				errChan <- fmt.Errorf("sender failed to send text: %w", err)
 			}
 		})
 
@@ -192,5 +191,6 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Test timed out waiting for message")
 	}
+	close(done)
 }
 

@@ -43,7 +43,7 @@ var DefaultKeyMap = KeyMap{
 	Reject: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "Reject")),
 }
 
-func initReceiverModel(app AppController, port int) receiverModel {
+func initReceiverModel(port int) receiverModel {
 	s := style.NewSpinner()
 
 	return receiverModel{
@@ -72,6 +72,8 @@ func (m model) receiverView() string {
 		return fmt.Sprintf("%s\n%s", m.receiver.fileTree.View(), style.HelpStyle.Render(help))
 	case receivingFiles:
 		return fmt.Sprintf("\n\n %s Receiving files...", m.receiver.spinner.View())
+	case receiveComplete: // Add this new case
+		return "\nFile transfer complete!\n\nPress Enter to exit."
 	case receiveFailed:
 		return fmt.Sprintf("\nAn error occurred: %v\n\nPress Enter to restart.", style.ErrorStyle.Render(m.receiver.lastError.Error()))
 	default:
@@ -95,7 +97,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.receiver.state {
 		case receiveFailed:
 			if msg.Type == tea.KeyEnter {
-				 m.receiver = initReceiverModel(m.appController, m.receiver.port)
+				 m.receiver = initReceiverModel(m.receiver.port)
 				return m, m.Init()
 			}
 		case awaitingConfirmation:
@@ -106,7 +108,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForAppMessages()
 			case key.Matches(msg, DefaultKeyMap.Reject):
 				m.appController.AppEvents() <- receiverEvent.RejectFileRequestEvent{}
-				 m.receiver = initReceiverModel(m.appController, m.receiver.port)
+				 m.receiver = initReceiverModel(m.receiver.port)
 				return m, m.Init()
 			default:
 				newFileTree, cmd := m.receiver.fileTree.Update(msg)
@@ -121,6 +123,9 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 			cmds = append(cmds, m.listenForAppMessages())
 		}
+	case receiverEvent.TransferCompleteMsg:
+		m.receiver.state = receiveComplete
+		return m, nil // Stop listening for other app messages
 	}
 
 	var spinCmd tea.Cmd
