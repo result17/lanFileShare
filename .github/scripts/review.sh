@@ -12,24 +12,21 @@ FILE_EXTENSIONS_TO_REVIEW="go"
 
 echo "Finding changed files..."
 
-# --- FIX START ---
-# Run the command to get changed files, but add '|| true' to the end of the
-# grep command. This ensures that even if grep finds nothing (and exits with 1),
-# the pipeline will continue and not trigger 'set -e'.
+# Get changed files, using '|| true' to prevent grep from failing when no matches are found
 CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E "\.($FILE_EXTENSIONS_TO_REVIEW)$" || true)
 
-# Now, check if the CHANGED_FILES variable is empty.
+# Exit if no files need to be reviewed
 if [ -z "$CHANGED_FILES" ]; then
   echo "No files with specified extensions (.${FILE_EXTENSIONS_TO_REVIEW}) changed. Skipping review."
-  exit 0 # Exit successfully.
+  exit 0
 fi
-# --- FIX END ---
 
 echo "Found changed files to review:"
 echo "$CHANGED_FILES"
 
-# Use a while-read loop to process the files from the variable.
+# Process each changed file
 echo "$CHANGED_FILES" | while read -r FILE; do
+  # Skip empty lines
   if [ -z "$FILE" ]; then
     continue
   fi
@@ -37,15 +34,20 @@ echo "$CHANGED_FILES" | while read -r FILE; do
   echo "-----------------------------------------------------"
   echo "Reviewing file: $FILE"
 
+  # Check if file still exists (might have been deleted)
+  if [ ! -f "$FILE" ]; then
+    echo "File $FILE has been deleted. Skipping review."
+    continue
+  fi
+
+  # Get file content and check if empty
   FILE_CONTENT=$(cat "$FILE")
   if [ -z "$FILE_CONTENT" ]; then
     echo "File is empty. Skipping."
     continue
   fi
 
-  # ... (The rest of your script remains the same) ...
-
-  # Construct the prompt for the Gemini model.
+  # Construct the prompt for the Gemini model
   PROMPT=$(cat <<EOF
 You are an expert Go programmer acting as a senior code reviewer for a project named "lanFileSharer".
 Your task is to provide a concise and constructive code review for the following file: \`$FILE\`.
@@ -68,11 +70,14 @@ $FILE_CONTENT
 EOF
 )
 
-  # Call the Gemini CLI.
+  # Call the Gemini CLI and handle potential errors
   echo "Sending to Gemini for review..."
-  REVIEW_COMMENT=$(echo "$PROMPT" | gemini)
+  if ! REVIEW_COMMENT=$(echo "$PROMPT" | gemini); then
+    echo "Error: Failed to get review from Gemini for $FILE"
+    continue
+  fi
 
-  # Format the review comment body.
+  # Format the review comment with a header
   COMMENT_BODY=$(cat <<EOF
 ### 🤖 Gemini Review for \`$FILE\`
 
@@ -80,16 +85,19 @@ $REVIEW_COMMENT
 EOF
 )
 
-  # Create a valid JSON payload using jq.
+  # Create JSON payload using jq
   JSON_PAYLOAD=$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')
 
-  # Post the comment to the PR.
+  # Post comment to GitHub PR with error handling
   echo "Posting review comment to PR #$PR_NUMBER..."
-  curl -s -S -f -X POST \
+  if ! curl -s -S -f -X POST \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github.v3+json" \
     "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/$PR_NUMBER/comments" \
-    -d "$JSON_PAYLOAD"
+    -d "$JSON_PAYLOAD"; then
+    echo "Error: Failed to post review comment for $FILE"
+    continue
+  fi
 
   echo "Review for $FILE posted successfully."
 done
