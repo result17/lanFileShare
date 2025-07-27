@@ -29,6 +29,7 @@ type App struct {
 	selectedFiles   []fileInfo.FileNode
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
+	discoveryErr    chan error
 }
 
 // NewApp creates a new sender application instance.
@@ -58,39 +59,35 @@ func (a *App) AppEvents() chan<- appevents.AppEvent {
 }
 
 // Run starts the application's main event loop.
-func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error { 
-	if err := a.startDiscovery(ctx); err != nil {
-		return err
-	}
+func (a *App) Run(ctx context.Context) error { 
+	a.startDiscovery(ctx)
+
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-a.discoveryErr:
+			a.sendAndLogError("Discovery process failed", err)
+			return err
 		case event := <-a.appEvents:
 			switch e := event.(type) {
-			case sender.QuitAppMsg:
-				cancel()
-				return nil
 			case sender.SendFilesMsg:
 				// show files to users
 				a.SelectFiles(e.Files)
 				a.StartSendProcess(ctx, e.Receiver)
-				return nil
 			}
 		}
 	}
 }
 
 // startDiscovery begins the process of finding receivers on the network.
-func (a *App) startDiscovery(ctx context.Context) error {
-	errChan := make(chan error, 1)
-
+func (a *App) startDiscovery(ctx context.Context) {
 	go func() {
 		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 		if err != nil {
 			a.sendAndLogError("Failed to start discovery", err)
-			errChan <- err
+			a.discoveryErr <- err
 			return
 		}
 
@@ -110,15 +107,6 @@ func (a *App) startDiscovery(ctx context.Context) error {
 			}
 		}
 	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <- errChan:
-			return err
-		}
-	}
 }
 
 // sendAndLogError is a helper function to both log an error and send it to the UI.
@@ -136,7 +124,7 @@ func (a *App) SelectFiles(files []fileInfo.FileNode) {
 func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo) {
 	task := func() error {
 		a.uiMessages <- sender.TransferStartedMsg{}
-
+		// TODO use https
 		receiverURL := fmt.Sprintf("http://%s", net.JoinHostPort(receiver.Addr.String(), fmt.Sprintf("%d", receiver.Port)))
 		a.apiClient.SetReceiverURL(receiverURL)
 

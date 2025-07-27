@@ -21,6 +21,8 @@ type SenderConnection interface {
 	CommonConnection
 	Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error
 	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+	getSignaler() Signaler
+	SendFiles(ctx context.Context, files []fileInfo.FileNode) error 
 }
 
 type ReceiverConnection interface {
@@ -40,6 +42,14 @@ type Connection struct {
 // Peer returns the underlying webrtc.PeerConnection object.
 func (c *Connection) Peer() *webrtc.PeerConnection {
 	return c.peerConnection
+}
+
+func (c *Connection) Close() error {
+	if c.peerConnection != nil {
+		slog.Info("Closing WebRTC connection")
+		return c.peerConnection.Close()
+	}
+	return nil
 }
 
 type SenderConn struct {
@@ -71,7 +81,7 @@ func NewWebrtcAPI() *WebrtcAPI {
 	}
 }
 
-func (a *WebrtcAPI) createPeerconnection(config Config) (*webrtc.PeerConnection, error) {
+func (a *WebrtcAPI) createPeerConnection(config Config) (*webrtc.PeerConnection, error) {
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: config.ICEServers,
 	}
@@ -80,11 +90,16 @@ func (a *WebrtcAPI) createPeerconnection(config Config) (*webrtc.PeerConnection,
 			{URLs: []string{"stun:stun.l.google.com:19302"}},
 		}
 	}
-	return a.api.NewPeerConnection(peerConnectionConfig)
+	pc, err := a.api.NewPeerConnection(peerConnectionConfig)
+	if err != nil {
+		// Just wrap and return. Let the caller log.
+		return nil, fmt.Errorf("failed to create new peer connection: %w", err)
+	}
+	return pc, nil
 }
 
-func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (*SenderConn, error) {
-	pc, err := a.createPeerconnection(config)
+func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (SenderConnection, error) {
+	pc, err := a.createPeerConnection(config)
 	if err != nil {
 		slog.Error("Failed to create peer connection for sender", "error", err)
 		return nil, err
@@ -102,9 +117,8 @@ func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiC
 
 }
 
-
 func (a *WebrtcAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
-	pc, err := a.createPeerconnection(config)
+	pc, err := a.createPeerConnection(config)
 	if err != nil {
 		slog.Error("Failed to create peer connection for receiver", "error", err)
 		return nil, err
@@ -151,6 +165,11 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 		slog.Error("Failed to wait for answer", "error", err)
 		return fmt.Errorf("failed to wait for answer: %w", err)
 	}
+	if answer == nil {
+		err := errors.New("received a nil answer")
+		slog.Error("Failed to establish connection", "error", err)
+		return err
+	}
 
 	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
 		slog.Error("Failed to set remote description for answer", "error", err)
@@ -183,15 +202,11 @@ func (c *SenderConn) CreateDataChannel(label string, options *webrtc.DataChannel
 	return c.peerConnection.CreateDataChannel(label, options)
 }
 
-func (c *Connection) Close() error {
-	if c.peerConnection != nil {
-		slog.Info("Closing WebRTC connection")
-		return c.peerConnection.Close()
-	}
-	return nil
-}
-
 func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode) error {
 	// TODO
 	return nil
+}
+
+func (c *SenderConn) getSignaler() Signaler {
+	return c.signaler
 }

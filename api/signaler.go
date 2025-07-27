@@ -25,6 +25,8 @@ type APISignaler struct {
 	errChan             chan error
 }
 
+// 
+// Sender
 // NewAPISignaler creates a new signaler.
 // It requires a callback function, which will be used to pass ICE candidates received
 // from the receiver back to the sender's PeerConnection.
@@ -51,6 +53,7 @@ func (s *APISignaler) SendOffer(offer webrtc.SessionDescription, files []fileInf
 
 	payload := AskPayload{
 		Files: files,
+		Offer: offer,
 		// The actual offer is now part of the AppController/StateManager logic,
 		// but for the purpose of the request, we can imagine it being sent here
 		// or handled implicitly by the session.

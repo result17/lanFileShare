@@ -10,7 +10,7 @@ import (
 // Both Sender and Receiver apps should implement this interface.
 type AppController interface {
 	// Run starts the backend services and the event loop.
-	Run(ctx context.Context, cancel context.CancelFunc) error
+	Run(ctx context.Context) error
 
 	// UIMessages returns a read-only channel for receiving messages from the backend to the UI.
 	UIMessages() <-chan tea.Msg

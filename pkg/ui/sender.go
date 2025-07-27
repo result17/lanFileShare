@@ -35,7 +35,6 @@ type senderModel struct {
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
 	lastError       error
-	viewError       error
 }
 
 var columns = []table.Column{
@@ -89,18 +88,48 @@ func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
+	if cmd, processed := m.handleSenderAppEvent(msg); processed {
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	// Handle UI events
+	switch m.sender.state {
+	case selectingReceiver:
+		cmd = m.updateSelectingReceiverState(msg)
+	case selectingFiles:
+		cmd = m.updateSelectingFilesState(msg)
+	case transferComplete, transferFailed:
+		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
+			m.sender.reset()
+			m.sender.state = findingReceivers // Explicitly set state
+			return m, m.initSender()
+		}
+	}
 
-	// Handle messages from the app logic layer first
+	var spinCmd tea.Cmd
+	m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
+
+	return m, tea.Batch(cmd, spinCmd)
+}
+
+func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC:
-			if m.cancel != nil {
-				m.cancel()
+		case tea.KeyEnter:
+			if len(m.sender.services) > 0 {
+				selectedIndex := m.sender.table.Cursor()
+				if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
+					m.err = nil // Reset any previous error
+					m.sender.selectedService = m.sender.services[selectedIndex]
+					m.sender.state = selectingFiles
+					return tea.Quit, true
+				}
+				// This case should ideally not be hit, but good to have for safety
+				err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
+				slog.Error("Cursor out of sync", "error", err)
+				m.err = err
 			}
-			m.appController.AppEvents() <- senderEvent.QuitAppMsg{}
-			return m, tea.Quit
 		}
 	case senderEvent.FoundServicesMsg:
 		slog.Info("Discovery update", "service_count", len(msg.Services))
@@ -117,78 +146,67 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.updateReceiverTable(msg.Services)
-		return m, m.listenForAppMessages() // Continue listening
+		return m.listenForAppMessages(), true // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
 	case senderEvent.ReceiverAcceptedMsg:
 		m.sender.state = sendingFiles
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
 		slog.Info("Status Update", "message", msg.Message) // For now, just log
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
 	case senderEvent.ErrorMsg:
 		m.sender.state = transferFailed
 		m.sender.lastError = msg.Err
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
 	}
+	return nil, false
+}
 
-	// Handle UI events
-	switch m.sender.state {
-	case selectingReceiver:
-		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			switch msg.Type {
-			case tea.KeyEnter:
-				if len(m.sender.services) > 0 {
-					selectedIndex := m.sender.table.Cursor()
-					if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
-						m.sender.viewError = nil // Reset any previous error
-						m.sender.selectedService = m.sender.services[selectedIndex]
-						m.sender.state = selectingFiles
-						return m, nil
-					}
-					// This case should ideally not be hit, but good to have for safety
-					err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
-					slog.Error("Cursor out of sync", "error", err)
-					m.sender.viewError = err
+// updateSelectingReceiverState handles UI events for the selectingReceiver state.
+func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
+	// ... logic for key presses and table updates
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			if len(m.sender.services) > 0 {
+				selectedIndex := m.sender.table.Cursor()
+				if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
+					m.err = nil // Reset any previous error
+					m.sender.selectedService = m.sender.services[selectedIndex]
+					m.sender.state = selectingFiles
 				}
+				// This case should ideally not be hit, but good to have for safety
+				err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
+				slog.Error("Cursor out of sync", "error", err)
+				m.err = err
+				_, cmd := m.sender.table.Update(msg)
+				return cmd
 			}
-		}
-		var cmd tea.Cmd
-		m.sender.table, cmd = m.sender.table.Update(msg)
-		cmds = append(cmds, cmd)
 
-	case selectingFiles:
-		switch msg := msg.(type) {
-		case multiFilePicker.SelectedFileNodeMsg:
-			// The app will now send messages about the transfer progress
-			m.appController.AppEvents() <- senderEvent.SendFilesMsg{
-				Receiver: m.sender.selectedService,
-				Files:    msg.Files,
-			}
-		}
-		newFpModel, cmd := m.sender.fp.Update(msg)
-		m.sender.fp = newFpModel.(multiFilePicker.Model)
-		cmds = append(cmds, cmd)
-
-	case transferComplete, transferFailed:
-		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
-			m.sender.reset()
-			m.sender.state = findingReceivers // Explicitly set state
-			return m, m.initSender()
 		}
 	}
+	return nil
+}
 
-	var spinCmd tea.Cmd
-	m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
-	cmds = append(cmds, spinCmd)
-
-	return m, tea.Batch(cmds...)
+func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case multiFilePicker.SelectedFileNodeMsg:
+		// The app will now send messages about the transfer progress
+		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
+			Receiver: m.sender.selectedService,
+			Files:    msg.Files,
+		}
+	}
+	newFpModel, cmd := m.sender.fp.Update(msg)
+	m.sender.fp = newFpModel.(multiFilePicker.Model)
+	return cmd
 }
 
 func (m *model) senderView() string {
@@ -198,9 +216,6 @@ func (m *model) senderView() string {
 	case selectingReceiver:
 		s := fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
 		s += style.BaseStyle.Render(m.sender.table.View()) + "\n"
-		if m.sender.viewError != nil {
-			s += style.ErrorStyle.Render(m.sender.viewError.Error()) + "\n"
-		}
 		s += "Use arrow keys to navigate, Enter to select."
 		return s
 	case selectingFiles:

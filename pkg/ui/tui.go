@@ -73,7 +73,7 @@ func (m model) Init() tea.Cmd {
 	}
 
 	runCmd := func() tea.Msg {
-		if err := m.appController.Run(m.ctx, m.cancel); err != nil {
+		if err := m.appController.Run(m.ctx); err != nil {
 			slog.Error("App runtime error", "error", err)
 			return serverErrorMsg{err: err}
 		}
@@ -89,6 +89,7 @@ func (m model) View() string {
 	}
 
 	var s string
+
 	switch m.mode {
 	case Sender:
 		s += m.senderView()
@@ -97,7 +98,7 @@ func (m model) View() string {
 	default:
 		return ""
 	}
-	s += style.ErrorStyle.Render(m.sender.viewError.Error()) + "\n"
+	s += style.ErrorStyle.Render(m.err.Error()) + "\n"
 	s += "\nPress ctrl + c to quit"
 	return s
 }

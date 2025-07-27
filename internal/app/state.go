@@ -89,7 +89,12 @@ func (m *StateManager) SetDecision(decision Decision) error {
 	defer m.mu.Unlock()
 
 	if m.state != nil && m.state.DecisionChan != nil {
+		slog.Error("no active request")
 		return errors.New("no active request")
+	}
+	if m.state.decisionSent {
+		slog.Error("had made a decision")
+		return errors.New("had made a decision")
 	}
 	m.state.DecisionChan <- decision
 	m.state.decisionSent = true
@@ -98,20 +103,19 @@ func (m *StateManager) SetDecision(decision Decision) error {
 }
 
 // SetAnswer stores the generated answer from the WebRTC peer.
-func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) {
+func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state != nil && m.state.AnswerChan != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				// Ignore "send on closed channel" panic
-				slog.Warn("Attempted to send answer on closed channel", "error", r)
-			}
-		}()
-		m.state.AnswerChan <- answer
-		close(m.state.AnswerChan) // Answer is sent only once
+	if m.state == nil || m.state.AnswerChan == nil || m.state.answerSent {
+		slog.Error("answer had sent")
+		return errors.New("answer had sent")
 	}
+
+	m.state.AnswerChan <- answer
+	close(m.state.AnswerChan)
+	m.state.answerSent = true
+	return nil
 }
 
 // GetAnswerChan returns the channel from which the answer can be read.
@@ -132,11 +136,11 @@ func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state != nil && m.state.CandidateChan != nil {
+	if m.state != nil || m.state.CandidateChan != nil {
 		defer func() {
 			if r := recover(); r != nil {
 				// Ignore "send on closed channel" panic
-				slog.Warn("Attempted to send candidate on closed channel", "error", r)
+				slog.Error("Attempted to send candidate on closed channel", "error", r)
 			}
 		}()
 		m.state.CandidateChan <- candidate

@@ -62,7 +62,7 @@ func (m *mockSignaler) SendCandidateFromReceiver(candidate webrtc.ICECandidateIn
 	m.receiverCandidates <- candidate
 }
 
-func processCandidates(t *testing.T, ctx context.Context, conn *Connection, candidateChan <-chan webrtc.ICECandidateInit, done <-chan struct{}, side string) {
+func processCandidates(t *testing.T, ctx context.Context, conn CommonConnection, candidateChan <-chan webrtc.ICECandidateInit, done <-chan struct{}, side string) {
 	for {
 		select {
 		case candidate := <-candidateChan:
@@ -170,7 +170,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 			}
 		})
 
-		go processCandidates(t, ctx, senderConn.Connection, signaler.receiverCandidates, done, "Sender")
+		go processCandidates(t, ctx, senderConn, signaler.receiverCandidates, done, "Sender")
 
 		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx, nil); err != nil {
@@ -186,6 +186,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case msg := <-dataChanMsg:
 		assert.Equal(t, "Hello, Receiver!", msg)
 		t.Log("SUCCESS: Message received successfully.")
+		close(done)
 	case err := <-errChan:
 		t.Fatalf("A goroutine reported an error: %v", err)
 	case <-ctx.Done():

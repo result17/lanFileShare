@@ -17,7 +17,6 @@ type receiverState int
 
 const (
 	awaitingConnection receiverState = iota
-	showFileNodes
 	awaitingConfirmation
 	receivingFiles
 	receiveComplete
@@ -93,7 +92,7 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appevents.ErrorMsg:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
-		return m, m.listenForAppMessages()
+		return m, nil
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -116,7 +115,6 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.listenForAppMessages()
 			case key.Matches(msg, DefaultKeyMap.Reject):
 				m.appController.AppEvents() <- receiverEvent.RejectFileRequestEvent{}
-				m.receiver = initReceiverModel(m.receiver.port)
 				return m.resetReceiver()
 			default:
 				newFileTree, cmd := m.receiver.fileTree.Update(msg)

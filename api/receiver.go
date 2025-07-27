@@ -99,7 +99,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 
 	decisionChan, err := s.stateManager.CreateRequest(req.Offer)
 	if err != nil {
-		slog.Error("failed to create request", "error", err) 
+		slog.Error("failed to create request", "error", err)
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
 	}
@@ -144,6 +144,7 @@ func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) {
 	if !ok {
 		slog.Error("failed to support streaming for rejection")
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
 	}
 	response := map[string]string{"status": "rejected"}
 	jsonResponse, err := json.Marshal(response)
@@ -181,7 +182,9 @@ func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher, 
 		return fmt.Errorf("failed to marshal answer: %w", err)
 	}
 
-	fmt.Fprintf(w, "event: answer\ndata: %s\n\n", jsonResponse)
+	if _, err := fmt.Fprintf(w, "event: answer\ndata: %s\n\n", jsonResponse); err != nil {
+		return fmt.Errorf("failed to write answer to response: %w", err)
+	}
 	flusher.Flush()
 	return nil
 }
@@ -192,22 +195,34 @@ func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flu
 	candidateChan := s.stateManager.GetCandidateChan()
 
 	// Ensure that the implementation guarantees that will always be closed after the peer connection is established or has failed
-	for candidate := range candidateChan {
-		slog.Info("Sending candidate to sender", "candidate", candidate.Candidate)
-		response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
-		jsonResponse, err := json.Marshal(response)
-		if err != nil {
-			slog.Error("Failed to marshal candidate, skipping", "error", err)
-			continue
-		}
-		fmt.Fprintf(w, "event: candidate\ndata: %s\n\n", jsonResponse)
-		flusher.Flush()
-	}
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Warn("Client disconnected, stopping candidate streaming.")
+			return ctx.Err()
+		case candidate, ok := <-candidateChan:
+			if !ok {
+				// Channel closed, successfully finished streaming.
+				slog.Info("Finished streaming candidates.")
+				fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
+				flusher.Flush()
+				return nil
+			}
 
-	slog.Info("Finished streaming candidates.")
-	fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
-	flusher.Flush()
-	return nil
+			slog.Info("Sending candidate to sender", "candidate", candidate.Candidate)
+			response := map[string]webrtc.ICECandidateInit{"candidate": candidate}
+			jsonResponse, err := json.Marshal(response)
+			if err != nil {
+				slog.Error("Failed to marshal candidate, skipping", "error", err)
+				continue
+			}
+
+			if _, err := fmt.Fprintf(w, "event: candidate\ndata: %s\n\n", jsonResponse); err != nil {
+				return fmt.Errorf("failed to write candidate to response: %w", err)
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request) {

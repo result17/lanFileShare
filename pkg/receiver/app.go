@@ -67,9 +67,11 @@ func (a *App) InboundCandidateChan() chan<- webrtc.ICECandidateInit {
 }
 
 // Run starts the application's main event loop and services.
-func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error {
-	a.startRegistration(ctx, a.port, cancel)
-	a.startServer(ctx, a.port, cancel)
+func (a *App) Run(ctx context.Context) error {
+	tctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	a.startRegistration(tctx, a.port, cancel)
+	a.startServer(tctx, a.port, cancel)
 
 	for {
 		select {
@@ -82,7 +84,6 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error {
 			if a.activeConn != nil {
 				if err := a.activeConn.Peer().AddICECandidate(candidate); err != nil {
 					slog.Warn("Failed to add inbound ICE candidate", "error", err)
-					return err
 				}
 			} else {
 				slog.Warn("Received an ICE candidate but there is no active connection.")
@@ -109,7 +110,6 @@ func (a *App) Run(ctx context.Context, cancel context.CancelFunc) error {
 				a.stateManager.SetDecision(app.Rejected)
 			default:
 				slog.Warn("Received unhandled app event", "event", event)
-				return errors.New("received unhandled app event")
 			}
 		}
 	}
@@ -129,9 +129,15 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 
 	a.stateManager.SetDecision(app.Accepted)
 
-	webRTCAPI := webrtcPkg.NewWebrtcAPI()
-	receiverConn, err := webRTCAPI.NewReceiverConnection(webrtcPkg.Config{})
-	a.setActiveConn(receiverConn)
+	webrtcAPI := webrtcPkg.NewWebrtcAPI()
+
+	offer, err := a.stateManager.GetOffer()
+	if err != nil {
+		a.sendAndLogError("Could not get offer from state", err)
+		return err
+	}
+
+	receiverConn, err := webrtcAPI.NewReceiverConnection(webrtcPkg.Config{})
 	if err != nil {
 		a.sendAndLogError("Failed to create receiver connection", err)
 		return err
@@ -159,11 +165,6 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		}
 	})
 
-	offer, err := a.stateManager.GetOffer()
-	if err != nil {
-		a.sendAndLogError("Could not get offer from state", err)
-		return err
-	}
 
 	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 	if err != nil {
@@ -175,6 +176,7 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", err)
 		return err
 	}
+	a.setActiveConn(receiverConn)
 	a.stateManager.SetAnswer(*answer)
 	slog.Info("Answer created and sent to state manager.")
 	return nil
@@ -193,6 +195,7 @@ func (a *App) startRegistration(ctx context.Context, port int, cancel context.Ca
 	hostname, err := os.Hostname()
 	if err != nil {
 		a.sendAndLogError("Could not get hostname", err)
+		a.errChan <- err
 		return
 	}
 	serviceUUID := uuid.New().String()
