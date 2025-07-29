@@ -16,6 +16,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
+	"golang.org/x/sync/errgroup"
 )
 
 // App is the main application logic controller for the sender.
@@ -26,7 +27,6 @@ type App struct {
 	apiClient       *api.Client
 	uiMessages      chan tea.Msg
 	appEvents       chan appevents.AppEvent
-	selectedFiles   []fileInfo.FileNode
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
 	discoveryErr    chan error
@@ -59,69 +59,66 @@ func (a *App) AppEvents() chan<- appevents.AppEvent {
 }
 
 // Run starts the application's main event loop.
-func (a *App) Run(ctx context.Context) error { 
-	a.startDiscovery(ctx)
+func (a *App) Run(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
 
+	g.Go(func() error {
+		return a.runDiscovery(ctx)
+	})
+
+
+	g.Go(func() error {
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case err := <-a.discoveryErr:
+				a.sendAndLogError("Discovery process failed", err)
+				return err
+			case event := <-a.appEvents:
+				switch e := event.(type) {
+				case sender.SendFilesMsg:
+					// show files to users
+					a.StartSendProcess(ctx, e.Receiver, e.Files)
+				}
+			}
+		}
+	})
+	return g.Wait()
+}
+
+// startDiscovery begins the process of finding receivers on the network.
+func (a *App) runDiscovery(ctx context.Context) error {
+	// TODO use https
+	serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
+	if err != nil {
+		a.sendAndLogError("Failed to start discovery", err)
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case err := <-a.discoveryErr:
-			a.sendAndLogError("Discovery process failed", err)
-			return err
-		case event := <-a.appEvents:
-			switch e := event.(type) {
-			case sender.SendFilesMsg:
-				// show files to users
-				a.SelectFiles(e.Files)
-				a.StartSendProcess(ctx, e.Receiver)
+			return ctx.Err()
+		case services, ok := <-serviceChan:
+			if !ok {
+				return nil
 			}
+			a.uiMessages <- sender.FoundServicesMsg{Services: services}
+
 		}
 	}
-}
 
-// startDiscovery begins the process of finding receivers on the network.
-func (a *App) startDiscovery(ctx context.Context) {
-	go func() {
-		serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
-		if err != nil {
-			a.sendAndLogError("Failed to start discovery", err)
-			a.discoveryErr <- err
-			return
-		}
-
-		var currentServices []discovery.ServiceInfo
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case services, ok := <-serviceChan:
-				if !ok {
-					return
-				}
-				currentServices = services
-				a.uiMessages <- sender.FoundServicesMsg{Services: currentServices}
-
-			}
-		}
-	}()
 }
 
 // sendAndLogError is a helper function to both log an error and send it to the UI.
 func (a *App) sendAndLogError(baseMessage string, err error) {
 	slog.Error(baseMessage, "error", err)
-	a.uiMessages <- sender.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
-}
-
-// SelectFiles sets the files that the user has chosen.
-func (a *App) SelectFiles(files []fileInfo.FileNode) {
-	a.selectedFiles = files
+	a.uiMessages <- appevents.AppErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // StartSendProcess is the main entry point for starting a file transfer.
-func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo) {
+func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
 	task := func() error {
 		a.uiMessages <- sender.TransferStartedMsg{}
 		// TODO use https
@@ -138,7 +135,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		defer webrtcConn.Close()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
-		if err := webrtcConn.Establish(ctx, a.selectedFiles); err != nil {
+		if err := webrtcConn.Establish(ctx, files); err != nil {
 			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
 
@@ -146,7 +143,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 
 		// TODO: Add actual file transfer logic over the webrtcConn.
 
-		if err := webrtcConn.SendFiles(ctx, a.selectedFiles); err != nil {
+		if err := webrtcConn.SendFiles(ctx, files); err != nil {
 			return fmt.Errorf("failed to send files: %w", err)
 		}
 

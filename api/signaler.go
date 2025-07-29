@@ -15,6 +15,8 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
+var ErrTransferRejected = errors.New("transfer rejected by the receiver")
+
 // APISignaler is the client-side implementation of the Signaler interface.
 // It communicates with the Receiver's API endpoint to exchange WebRTC signaling messages.
 type APISignaler struct {
@@ -25,7 +27,6 @@ type APISignaler struct {
 	errChan             chan error
 }
 
-// 
 // Sender
 // NewAPISignaler creates a new signaler.
 // It requires a callback function, which will be used to pass ICE candidates received
@@ -110,7 +111,7 @@ func (s *APISignaler) routeEvent(event, data string) {
 	case "candidate":
 		s.handleCandidateEvent(data)
 	case "rejection":
-		s.errChan <- errors.New("transfer rejected by the receiver")
+		s.sendError(ErrTransferRejected)
 	case "candidates_done":
 		slog.Info("Receiver has finished sending candidates.")
 	default:
@@ -123,7 +124,7 @@ func (s *APISignaler) handleAnswerEvent(data string) {
 		Answer webrtc.SessionDescription `json:"answer"`
 	}
 	if err := json.Unmarshal([]byte(data), &respData); err != nil {
-		s.errChan <- fmt.Errorf("failed to unmarshal answer event: %w", err)
+		s.sendError(fmt.Errorf("failed to unmarshal answer event: %w", err))
 		return
 	}
 	s.answerChan <- &respData.Answer
@@ -144,22 +145,36 @@ func (s *APISignaler) handleCandidateEvent(data string) {
 }
 
 // WaitForAnswer blocks until the answer is received from the SSE stream or the context is cancelled.
-func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
+func (s *APISignaler) WaitForAnswer() (*webrtc.SessionDescription, error) {
 	select {
 	case answer := <-s.answerChan:
+		if answer == nil {
+			return nil, fmt.Errorf("answer is nil") // This should never happen, but just in case.
+		}
 		return answer, nil
 	case err := <-s.errChan:
+		// TODO receiver reject opt
 		return nil, err
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <- s.ctx.Done():
+		return nil, fmt.Errorf("signaler context cancelled: %w", s.ctx.Err())
 	}
 }
 
-// SendICECandidate sends a candidate from the sender to the receiver.
-// NOTE: The current receiver API in `api/receiver.go` does not have an endpoint
-// to handle this. This will require a new endpoint on the receiver side.
+
 func (s *APISignaler) SendICECandidate(candidate webrtc.ICECandidateInit) {
 	slog.Info("Sending ICE candidate to receiver", "candidate", candidate)
 	// This is a fire-and-forget action.
-	go s.apiClient.SendICECandidateRequest(context.Background(), candidate)
+	go func() {
+		if err := s.apiClient.SendICECandidateRequest(s.ctx, candidate); err != nil {
+			slog.Warn("failed to send ICE candidate to receiver", "error", err)
+		}
+	}()
+}
+
+func (s *APISignaler) sendError(err error) {
+	select {
+		case s.errChan <- err:
+		default:
+			slog.Warn("Could not send error on channel (already full)", "error", err)
+	}
 }

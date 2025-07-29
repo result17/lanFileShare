@@ -17,7 +17,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/internal/app"
-	"github.com/rescp17/lanFileSharer/internal/app_events"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
@@ -32,7 +32,7 @@ type App struct {
 	port                 int
 	uiMessages           chan tea.Msg
 	appEvents            chan appevents.AppEvent
-	stateManager         *app.StateManager
+	stateManager         *app.SingleRequestManager
 	inboundCandidateChan chan webrtc.ICECandidateInit
 	activeConn           *webrtcPkg.ReceiverConn
 	connMu               sync.Mutex
@@ -66,46 +66,57 @@ func (a *App) InboundCandidateChan() chan<- webrtc.ICECandidateInit {
 	return a.inboundCandidateChan
 }
 
+func (a *App) handleInboundCandidate(candidate webrtc.ICECandidateInit) error {
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+
+	if a.activeConn != nil {
+		if err := a.activeConn.Peer().AddICECandidate(candidate); err != nil {
+			slog.Warn("Failed to add inbound ICE candidate", "error", err)
+		}
+	} else {
+		/**
+		 * f an ICE candidate is received after a connection has been closed or has failed 
+		 * (i.e., a.activeConn == nil), the application terminates. This could happen due to network latency where candidates from a stale session arrive late. This should be a non-fatal event.
+		*/
+		slog.Warn("Received an ICE candidate but there is no active connection.")
+		return errors.New("received an ICE candidate but there is no active connection")
+	}
+	return nil
+}
+
 // Run starts the application's main event loop and services.
 func (a *App) Run(ctx context.Context) error {
 	tctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	a.startRegistration(tctx, a.port, cancel)
-	a.startServer(tctx, a.port, cancel)
+	a.startServer(tctx, a.port)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case err := <-a.errChan:
-			return fmt.Errorf("file acceptance handler failed: %w", err)
+			return fmt.Errorf("application service failed: %w", err)
 		case candidate := <-a.inboundCandidateChan:
-			a.connMu.Lock()
-			if a.activeConn != nil {
-				if err := a.activeConn.Peer().AddICECandidate(candidate); err != nil {
-					slog.Warn("Failed to add inbound ICE candidate", "error", err)
-				}
-			} else {
-				slog.Warn("Received an ICE candidate but there is no active connection.")
-				return errors.New("received an ICE candidate but there is no active connection")
-			}
-			a.connMu.Unlock()
+			return a.handleInboundCandidate(candidate)
 		case event := <-a.appEvents:
 			switch event.(type) {
-			case receiver.AcceptFileRequestEvent:
+			case receiver.FileRequestAccepted:
 				go func() {
 					if err := a.guard.Execute(func() error {
 						return a.handleAcceptFileRequest(ctx)
 					}); err != nil {
 						slog.Error("File acceptance handler failed", "error", err)
-						select {
-						case a.errChan <- err:
-						default:
-							slog.Error("Error channel full, dropping error", "error", err)
-						}
+						// DO NOT send the error to a.errChan, as this is a recoverable error.
+						// select {
+						// case a.errChan <- err:
+						// default:
+						//     slog.Error("Error channel full, dropping error", "error", err)
+						// }
 					}
 				}()
-			case receiver.RejectFileRequestEvent:
+			case receiver.FileRequestRejected:
 				slog.Info("User rejected file transfer.")
 				a.stateManager.SetDecision(app.Rejected)
 			default:
@@ -118,7 +129,7 @@ func (a *App) Run(ctx context.Context) error {
 // sendAndLogError is a helper function to both log an error and send it to the UI.
 func (a *App) sendAndLogError(baseMessage string, err error) {
 	slog.Error(baseMessage, "error", err)
-	a.uiMessages <- appevents.ErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+	a.uiMessages <- appevents.AppErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
@@ -165,7 +176,6 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		}
 	})
 
-
 	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 	if err != nil {
 		a.sendAndLogError("Failed to create answer", err)
@@ -195,8 +205,7 @@ func (a *App) startRegistration(ctx context.Context, port int, cancel context.Ca
 	hostname, err := os.Hostname()
 	if err != nil {
 		a.sendAndLogError("Could not get hostname", err)
-		a.errChan <- err
-		return
+		cancel()
 	}
 	serviceUUID := uuid.New().String()
 
@@ -212,14 +221,12 @@ func (a *App) startRegistration(ctx context.Context, port int, cancel context.Ca
 		err := a.registrar.Announce(ctx, serviceInfo)
 		if err != nil {
 			a.sendAndLogError("Failed to start mDNS announcement", err)
-			// exit the app if we can't announce
 			cancel()
-			return
 		}
 	}()
 }
 
-func (a *App) startServer(ctx context.Context, port int, cancel context.CancelFunc) {
+func (a *App) startServer(ctx context.Context, port int) {
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: a.api,
@@ -228,7 +235,6 @@ func (a *App) startServer(ctx context.Context, port int, cancel context.CancelFu
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			a.sendAndLogError("HTTP server failed", err)
-			cancel()
 		}
 	}()
 
@@ -261,5 +267,4 @@ func (a *App) setActiveConn(conn *webrtcPkg.ReceiverConn) {
 	}
 	a.activeConn = conn
 	a.connMu.Unlock()
-
 }

@@ -34,7 +34,3 @@ type TransferStartedMsg struct{}
 type ReceiverAcceptedMsg struct{}
 
 type TransferCompleteMsg struct{}
-
-type ErrorMsg struct {
-	Err error
-}

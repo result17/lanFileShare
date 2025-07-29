@@ -21,7 +21,6 @@ type SenderConnection interface {
 	CommonConnection
 	Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error
 	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
-	getSignaler() Signaler
 	SendFiles(ctx context.Context, files []fileInfo.FileNode) error 
 }
 
@@ -101,7 +100,6 @@ func (a *WebrtcAPI) createPeerConnection(config Config) (*webrtc.PeerConnection,
 func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (SenderConnection, error) {
 	pc, err := a.createPeerConnection(config)
 	if err != nil {
-		slog.Error("Failed to create peer connection for sender", "error", err)
 		return nil, err
 	}
 	conn := &SenderConn{
@@ -160,15 +158,10 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 		return fmt.Errorf("failed to send offer via signaler: %w", err)
 	}
 
-	answer, err := c.signaler.WaitForAnswer(ctx)
+	answer, err := c.signaler.WaitForAnswer()
 	if err != nil {
 		slog.Error("Failed to wait for answer", "error", err)
 		return fmt.Errorf("failed to wait for answer: %w", err)
-	}
-	if answer == nil {
-		err := errors.New("received a nil answer")
-		slog.Error("Failed to establish connection", "error", err)
-		return err
 	}
 
 	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
@@ -205,8 +198,4 @@ func (c *SenderConn) CreateDataChannel(label string, options *webrtc.DataChannel
 func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode) error {
 	// TODO
 	return nil
-}
-
-func (c *SenderConn) getSignaler() Signaler {
-	return c.signaler
 }

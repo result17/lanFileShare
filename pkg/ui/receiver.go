@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rescp17/lanFileSharer/internal/app_events"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	receiverEvent "github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileTree"
@@ -89,19 +89,16 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case appevents.ErrorMsg:
+	case appevents.AppErrorMsg:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
 		return m, nil
 
 	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
-		}
 		switch m.receiver.state {
 		case receiveFailed:
 			if msg.Type == tea.KeyEnter {
-				 return m.resetReceiver()
+				return m.resetReceiver()
 			}
 		case receiveComplete:
 			if msg.Type == tea.KeyEnter {
@@ -110,11 +107,11 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case awaitingConfirmation:
 			switch {
 			case key.Matches(msg, DefaultKeyMap.Accept):
-				m.appController.AppEvents() <- receiverEvent.AcceptFileRequestEvent{}
+				m.appController.AppEvents() <- receiverEvent.FileRequestAccepted{}
 				m.receiver.state = receivingFiles
-				return m, m.listenForAppMessages()
+				return m, nil
 			case key.Matches(msg, DefaultKeyMap.Reject):
-				m.appController.AppEvents() <- receiverEvent.RejectFileRequestEvent{}
+				m.appController.AppEvents() <- receiverEvent.FileRequestRejected{}
 				return m.resetReceiver()
 			default:
 				newFileTree, cmd := m.receiver.fileTree.Update(msg)
@@ -127,7 +124,6 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.receiver.state == awaitingConnection {
 			m.receiver.state = awaitingConfirmation // Transition to confirmation state
 			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
-			cmds = append(cmds, m.listenForAppMessages())
 		}
 	case receiverEvent.TransferCompleteMsg:
 		m.receiver.state = receiveComplete
@@ -135,7 +131,9 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var spinCmd tea.Cmd
-	m.receiver.spinner, spinCmd = m.receiver.spinner.Update(msg)
+	if m.receiver.state == awaitingConnection || m.receiver.state == receivingFiles {
+		m.receiver.spinner, spinCmd = m.receiver.spinner.Update(msg)
+	}
 	cmds = append(cmds, spinCmd)
 
 	return m, tea.Batch(cmds...)

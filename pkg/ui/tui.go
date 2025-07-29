@@ -5,17 +5,14 @@ import (
 	"log/slog"
 
 	tea "github.com/charmbracelet/bubbletea"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
+	"github.com/rescp17/lanFileSharer/internal/style"
+	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
-	"github.com/rescp17/lanFileSharer/pkg/discovery"
-	"github.com/rescp17/lanFileSharer/internal/style"
 )
 
 type mode int
-
-type serverErrorMsg struct {
-	err error
-}
 
 const (
 	None mode = iota
@@ -75,7 +72,7 @@ func (m model) Init() tea.Cmd {
 	runCmd := func() tea.Msg {
 		if err := m.appController.Run(m.ctx); err != nil {
 			slog.Error("App runtime error", "error", err)
-			return serverErrorMsg{err: err}
+			return appevents.AppErrorMsg{Err: err}
 		}
 		return nil
 	}
@@ -85,11 +82,9 @@ func (m model) Init() tea.Cmd {
 
 func (m model) View() string {
 	if m.err != nil {
-		return "Error: " + m.err.Error() + "\n\nPress ctrl+c to quit."
+		return style.ErrorStyle.Render(m.err.Error()) + "\n\nPress ctrl+c to quit."
 	}
-
 	var s string
-
 	switch m.mode {
 	case Sender:
 		s += m.senderView()
@@ -98,20 +93,29 @@ func (m model) View() string {
 	default:
 		return ""
 	}
-	s += style.ErrorStyle.Render(m.err.Error()) + "\n"
+
 	s += "\nPress ctrl + c to quit"
 	return s
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			if m.cancel != nil {
+				m.cancel()
+			}
+			return m, tea.Quit
+		}
 	case tea.QuitMsg:
 		if m.cancel != nil {
 			m.cancel()
 		}
 		return m, tea.Quit
-	case serverErrorMsg:
-		m.err = msg.err
+	case appevents.AppUIMessage:
+	case appevents.UIErrorEvent:
+		m.err = msg.Err
 		return m, nil
 	}
 

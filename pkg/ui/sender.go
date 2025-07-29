@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rescp17/lanFileSharer/internal/app_events"
 	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
@@ -34,7 +35,6 @@ type senderModel struct {
 	fp              multiFilePicker.Model
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
-	lastError       error
 }
 
 var columns = []table.Column{
@@ -114,23 +114,6 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
-			if len(m.sender.services) > 0 {
-				selectedIndex := m.sender.table.Cursor()
-				if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
-					m.err = nil // Reset any previous error
-					m.sender.selectedService = m.sender.services[selectedIndex]
-					m.sender.state = selectingFiles
-					return tea.Quit, true
-				}
-				// This case should ideally not be hit, but good to have for safety
-				err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
-				slog.Error("Cursor out of sync", "error", err)
-				m.err = err
-			}
-		}
 	case senderEvent.FoundServicesMsg:
 		slog.Info("Discovery update", "service_count", len(msg.Services))
 		for _, s := range msg.Services {
@@ -160,9 +143,8 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
 		return m.listenForAppMessages(), true
-	case senderEvent.ErrorMsg:
+	case appevents.AppErrorMsg:
 		m.sender.state = transferFailed
-		m.sender.lastError = msg.Err
 		return m.listenForAppMessages(), true
 	}
 	return nil, false
@@ -181,11 +163,12 @@ func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 					m.err = nil // Reset any previous error
 					m.sender.selectedService = m.sender.services[selectedIndex]
 					m.sender.state = selectingFiles
+				} else {
+					// This case should ideally not be hit, but good to have for safety
+					err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
+					slog.Error("Cursor out of sync", "error", err)
+					m.err = err
 				}
-				// This case should ideally not be hit, but good to have for safety
-				err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
-				slog.Error("Cursor out of sync", "error", err)
-				m.err = err
 				_, cmd := m.sender.table.Update(msg)
 				return cmd
 			}
@@ -227,7 +210,7 @@ func (m *model) senderView() string {
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:
-		return fmt.Sprintf("\nTransfer failed: %v\n\nPress Enter to try again.", m.sender.lastError)
+		return "\nTransfer failed: \nPress Enter to try again."
 	default:
 		return "Internal error: unknown sender state"
 	}

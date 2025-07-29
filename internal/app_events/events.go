@@ -24,14 +24,14 @@ func (UIMessage) isUIMessage() {}
 
 // --- App Events (from TUI to App) ---
 
-type ErrorMsg struct {
+// For events from the TUI to the App
+type UIErrorEvent struct {
 	Event
 	Err error
 }
 
-
-var (
-
-	_ AppEvent = (*ErrorMsg)(nil)
-	
-)
+// For messages from the App to the TUI
+type AppErrorMsg struct {
+	UIMessage
+	Err error
+}

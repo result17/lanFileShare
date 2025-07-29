@@ -25,35 +25,24 @@ type RequestState struct {
 	TransferDone  chan struct{}
 	decisionSent  bool
 	answerSent    bool
+	candidateChanClose bool
+	transferDoneClose bool
 }
 
 // StateManager manages the lifecycle of a file transfer request state in a concurrent-safe manner.
-type StateManager struct {
+type SingleRequestManager  struct {
 	mu    sync.Mutex
 	state *RequestState // Holds the state for the *single* active request
 }
 
 // NewStateManager creates a new StateManager instance.
-func NewStateManager() *StateManager {
-	return &StateManager{}
-}
-
-// SetOffer is the first step in creating a request. It stores the offer
-// and initializes a partial state. It fails if a request is already active.
-func (m *StateManager) SetOffer(offer webrtc.SessionDescription) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.state != nil {
-		return errors.New("a request is already in progress")
-	}
-	m.state = &RequestState{Offer: offer}
-	return nil
+func NewStateManager() *SingleRequestManager {
+	return &SingleRequestManager{}
 }
 
 // CreateRequest finishes initializing the request state created by SetOffer.
 // It returns the decision channel for the caller to wait on.
-func (m *StateManager) CreateRequest(offer webrtc.SessionDescription) (<-chan Decision, error) {
+func (m *SingleRequestManager) CreateRequest(offer webrtc.SessionDescription) (<-chan Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -73,7 +62,7 @@ func (m *StateManager) CreateRequest(offer webrtc.SessionDescription) (<-chan De
 }
 
 // GetOffer retrieves the currently stored offer.
-func (m *StateManager) GetOffer() (webrtc.SessionDescription, error) {
+func (m *SingleRequestManager) GetOffer() (webrtc.SessionDescription, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -84,17 +73,17 @@ func (m *StateManager) GetOffer() (webrtc.SessionDescription, error) {
 }
 
 // SetDecision records the user's decision and sends it to the waiting handler.
-func (m *StateManager) SetDecision(decision Decision) error {
+func (m *SingleRequestManager) SetDecision(decision Decision) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state != nil && m.state.DecisionChan != nil {
+	if m.state != nil || m.state.DecisionChan != nil {
 		slog.Error("no active request")
 		return errors.New("no active request")
 	}
 	if m.state.decisionSent {
-		slog.Error("had made a decision")
-		return errors.New("had made a decision")
+		slog.Error("a decision has already been made")
+		return errors.New("a decision has already been made")
 	}
 	m.state.DecisionChan <- decision
 	m.state.decisionSent = true
@@ -103,13 +92,13 @@ func (m *StateManager) SetDecision(decision Decision) error {
 }
 
 // SetAnswer stores the generated answer from the WebRTC peer.
-func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) error {
+func (m *SingleRequestManager) SetAnswer(answer webrtc.SessionDescription) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.state == nil || m.state.AnswerChan == nil || m.state.answerSent {
-		slog.Error("answer had sent")
-		return errors.New("answer had sent")
+		slog.Error("an answer has already been sent")
+		return errors.New("an answer has already been sent")
 	}
 
 	m.state.AnswerChan <- answer
@@ -119,7 +108,7 @@ func (m *StateManager) SetAnswer(answer webrtc.SessionDescription) error {
 }
 
 // GetAnswerChan returns the channel from which the answer can be read.
-func (m *StateManager) GetAnswerChan() <-chan webrtc.SessionDescription {
+func (m *SingleRequestManager) GetAnswerChan() <-chan webrtc.SessionDescription {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -132,7 +121,30 @@ func (m *StateManager) GetAnswerChan() <-chan webrtc.SessionDescription {
 }
 
 // SetCandidate sends a new ICE candidate to the listening handler.
-func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) error {
+func (m *SingleRequestManager) SetCandidate(candidate webrtc.ICECandidateInit) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state == nil || m.state.CandidateChan == nil {
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore "send on closed channel" panic
+				slog.Error("Attempted to send candidate on closed channel", "error", r)
+			}
+		}()
+		return errors.New("no active request state or candidate channel is not initialized")
+	}
+
+	if m.state.candidateChanClose {
+		return errors.New("candidate channel is already closed")
+	}
+
+	m.state.CandidateChan <- candidate
+	return nil
+}
+
+// CloseCandidateChan closes the candidate channel to signal completion.
+func (m *SingleRequestManager) CloseCandidateChan() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -140,35 +152,22 @@ func (m *StateManager) SetCandidate(candidate webrtc.ICECandidateInit) error {
 		defer func() {
 			if r := recover(); r != nil {
 				// Ignore "send on closed channel" panic
-				slog.Error("Attempted to send candidate on closed channel", "error", r)
-			}
-		}()
-		m.state.CandidateChan <- candidate
-		return nil
-	}
-	return errors.New("no active request state or candidate channel is not initialized")
-}
-
-// CloseCandidateChan closes the candidate channel to signal completion.
-func (m *StateManager) CloseCandidateChan() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.state != nil && m.state.CandidateChan != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				// Ignore "send on closed channel" panic
 				slog.Warn("Attempted to send candidate on closed channel", "error", r)
 			}
 		}()
 		close(m.state.CandidateChan)
+		m.state.candidateChanClose = true
 	}
 }
 
 // GetCandidateChan returns the channel from which ICE candidates can be read.
-func (m *StateManager) GetCandidateChan() <-chan webrtc.ICECandidateInit {
+func (m *SingleRequestManager) GetCandidateChan() <-chan webrtc.ICECandidateInit {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.state.candidateChanClose {
+		return nil
+	}
 
 	if m.state == nil {
 		ch := make(chan webrtc.ICECandidateInit)
@@ -179,7 +178,7 @@ func (m *StateManager) GetCandidateChan() <-chan webrtc.ICECandidateInit {
 }
 
 // CloseRequest cleans up the state of the current request.
-func (m *StateManager) CloseRequest() {
+func (m *SingleRequestManager) CloseRequest() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -188,12 +187,13 @@ func (m *StateManager) CloseRequest() {
 			recover()
 		}()
 		close(m.state.TransferDone)
+		m.state.transferDoneClose = true
 	}
 	m.state = nil
 }
 
 // WaitForTransferDone returns a channel that blocks until the transfer is marked as complete.
-func (m *StateManager) WaitForTransferDone() <-chan struct{} {
+func (m *SingleRequestManager) WaitForTransferDone() <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

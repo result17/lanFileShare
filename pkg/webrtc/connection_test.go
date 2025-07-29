@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"sync"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
@@ -93,6 +94,8 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	errChan := make(chan error, 2)
 	dataChanMsg := make(chan string, 1)
 	done := make(chan struct{})
+	var wg sync.WaitGroup
+
 
 	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
@@ -133,7 +136,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	})
 
 	// 3. Run Receiver logic in a goroutine
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		var offer webrtc.SessionDescription
 		select {
 		case offer = <-signaler.offerChan:
@@ -170,7 +175,11 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 			}
 		})
 
-		go processCandidates(t, ctx, senderConn, signaler.receiverCandidates, done, "Sender")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			processCandidates(t, ctx, senderConn, signaler.receiverCandidates, done, "Sender")
+		}()
 
 		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx, nil); err != nil {
@@ -192,5 +201,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Test timed out waiting for message")
 	}
+	close(done)
+	wg.Wait()
 }
 

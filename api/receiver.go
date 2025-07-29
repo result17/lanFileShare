@@ -23,7 +23,7 @@ type API struct {
 }
 
 // NewAPI creates and initializes a new API instance.
-func NewAPI(uiMessages chan<- tea.Msg, stateManager *app.StateManager) *API {
+func NewAPI(uiMessages chan<- tea.Msg, stateManager *app.SingleRequestManager) *API {
 	api := &API{
 		server: NewReceiverGuard(uiMessages, stateManager),
 		mux:    http.NewServeMux(),
@@ -48,11 +48,11 @@ func (a *API) registerRoutes() {
 type ReceiverGuard struct {
 	guard        *concurrency.ConcurrencyGuard
 	uiMessages   chan<- tea.Msg // Channel to send messages to the UI
-	stateManager *app.StateManager
+	stateManager *app.SingleRequestManager
 }
 
 // NewReceiverGuard creates a new ReceiverServer instance.
-func NewReceiverGuard(uiMessages chan<- tea.Msg, stateManager *app.StateManager) *ReceiverGuard {
+func NewReceiverGuard(uiMessages chan<- tea.Msg, stateManager *app.SingleRequestManager) *ReceiverGuard {
 	return &ReceiverGuard{
 		guard:        concurrency.NewConcurrencyGuard(),
 		uiMessages:   uiMessages,
@@ -63,7 +63,13 @@ func NewReceiverGuard(uiMessages chan<- tea.Msg, stateManager *app.StateManager)
 // ConcurrencyControlMiddleware ensures only one request is processed at a time.
 func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		task := func() error {
+		task := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("recovered from panic in HTTP handler", "panic", r)
+					err = fmt.Errorf("panic: %v", r)
+				}
+			}()
 			next.ServeHTTP(w, r)
 			return nil
 		}
@@ -76,6 +82,9 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 			json.NewEncoder(w).Encode(map[string]string{
 				"error": concurrency.ErrBusy.Error(),
 			})
+		} else if err != nil {
+			slog.Error("Unexpected error in concurrency control middleware", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 	})
 }
@@ -88,10 +97,9 @@ type AskPayload struct {
 
 // AskHandler is the core business logic for handling /ask requests.
 func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
-	defer s.stateManager.CloseRequest()
-
 	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Error("failed to decode request", "error", err)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
@@ -103,6 +111,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
 	}
+	defer s.stateManager.CloseRequest()
 
 	s.uiMessages <- receiver.FileNodeUpdateMsg{Nodes: req.Files}
 
@@ -122,7 +131,9 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	case decision := <-decisionChan:
 		if decision == app.Rejected {
 			slog.Info("Request rejected by user")
-			s.sendRejection(w)
+			if err := s.sendRejection(w); err  != nil {
+				slog.Error("Failed to send rejection", "error", err)
+			}
 			return
 		}
 	}
@@ -130,32 +141,35 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Request accepted by user")
 	if err := s.sendAnswer(w, flusher, r.Context()); err != nil {
 		slog.Error("Failed to send answer", "error", err)
+		sendErrorEvent(w, flusher, err)
 		return
 	}
 
 	if err := s.streamCandidates(w, flusher, r.Context()); err != nil {
 		slog.Error("Failed to stream candidates", "error", err)
+		sendErrorEvent(w, flusher, err)
 	}
 }
 
 // sendRejection sends a rejection message to the sender.
-func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) {
+func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		slog.Error("failed to support streaming for rejection")
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
+		return fmt.Errorf("streaming unsupported")
 	}
 	response := map[string]string{"status": "rejected"}
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
 		slog.Error("Failed to marshal rejection response", "error", err)
-		http.Error(w, "Failed to process rejection", http.StatusInternalServerError)
-		return
+		return fmt.Errorf("failed to marshal rejection response: %w", err)
 	}
-	fmt.Fprintf(w, "event: rejection\ndata: %s\n\n", jsonResponse)
+	if _, err := fmt.Fprintf(w, "event: rejection\ndata: %s\n\n", jsonResponse); err != nil {
+		return fmt.Errorf("failed to write rejection event: %w", err)
+	}
 
 	flusher.Flush()
+	return nil
 }
 
 // sendAnswer waits for the WebRTC answer and sends it as an SSE event.
@@ -240,7 +254,16 @@ func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// TODO This will be changed in a later step.
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "Candidate received successfully")
+	w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+    json.NewEncoder(w).Encode(map[string]string{
+        "message": "Candidate received successfully",
+    })
+}
+
+func sendErrorEvent(w http.ResponseWriter, flusher http.Flusher, err error) {
+	response := map[string]string{"error": err.Error()}
+	jsonResponse, _ := json.Marshal(response) // Marshalling a simple map shouldn't fail
+	fmt.Fprintf(w, "event: error\ndata: %s\n\n", jsonResponse)
+	flusher.Flush()
 }
