@@ -86,46 +86,27 @@ func (m *model) resetReceiver() (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// If we are in a final state, only handle key presses to exit or restart.
+	if m.receiver.state == receiveComplete || m.receiver.state == receiveFailed {
+		return m.handleReceiveFinishedOrFailed(msg)
+	}
 	var cmds []tea.Cmd
+	if m.receiver.state == awaitingConfirmation {
+		_, cmd := m.handleAwaitingConfirmation(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	switch msg := msg.(type) {
-	case appevents.AppErrorMsg:
+	case appevents.Error:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
 		return m, nil
-
-	case tea.KeyMsg:
-		switch m.receiver.state {
-		case receiveFailed:
-			if msg.Type == tea.KeyEnter {
-				return m.resetReceiver()
-			}
-		case receiveComplete:
-			if msg.Type == tea.KeyEnter {
-				return m, tea.Quit
-			}
-		case awaitingConfirmation:
-			switch {
-			case key.Matches(msg, DefaultKeyMap.Accept):
-				m.appController.AppEvents() <- receiverEvent.FileRequestAccepted{}
-				m.receiver.state = receivingFiles
-				return m, nil
-			case key.Matches(msg, DefaultKeyMap.Reject):
-				m.appController.AppEvents() <- receiverEvent.FileRequestRejected{}
-				return m.resetReceiver()
-			default:
-				newFileTree, cmd := m.receiver.fileTree.Update(msg)
-				m.receiver.fileTree = newFileTree.(fileTree.Model)
-				cmds = append(cmds, cmd)
-			}
-		}
-
 	case receiverEvent.FileNodeUpdateMsg:
 		if m.receiver.state == awaitingConnection {
 			m.receiver.state = awaitingConfirmation // Transition to confirmation state
 			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 		}
-	case receiverEvent.TransferCompleteMsg:
+	case receiverEvent.TransferFinishedMsg:
 		m.receiver.state = receiveComplete
 		return m, nil // Stop listening for other app messages
 	}
@@ -137,4 +118,41 @@ func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, spinCmd)
 
 	return m, tea.Batch(cmds...)
+
+}
+
+func (m *model) handleAwaitingConfirmation(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch {
+		case key.Matches(keyMsg, DefaultKeyMap.Accept):
+			m.appController.AppEvents() <- receiverEvent.FileRequestAccepted{}
+			m.receiver.state = receivingFiles
+			return m, nil
+		case key.Matches(keyMsg, DefaultKeyMap.Reject):
+			m.appController.AppEvents() <- receiverEvent.FileRequestRejected{}
+			return m.resetReceiver()
+		default:
+			newFileTree, cmd := m.receiver.fileTree.Update(msg)
+			m.receiver.fileTree = newFileTree.(fileTree.Model)
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+func (m *model) handleReceiveFinishedOrFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch m.receiver.state {
+		case receiveComplete:
+			if keyMsg.Type == tea.KeyEnter {
+				return m, tea.Quit
+			}
+		case receiveFailed:
+			if keyMsg.Type == tea.KeyEnter {
+				return m.resetReceiver()
+			}
+		}
+	}
+	// Ignore all other messages in final states.
+	return m, nil
 }

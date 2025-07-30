@@ -21,7 +21,6 @@ var ErrTransferRejected = errors.New("transfer rejected by the receiver")
 // It communicates with the Receiver's API endpoint to exchange WebRTC signaling messages.
 type APISignaler struct {
 	apiClient           *Client
-	ctx                 context.Context
 	addIceCandidateFunc func(webrtc.ICECandidateInit) error // Callback to add candidates to the sender's connection
 	answerChan          chan *webrtc.SessionDescription
 	errChan             chan error
@@ -32,13 +31,11 @@ type APISignaler struct {
 // It requires a callback function, which will be used to pass ICE candidates received
 // from the receiver back to the sender's PeerConnection.
 func NewAPISignaler(
-	ctx context.Context,
 	apiClient *Client,
 	addIceCandidateFunc func(webrtc.ICECandidateInit) error,
 ) *APISignaler {
 	return &APISignaler{
 		apiClient:           apiClient,
-		ctx:                 ctx,
 		addIceCandidateFunc: addIceCandidateFunc,
 		answerChan:          make(chan *webrtc.SessionDescription, 1),
 		errChan:             make(chan error, 1),
@@ -47,7 +44,7 @@ func NewAPISignaler(
 
 // SendOffer sends the offer to the receiver and starts listening for the SSE event stream.
 // This is the main entry point that triggers the entire signaling process.
-func (s *APISignaler) SendOffer(offer webrtc.SessionDescription, files []fileInfo.FileNode) error {
+func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, files []fileInfo.FileNode) error {
 	// The /ask endpoint is the single point of contact.
 	// It receives the offer and returns an SSE stream.
 	url := s.apiClient.receiverURL + "/ask"
@@ -64,7 +61,7 @@ func (s *APISignaler) SendOffer(offer webrtc.SessionDescription, files []fileInf
 		return fmt.Errorf("failed to marshal offer payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(s.ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create /ask request: %w", err)
 	}
@@ -99,7 +96,7 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		s.errChan <- fmt.Errorf("error reading SSE stream: %w", err)
+		s.sendError(fmt.Errorf("error reading SSE stream: %w", err))
 	}
 }
 
@@ -123,6 +120,7 @@ func (s *APISignaler) handleAnswerEvent(data string) {
 	var respData struct {
 		Answer webrtc.SessionDescription `json:"answer"`
 	}
+	// answer is an import part of webrtc conn.
 	if err := json.Unmarshal([]byte(data), &respData); err != nil {
 		s.sendError(fmt.Errorf("failed to unmarshal answer event: %w", err))
 		return
@@ -145,7 +143,7 @@ func (s *APISignaler) handleCandidateEvent(data string) {
 }
 
 // WaitForAnswer blocks until the answer is received from the SSE stream or the context is cancelled.
-func (s *APISignaler) WaitForAnswer() (*webrtc.SessionDescription, error) {
+func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
 	select {
 	case answer := <-s.answerChan:
 		if answer == nil {
@@ -155,17 +153,17 @@ func (s *APISignaler) WaitForAnswer() (*webrtc.SessionDescription, error) {
 	case err := <-s.errChan:
 		// TODO receiver reject opt
 		return nil, err
-	case <- s.ctx.Done():
-		return nil, fmt.Errorf("signaler context cancelled: %w", s.ctx.Err())
+	case <- ctx.Done():
+		return nil, fmt.Errorf("signaler context cancelled: %w", ctx.Err())
 	}
 }
 
 
-func (s *APISignaler) SendICECandidate(candidate webrtc.ICECandidateInit) {
+func (s *APISignaler) SendICECandidate(ctx context.Context, candidate webrtc.ICECandidateInit) {
 	slog.Info("Sending ICE candidate to receiver", "candidate", candidate)
 	// This is a fire-and-forget action.
 	go func() {
-		if err := s.apiClient.SendICECandidateRequest(s.ctx, candidate); err != nil {
+		if err := s.apiClient.SendICECandidateRequest(ctx, candidate); err != nil {
 			slog.Warn("failed to send ICE candidate to receiver", "error", err)
 		}
 	}()

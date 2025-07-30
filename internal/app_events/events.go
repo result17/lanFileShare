@@ -24,14 +24,14 @@ func (UIMessage) isUIMessage() {}
 
 // --- App Events (from TUI to App) ---
 
-// For events from the TUI to the App
-type UIErrorEvent struct {
-	Event
-	Err error
+// Error represents an error that can be sent in both directions:
+// - As an AppEvent (TUI -> App) when embedded Event provides isAppEvent()
+// - As an AppUIMessage (App -> TUI) when embedded UIMessage provides isUIMessage()
+// The direction is determined by which channel it's sent on.
+type Error struct {
+    Event     // Embeds Event to implement AppEvent interface
+    UIMessage // Embeds UIMessage to implement AppUIMessage interface
+    Err       error // Optional: when the error occurred
 }
 
-// For messages from the App to the TUI
-type AppErrorMsg struct {
-	UIMessage
-	Err error
-}
+type AppFinishedMsg struct{}

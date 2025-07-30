@@ -42,7 +42,7 @@ type App struct {
 // NewApp creates a new receiver application instance.
 func NewApp(port int) *App {
 	uiMessages := make(chan tea.Msg, 10)
-	stateManager := app.NewStateManager()
+	stateManager := app.NewSingleRequestManager()
 	apiHandler := api.NewAPI(uiMessages, stateManager)
 
 	dnssdlog.Info.SetOutput(io.Discard)
@@ -76,9 +76,9 @@ func (a *App) handleInboundCandidate(candidate webrtc.ICECandidateInit) error {
 		}
 	} else {
 		/**
-		 * f an ICE candidate is received after a connection has been closed or has failed 
+		 * f an ICE candidate is received after a connection has been closed or has failed
 		 * (i.e., a.activeConn == nil), the application terminates. This could happen due to network latency where candidates from a stale session arrive late. This should be a non-fatal event.
-		*/
+		 */
 		slog.Warn("Received an ICE candidate but there is no active connection.")
 		return errors.New("received an ICE candidate but there is no active connection")
 	}
@@ -129,7 +129,7 @@ func (a *App) Run(ctx context.Context) error {
 // sendAndLogError is a helper function to both log an error and send it to the UI.
 func (a *App) sendAndLogError(baseMessage string, err error) {
 	slog.Error(baseMessage, "error", err)
-	a.uiMessages <- appevents.AppErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+	a.uiMessages <- appevents.Error{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
@@ -182,6 +182,13 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		return err
 	}
 
+	var success bool
+	defer func() {
+		if success {
+			receiverConn.Close()
+		}
+	}()
+
 	if err := hctx.Err(); err != nil {
 		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", err)
 		return err
@@ -189,6 +196,7 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	a.setActiveConn(receiverConn)
 	a.stateManager.SetAnswer(*answer)
 	slog.Info("Answer created and sent to state manager.")
+	success = true
 	return nil
 
 }
@@ -261,10 +269,11 @@ func (a *App) closeActiveConnectionIfSameConn(receiverConn *webrtcPkg.ReceiverCo
 
 func (a *App) setActiveConn(conn *webrtcPkg.ReceiverConn) {
 	a.connMu.Lock()
-	if a.activeConn != nil {
-		slog.Warn("An active connection already exits. Closing it before creating a new one.")
-		a.activeConn.Close()
-	}
+	oldConn := a.activeConn
 	a.activeConn = conn
 	a.connMu.Unlock()
+	if oldConn != nil {
+		slog.Warn("An active connection already exits. Closing it before creating a new one.")
+		oldConn.Close()
+	}
 }

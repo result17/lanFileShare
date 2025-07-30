@@ -36,7 +36,7 @@ type SingleRequestManager  struct {
 }
 
 // NewStateManager creates a new StateManager instance.
-func NewStateManager() *SingleRequestManager {
+func NewSingleRequestManager() *SingleRequestManager {
 	return &SingleRequestManager{}
 }
 
@@ -77,7 +77,7 @@ func (m *SingleRequestManager) SetDecision(decision Decision) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state != nil || m.state.DecisionChan != nil {
+	if m.state == nil || m.state.DecisionChan == nil {
 		slog.Error("no active request")
 		return errors.New("no active request")
 	}
@@ -125,18 +125,8 @@ func (m *SingleRequestManager) SetCandidate(candidate webrtc.ICECandidateInit) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state == nil || m.state.CandidateChan == nil {
-		defer func() {
-			if r := recover(); r != nil {
-				// Ignore "send on closed channel" panic
-				slog.Error("Attempted to send candidate on closed channel", "error", r)
-			}
-		}()
-		return errors.New("no active request state or candidate channel is not initialized")
-	}
-
-	if m.state.candidateChanClose {
-		return errors.New("candidate channel is already closed")
+	if m.state == nil || m.state.candidateChanClose {
+		return errors.New("request is not active or candidates are no longer accepted")
 	}
 
 	m.state.CandidateChan <- candidate
@@ -165,11 +155,7 @@ func (m *SingleRequestManager) GetCandidateChan() <-chan webrtc.ICECandidateInit
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state.candidateChanClose {
-		return nil
-	}
-
-	if m.state == nil {
+	if m.state == nil || m.state.candidateChanClose {
 		ch := make(chan webrtc.ICECandidateInit)
 		close(ch)
 		return ch

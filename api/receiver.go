@@ -18,14 +18,14 @@ import (
 
 // API is the main entry point for the entire receiver API.
 type API struct {
-	server *ReceiverGuard
+	server *ReceiverService
 	mux    *http.ServeMux
 }
 
 // NewAPI creates and initializes a new API instance.
 func NewAPI(uiMessages chan<- tea.Msg, stateManager *app.SingleRequestManager) *API {
 	api := &API{
-		server: NewReceiverGuard(uiMessages, stateManager),
+		server: NewReceiverService(uiMessages, stateManager),
 		mux:    http.NewServeMux(),
 	}
 	api.registerRoutes()
@@ -44,16 +44,16 @@ func (a *API) registerRoutes() {
 	a.mux.HandleFunc("POST /candidate", a.server.CandidateHandler)
 }
 
-// ReceiverGuard manages the server's state and core logic.
-type ReceiverGuard struct {
+// ReceiverService manages the server's state and core logic.
+type ReceiverService struct {
 	guard        *concurrency.ConcurrencyGuard
 	uiMessages   chan<- tea.Msg // Channel to send messages to the UI
 	stateManager *app.SingleRequestManager
 }
 
-// NewReceiverGuard creates a new ReceiverServer instance.
-func NewReceiverGuard(uiMessages chan<- tea.Msg, stateManager *app.SingleRequestManager) *ReceiverGuard {
-	return &ReceiverGuard{
+// NewReceiverService creates a new ReceiverServer instance.
+func NewReceiverService(uiMessages chan<- tea.Msg, stateManager *app.SingleRequestManager) *ReceiverService {
+	return &ReceiverService{
 		guard:        concurrency.NewConcurrencyGuard(),
 		uiMessages:   uiMessages,
 		stateManager: stateManager,
@@ -61,7 +61,7 @@ func NewReceiverGuard(uiMessages chan<- tea.Msg, stateManager *app.SingleRequest
 }
 
 // ConcurrencyControlMiddleware ensures only one request is processed at a time.
-func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Handler {
+func (s *ReceiverService) ConcurrencyControlMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		task := func() (err error) {
 			defer func() {
@@ -71,7 +71,7 @@ func (s *ReceiverGuard) ConcurrencyControlMiddleware(next http.Handler) http.Han
 				}
 			}()
 			next.ServeHTTP(w, r)
-			return nil
+			return
 		}
 
 		err := s.guard.Execute(task)
@@ -96,7 +96,7 @@ type AskPayload struct {
 }
 
 // AskHandler is the core business logic for handling /ask requests.
-func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
+func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 	var req AskPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.Error("failed to decode request", "error", err)
@@ -128,10 +128,17 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 		slog.Warn("Request context cancelled before processing")
 		return
-	case decision := <-decisionChan:
+	case decision, ok := <-decisionChan:
+		if !ok {
+			slog.Warn("Decision channel closed unexpectedly")
+			if err := s.sendRejection(w, flusher); err != nil {
+				slog.Error("Failed to send rejection", "error", err)
+			}
+			return
+		}
 		if decision == app.Rejected {
 			slog.Info("Request rejected by user")
-			if err := s.sendRejection(w); err  != nil {
+			if err := s.sendRejection(w, flusher); err  != nil {
 				slog.Error("Failed to send rejection", "error", err)
 			}
 			return
@@ -152,12 +159,7 @@ func (s *ReceiverGuard) AskHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendRejection sends a rejection message to the sender.
-func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		slog.Error("failed to support streaming for rejection")
-		return fmt.Errorf("streaming unsupported")
-	}
+func (s *ReceiverService) sendRejection(w http.ResponseWriter, flusher http.Flusher) error {
 	response := map[string]string{"status": "rejected"}
 	jsonResponse, err := json.Marshal(response)
 	if err != nil {
@@ -173,7 +175,7 @@ func (s *ReceiverGuard) sendRejection(w http.ResponseWriter) error {
 }
 
 // sendAnswer waits for the WebRTC answer and sends it as an SSE event.
-func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
+func (s *ReceiverService) sendAnswer(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
 	answerChan := s.stateManager.GetAnswerChan()
 
 	var answer webrtc.SessionDescription
@@ -204,7 +206,7 @@ func (s *ReceiverGuard) sendAnswer(w http.ResponseWriter, flusher http.Flusher, 
 }
 
 // streamCandidates waits for ICE candidates and streams them as SSE events.
-func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
+func (s *ReceiverService) streamCandidates(w http.ResponseWriter, flusher http.Flusher, ctx context.Context) error {
 	slog.Info("Now streaming ICE candidates to sender...")
 	candidateChan := s.stateManager.GetCandidateChan()
 
@@ -239,7 +241,7 @@ func (s *ReceiverGuard) streamCandidates(w http.ResponseWriter, flusher http.Flu
 	}
 }
 
-func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request) {
+func (s *ReceiverService) CandidateHandler(w http.ResponseWriter, r *http.Request) {
 	var req webrtc.ICECandidateInit
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid candidate payload", http.StatusBadRequest)
@@ -263,7 +265,11 @@ func (s *ReceiverGuard) CandidateHandler(w http.ResponseWriter, r *http.Request)
 
 func sendErrorEvent(w http.ResponseWriter, flusher http.Flusher, err error) {
 	response := map[string]string{"error": err.Error()}
-	jsonResponse, _ := json.Marshal(response) // Marshalling a simple map shouldn't fail
+	jsonResponse, marshalErr := json.Marshal(response) // Marshalling a simple map shouldn't fail
+	if marshalErr != nil {
+		slog.Error("failed to marshal error response", "error", marshalErr)
+		return
+	}
 	fmt.Fprintf(w, "event: error\ndata: %s\n\n", jsonResponse)
 	flusher.Flush()
 }

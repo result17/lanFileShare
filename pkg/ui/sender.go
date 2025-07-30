@@ -85,6 +85,7 @@ func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
 	}
 	m.sender.table.SetRows(rows)
 	m.sender.table.SetHeight(len(rows) + 1)
+	m.sender.adjustTableCursor(len(rows))
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -143,7 +144,7 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
 		return m.listenForAppMessages(), true
-	case appevents.AppErrorMsg:
+	case appevents.Error:
 		m.sender.state = transferFailed
 		return m.listenForAppMessages(), true
 	}
@@ -152,6 +153,7 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 
 // updateSelectingReceiverState handles UI events for the selectingReceiver state.
 func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
 	// ... logic for key presses and table updates
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -175,7 +177,9 @@ func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 
 		}
 	}
-	return nil
+	// Update the table on every message to handle navigation
+	m.sender.table, cmd = m.sender.table.Update(msg)
+	return cmd
 }
 
 func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
@@ -210,7 +214,11 @@ func (m *model) senderView() string {
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:
-		return "\nTransfer failed: \nPress Enter to try again."
+		errorText := "An unknown error occurred."
+		if m.err != nil {
+			errorText = m.err.Error()
+		}
+		return fmt.Sprintf("\nTransfer failed: %s\n\nPress Enter to try again.", style.ErrorStyle.Render(errorText))
 	default:
 		return "Internal error: unknown sender state"
 	}
@@ -218,4 +226,21 @@ func (m *model) senderView() string {
 
 func (m *senderModel) reset() {
 	*m = initSenderModel()
+}
+
+func (m *senderModel) adjustTableCursor(newRowCount int) {
+    if newRowCount == 0 {
+        m.table.SetCursor(0)
+    }
+    
+    currentCursor := m.table.Cursor()
+    if currentCursor >= newRowCount {
+        newCursor := newRowCount - 1
+        slog.Debug("Adjusting table cursor due to service list shrink", 
+            "old_cursor", currentCursor,
+            "new_cursor", newCursor,
+            "row_count", newRowCount)
+        
+        m.table.SetCursor(newCursor)
+    }
 }

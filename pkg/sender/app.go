@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/api"
-	"github.com/rescp17/lanFileSharer/internal/app_events"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
@@ -25,11 +25,10 @@ type App struct {
 	guard           *concurrency.ConcurrencyGuard
 	discoverer      discovery.Adapter
 	apiClient       *api.Client
-	uiMessages      chan tea.Msg
-	appEvents       chan appevents.AppEvent
+	uiMessages      chan tea.Msg            // App -> TUI
+	appEvents       chan appevents.AppEvent // TUI -> App
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
-	discoveryErr    chan error
 }
 
 // NewApp creates a new sender application instance.
@@ -66,15 +65,11 @@ func (a *App) Run(ctx context.Context) error {
 		return a.runDiscovery(ctx)
 	})
 
-
 	g.Go(func() error {
 		for {
 			select {
 			case <-ctx.Done():
 				return nil
-			case err := <-a.discoveryErr:
-				a.sendAndLogError("Discovery process failed", err)
-				return err
 			case event := <-a.appEvents:
 				switch e := event.(type) {
 				case sender.SendFilesMsg:
@@ -114,12 +109,14 @@ func (a *App) runDiscovery(ctx context.Context) error {
 // sendAndLogError is a helper function to both log an error and send it to the UI.
 func (a *App) sendAndLogError(baseMessage string, err error) {
 	slog.Error(baseMessage, "error", err)
-	a.uiMessages <- appevents.AppErrorMsg{Err: fmt.Errorf("%s: %w", baseMessage, err)}
+	a.uiMessages <- appevents.Error{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
 // StartSendProcess is the main entry point for starting a file transfer.
 func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
 	task := func() error {
+		transferCtx, cancel := context.WithTimeout(ctx, a.transferTimeout)
+		defer cancel()
 		a.uiMessages <- sender.TransferStartedMsg{}
 		// TODO use https
 		receiverURL := fmt.Sprintf("http://%s", net.JoinHostPort(receiver.Addr.String(), fmt.Sprintf("%d", receiver.Port)))
@@ -128,14 +125,14 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
 		config := webrtcPkg.Config{}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(ctx, config, a.apiClient)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(transferCtx, config, a.apiClient)
 		if err != nil {
 			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
 		defer webrtcConn.Close()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
-		if err := webrtcConn.Establish(ctx, files); err != nil {
+		if err := webrtcConn.Establish(transferCtx, files); err != nil {
 			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
 

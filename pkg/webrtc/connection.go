@@ -97,6 +97,10 @@ func (a *WebrtcAPI) createPeerConnection(config Config) (*webrtc.PeerConnection,
 	return pc, nil
 }
 
+func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+    return c.peerConnection.AddICECandidate(candidate)
+}
+
 func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (SenderConnection, error) {
 	pc, err := a.createPeerConnection(config)
 	if err != nil {
@@ -108,8 +112,14 @@ func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiC
 		},
 	}
 
-	signaler := api.NewAPISignaler(ctx, apiClient, conn.Peer().AddICECandidate)
+	signaler := api.NewAPISignaler(apiClient, conn.AddICECandidate)
 	conn.signaler = signaler
+
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate != nil {
+			signaler.SendICECandidate(ctx, candidate.ToJSON())
+		}
+	})
 
 	return conn, nil
 
@@ -132,40 +142,28 @@ func (a *WebrtcAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) 
 func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error {
 	if c.signaler == nil {
 		err := errors.New("signaler is not set for SenderConn")
-		slog.Error("Cannot establish connection", "error", err)
 		return err
 	}
 
-	c.Peer().OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			c.signaler.SendICECandidate(candidate.ToJSON())
-		}
-	})
-
 	offer, err := c.Peer().CreateOffer(nil)
 	if err != nil {
-		slog.Error("Failed to create offer", "error", err)
 		return fmt.Errorf("failed to create offer: %w", err)
 	}
 
 	if err := c.Peer().SetLocalDescription(offer); err != nil {
-		slog.Error("Failed to set local description", "error", err)
 		return fmt.Errorf("failed to set local description: %w", err)
 	}
 
-	if err := c.signaler.SendOffer(offer, fileNodes); err != nil {
-		slog.Error("Failed to send offer via signaler", "error", err)
+	if err := c.signaler.SendOffer(ctx, offer, fileNodes); err != nil {
 		return fmt.Errorf("failed to send offer via signaler: %w", err)
 	}
 
-	answer, err := c.signaler.WaitForAnswer()
+	answer, err := c.signaler.WaitForAnswer(ctx)
 	if err != nil {
-		slog.Error("Failed to wait for answer", "error", err)
 		return fmt.Errorf("failed to wait for answer: %w", err)
 	}
 
 	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
-		slog.Error("Failed to set remote description for answer", "error", err)
 		return fmt.Errorf("failed to set remote description for answer: %w", err)
 	}
 

@@ -72,9 +72,9 @@ func (m model) Init() tea.Cmd {
 	runCmd := func() tea.Msg {
 		if err := m.appController.Run(m.ctx); err != nil {
 			slog.Error("App runtime error", "error", err)
-			return appevents.AppErrorMsg{Err: err}
+			return appevents.Error{Err: err}
 		}
-		return nil
+		return appevents.AppFinishedMsg{}
 	}
 
 	return tea.Batch(initCmd, runCmd)
@@ -113,9 +113,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 		}
 		return m, tea.Quit
-	case appevents.AppUIMessage:
-	case appevents.UIErrorEvent:
+	case appevents.Error:
 		m.err = msg.Err
+		return m, nil
+	case appevents.AppFinishedMsg:
+		// TODO
 		return m, nil
 	}
 
