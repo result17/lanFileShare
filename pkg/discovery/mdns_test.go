@@ -71,7 +71,6 @@ func TestMDNSAdapter_Discover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to discover service: %v", err)
 	}
-	defer close(outCh)
 	discoveredService := <-outCh
 	assert.Equalf(t, serviceInfo.Name, discoveredService[0].Name,
 		"Expected service instance %s, got %s", serviceInfo.Name, discoveredService[0].Name)

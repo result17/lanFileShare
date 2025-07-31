@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -27,9 +26,9 @@ func (t *serviceIDInjector) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // Client is a stateless HTTP client for communicating with the receiver's API.
+// It does not store receiver-specific state, making it safe for concurrent use.
 type Client struct {
-	HttpClient  *http.Client
-	receiverURL string
+	HttpClient *http.Client
 }
 
 // NewClient creates a new API client, configured to automatically inject the provided serviceID.
@@ -50,17 +49,13 @@ func NewClient(serviceID string) *Client {
 	}
 }
 
-func (c *Client) SetReceiverURL(receiverURL string) {
-	c.receiverURL = receiverURL
-}
-
-// TODO: The receiver API currently does not have an endpoint to handle this request.
+// SendICECandidateRequest sends an ICE candidate to the receiver's API endpoint.
 // This method is kept as a placeholder for the necessary sender-to-receiver
 // ICE candidate signaling. Implementing the corresponding endpoint on the receiver
 // is required to make WebRTC work in more complex network environments.
-func (c *Client) SendICECandidateRequest(ctx context.Context, candidate webrtc.ICECandidateInit) error {
-	if c.receiverURL == "" {
-		log.Printf("receiver can not be empty.")
+func (c *Client) SendICECandidateRequest(ctx context.Context, receiverURL string, candidate webrtc.ICECandidateInit) error {
+	if receiverURL == "" {
+		return fmt.Errorf("receiver URL cannot be empty")
 	}
 
 	jsonData, err := json.Marshal(candidate)
@@ -68,15 +63,17 @@ func (c *Client) SendICECandidateRequest(ctx context.Context, candidate webrtc.I
 		return fmt.Errorf("failed to marshal candidate payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.receiverURL+"/candidate", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", receiverURL+"/candidate", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create candidate request: %w", err)
 	}
+
 	resp, err := c.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send candidate request: %w", err)
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("candidate responded with non-OK status: %s", resp.Status)
 	}

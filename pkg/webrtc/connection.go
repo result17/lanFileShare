@@ -2,26 +2,26 @@ package webrtc
 
 import (
 	"context"
+	"errors"
 	"fmt"
-
-	"log"
+	"log/slog"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
+	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 type CommonConnection interface {
-	OnDataChannel(f func(*webrtc.DataChannel))
-	OnICECandidate(f func(*webrtc.ICECandidate))
-	AddICECandidate(candidate webrtc.ICECandidateInit) error
+	Peer() *webrtc.PeerConnection
 	Close() error
 }
 
 type SenderConnection interface {
 	CommonConnection
-	Establish(ctx context.Context) error
+	Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error
 	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+	SendFiles(ctx context.Context, files []fileInfo.FileNode) error
 }
 
 type ReceiverConnection interface {
@@ -38,16 +38,34 @@ type Connection struct {
 	peerConnection *webrtc.PeerConnection
 }
 
+// Peer returns the underlying webrtc.PeerConnection object.
+func (c *Connection) Peer() *webrtc.PeerConnection {
+	return c.peerConnection
+}
+
+func (c *Connection) Close() error {
+	if c.peerConnection != nil {
+		slog.Info("Closing WebRTC connection")
+		return c.peerConnection.Close()
+	}
+	return nil
+}
+
 type SenderConn struct {
 	*Connection
 	signaler Signaler // Used to send signals to the remote peer
+}
+
+// SetSignaler allows setting a custom signaler (mainly for testing)
+func (s *SenderConn) SetSignaler(signaler Signaler) {
+	s.signaler = signaler
 }
 
 type ReceiverConn struct {
 	*Connection
 }
 
-type WebRTCAPI struct {
+type WebrtcAPI struct {
 	api *webrtc.API
 }
 
@@ -56,53 +74,69 @@ type Config struct {
 	ICEServers []webrtc.ICEServer
 }
 
-func NewWebRTCAPI() *WebRTCAPI {
-
+func NewWebrtcAPI() *WebrtcAPI {
 	settings := webrtc.SettingEngine{}
 	settings.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
 	settings.SetReceiveMTU(MTU)
 
-	// Using NewAPI is crucial for managing multiple PeerConnections in one application.
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
-	return &WebRTCAPI{
+	return &WebrtcAPI{
 		api: api,
 	}
 }
 
-func (a *WebRTCAPI) createPeerconnection(config Config) (*webrtc.PeerConnection, error) {
-	if len(config.ICEServers) == 0 {
-		config.ICEServers = append(config.ICEServers, webrtc.ICEServer{
-			URLs: []string{"stun:stun.l.google.com:19302"},
-		})
-	}
-	return a.api.NewPeerConnection(webrtc.Configuration{
+func (a *WebrtcAPI) createPeerConnection(config Config) (*webrtc.PeerConnection, error) {
+	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: config.ICEServers,
-	})
+	}
+	if len(config.ICEServers) == 0 {
+		peerConnectionConfig.ICEServers = []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		}
+	}
+	pc, err := a.api.NewPeerConnection(peerConnectionConfig)
+	if err != nil {
+		// Just wrap and return. Let the caller log.
+		return nil, fmt.Errorf("failed to create new peer connection: %w", err)
+	}
+	return pc, nil
 }
 
-func (a *WebRTCAPI) NewSenderConnection(config Config) (*SenderConn, error) {
-	pc, err := a.createPeerconnection(config)
+func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+	return c.peerConnection.AddICECandidate(candidate)
+}
+
+func (a *WebrtcAPI) NewSenderConnection(transferCtx context.Context, config Config, apiClient *api.Client, receiverURL string) (SenderConnection, error) {
+	pc, err := a.createPeerConnection(config)
 	if err != nil {
-		log.Printf("[NewSenderConnection] %v", err)
 		return nil, err
 	}
-
-	return &SenderConn{
+	conn := &SenderConn{
 		Connection: &Connection{
 			peerConnection: pc,
 		},
-		// signaler is left nil initially
-	}, nil
+	}
+
+	signaler := api.NewAPISignaler(apiClient, receiverURL, conn.AddICECandidate)
+	conn.signaler = signaler
+
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate != nil {
+			err := signaler.SendICECandidate(transferCtx, candidate.ToJSON())
+			if err != nil {
+				slog.Error("Failed to send ICE candidate", "error", err)
+			}
+		}
+	})
+
+	return conn, nil
+
 }
 
-func (c *SenderConn) SetSignaler(signaler Signaler) {
-	c.signaler = signaler
-}
-
-func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
-	pc, err := a.createPeerconnection(config)
+func (a *WebrtcAPI) NewReceiverConnection(config Config) (ReceiverConnection, error) {
+	pc, err := a.createPeerConnection(config)
 	if err != nil {
-		log.Printf("[NewSenderConnection] %v", err)
+		slog.Error("Failed to create peer connection for receiver", "error", err)
 		return nil, err
 	}
 
@@ -115,101 +149,56 @@ func (a *WebRTCAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) 
 
 func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error {
 	if c.signaler == nil {
-		err := fmt.Errorf("signaler is not set for SenderConn")
-		log.Printf("[Establish] %v", err)
+		err := errors.New("signaler is not set for SenderConn")
 		return err
 	}
-	c.peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			c.signaler.SendICECandidate(candidate.ToJSON())
-		}
-	})
-	offer, err := c.peerConnection.CreateOffer(nil)
+
+	offer, err := c.Peer().CreateOffer(nil)
 	if err != nil {
-		err := fmt.Errorf("fail to createOffer %w", err)
-		log.Printf("[Establish] %v", err)
-		return err
-	}
-	if err := c.peerConnection.SetLocalDescription(offer); err != nil {
-		err := fmt.Errorf("fail to set local description %w", err)
-		log.Printf("[Establish] %v", err)
-		return err
+		return fmt.Errorf("failed to create offer: %w", err)
 	}
 
-	if err := c.signaler.SendOffer(offer, fileNodes); err != nil {
-		err := fmt.Errorf("fail to send offer %w", err)
-		log.Printf("[Establish] %v", err)
-		return err // Return error if sending offer fails
+	if err := c.Peer().SetLocalDescription(offer); err != nil {
+		return fmt.Errorf("failed to set local description: %w", err)
 	}
 
-	// Wait for the answer to be received from the remote peer
+	if err := c.signaler.SendOffer(ctx, offer, fileNodes); err != nil {
+		return fmt.Errorf("failed to send offer via signaler: %w", err)
+	}
+
 	answer, err := c.signaler.WaitForAnswer(ctx)
 	if err != nil {
-		err := fmt.Errorf("failed to wait for answer: %w", err)
-		log.Printf("[Establish] %v", err)
-		return err
+		return fmt.Errorf("failed to wait for answer: %w", err)
 	}
 
-	// Set the remote description with the received answer
-	if err := c.peerConnection.SetRemoteDescription(*answer); err != nil {
-		err := fmt.Errorf("failed to set remote description for answer: %w", err)
-		log.Printf("[Establish] %v", err)
-		return err
+	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
+		return fmt.Errorf("failed to set remote description for answer: %w", err)
 	}
 
 	return nil
 }
 
-// HandleOffer is called by the receiver to process an incoming offer.
 func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
-	if err := c.peerConnection.SetRemoteDescription(offer); err != nil {
-		err = fmt.Errorf("failed to set remote description: %w", err)
-		log.Printf("[HandleOfferAndCreateAnswer] %v", err)
-		return nil, err
+	if err := c.Peer().SetRemoteDescription(offer); err != nil {
+		return nil, fmt.Errorf("failed to set remote description: %w", err)
 	}
 
-	answer, err := c.peerConnection.CreateAnswer(nil)
+	answer, err := c.Peer().CreateAnswer(nil)
 	if err != nil {
-		err = fmt.Errorf("failed to create answer: %w", err)
-		log.Printf("[HandleOfferAndCreateAnswer] %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to create answer: %w", err)
 	}
 
-	if err := c.peerConnection.SetLocalDescription(answer); err != nil {
-		err = fmt.Errorf("failed to set local description for answer: %w", err)
-		log.Printf("[HandleOfferAndCreateAnswer] %v", err)
-		return nil, err
+	if err := c.Peer().SetLocalDescription(answer); err != nil {
+		return nil, fmt.Errorf("failed to set local description for answer: %w", err)
 	}
 	return &answer, nil
 }
 
-// AddICECandidate is called by both peers to add a candidate received from the other peer.
-func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
-	if err := c.peerConnection.AddICECandidate(candidate); err != nil {
-		err := fmt.Errorf("failed to add ice candidate, %w", err)
-		log.Printf("[AddICECandidate] %v", err)
-		return err
-	}
-	return nil
-}
-
-func (c *Connection) OnICECandidate(f func(*webrtc.ICECandidate)) {
-	c.peerConnection.OnICECandidate(f)
-}
-
-func (c *Connection) OnDataChannel(f func(*webrtc.DataChannel)) {
-	c.peerConnection.OnDataChannel(f)
-}
-
-func (c *Connection) CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
+func (c *SenderConn) CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
 	return c.peerConnection.CreateDataChannel(label, options)
 }
 
-// Close gracefully shuts down the WebRTC connection.
-func (c *Connection) Close() error {
-	if c.peerConnection != nil {
-		log.Printf("Closing webrtc connection")
-		return c.peerConnection.Close()
-	}
+func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode) error {
+	// TODO
 	return nil
 }

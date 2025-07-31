@@ -1,30 +1,32 @@
 package receiver
 
 import (
-	"github.com/rescp17/lanFileSharer/internal/app_events"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 // --- UI to App Events ---
 
-// AcceptFileRequestEvent is sent when the user agrees to receive the files.
-type AcceptFileRequestEvent struct {
-	app_events.Event
+// FileRequestAccepted is sent when the user agrees to receive the files.
+type FileRequestAccepted struct {
+	appevents.Event
 }
 
-// RejectFileRequestEvent is sent when the user rejects the file transfer.
-type RejectFileRequestEvent struct {
-	app_events.Event
+// FileRequestRejected is sent when the user rejects the file transfer.
+type FileRequestRejected struct {
+	appevents.Event
 }
 
 // --- App to UI Messages ---
 
-// ErrorMsg is a message that carries an error.
-type ErrorMsg struct {
-	Err error
-}
-
 // FileNodeUpdateMsg is a message sent to the UI to update it with file info.
 type FileNodeUpdateMsg struct {
+	appevents.AppUIMessage
 	Nodes []fileInfo.FileNode
+}
+
+// TransferFinishedMsg signals the end of a file transfer, with status.
+type TransferFinishedMsg struct {
+	appevents.AppUIMessage
+	Err error // nil if transfer was successful
 }

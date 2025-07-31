@@ -2,17 +2,17 @@ package ui
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rescp17/lanFileSharer/internal/app_events"
+	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
-	"github.com/rescp17/lanFileSharer/internal/style"
-	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
-
 )
 
 // senderState defines the different states of the sender UI.
@@ -35,7 +35,6 @@ type senderModel struct {
 	fp              multiFilePicker.Model
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
-	lastError       error
 }
 
 var columns = []table.Column{
@@ -86,23 +85,39 @@ func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
 	}
 	m.sender.table.SetRows(rows)
 	m.sender.table.SetHeight(len(rows) + 1)
+	m.sender.adjustTableCursor(len(rows))
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
-	// Handle messages from the app logic layer first
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			m.appController.AppEvents() <- senderEvent.QuitAppMsg{}
-			return m, tea.Quit
+	if cmd, processed := m.handleSenderAppEvent(msg); processed {
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	// Handle UI events
+	switch m.sender.state {
+	case selectingReceiver:
+		cmd = m.updateSelectingReceiverState(msg)
+	case selectingFiles:
+		cmd = m.updateSelectingFilesState(msg)
+	case transferComplete, transferFailed:
+		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
+			m.sender.reset()
+			return m, m.initSender()
 		}
+	}
+
+	var spinCmd tea.Cmd
+	m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
+
+	return m, tea.Batch(cmd, spinCmd)
+}
+
+func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case senderEvent.FoundServicesMsg:
-		log.Printf("Discovery Update: Found %d services.", len(msg.Services))
+		slog.Info("Discovery update", "service_count", len(msg.Services))
 		for _, s := range msg.Services {
-			log.Printf("  - Service: %s, Addr: %s, Port: %d", s.Name, s.Addr, s.Port)
+			slog.Debug("Found service", "name", s.Name, "addr", s.Addr, "port", s.Port)
 		}
 
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
@@ -114,66 +129,71 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.updateReceiverTable(msg.Services)
-		return m, m.listenForAppMessages() // Continue listening
+		return m.listenForAppMessages(), true // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
+	case senderEvent.ReceiverAcceptedMsg:
+		m.sender.state = sendingFiles
+		return m.listenForAppMessages(), true
 	case senderEvent.StatusUpdateMsg:
 		// This could be used to update a status line in the UI
-		log.Println("Status Update:", msg.Message) // For now, just log
-		return m, m.listenForAppMessages()
+		slog.Info("Status Update", "message", msg.Message) // For now, just log
+		return m.listenForAppMessages(), true
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
-		return m, m.listenForAppMessages()
-	case senderEvent.ErrorMsg:
+		return m.listenForAppMessages(), true
+	case appevents.Error:
+		m.err = msg.Err
 		m.sender.state = transferFailed
-		m.sender.lastError = msg.Err
-		return m, m.listenForAppMessages()
+		return m.listenForAppMessages(), true
 	}
+	return nil, false
+}
 
-	// Handle UI events
-	switch m.sender.state {
-	case selectingReceiver:
-		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			if msg.String() == "enter" {
-				if len(m.sender.table.SelectedRow()) > 0 {
-					selectedIndex, _ := strconv.Atoi(m.sender.table.SelectedRow()[0])
+// updateSelectingReceiverState handles UI events for the selectingReceiver state.
+func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	// ... logic for key presses and table updates
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			if len(m.sender.services) > 0 {
+				selectedIndex := m.sender.table.Cursor()
+				if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
+					m.err = nil // Reset any previous error
 					m.sender.selectedService = m.sender.services[selectedIndex]
 					m.sender.state = selectingFiles
+				} else {
+					// This case should ideally not be hit, but good to have for safety
+					err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
+					slog.Error("Cursor out of sync", "error", err)
+					m.err = err
 				}
-				return m, nil
+				_, cmd := m.sender.table.Update(msg)
+				return cmd
 			}
-		}
-		var cmd tea.Cmd
-		m.sender.table, cmd = m.sender.table.Update(msg)
-		cmds = append(cmds, cmd)
 
-	case selectingFiles:
-		switch msg := msg.(type) {
-		case multiFilePicker.SelectedFileNodeMsg:
-			// The app will now send messages about the transfer progress
-			m.appController.AppEvents() <- senderEvent.SendFilesMsg{
-				Receiver: m.sender.selectedService,
-				Files:    msg.Files,
-			}
-		}
-		newFpModel, cmd := m.sender.fp.Update(msg)
-		m.sender.fp = newFpModel.(multiFilePicker.Model)
-		cmds = append(cmds, cmd)
-
-	case transferComplete, transferFailed:
-		if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
-			m.sender = initSenderModel()
-			return m, m.initSender()
 		}
 	}
+	// Update the table on every message to handle navigation
+	m.sender.table, cmd = m.sender.table.Update(msg)
+	return cmd
+}
 
-	var spinCmd tea.Cmd
-	m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
-	cmds = append(cmds, spinCmd)
-
-	return m, tea.Batch(cmds...)
+func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case multiFilePicker.SelectedFileNodeMsg:
+		// The app will now send messages about the transfer progress
+		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
+			Receiver: m.sender.selectedService,
+			Files:    msg.Files,
+		}
+	}
+	newFpModel, cmd := m.sender.fp.Update(msg)
+	m.sender.fp = newFpModel.(multiFilePicker.Model)
+	return cmd
 }
 
 func (m *model) senderView() string {
@@ -194,8 +214,34 @@ func (m *model) senderView() string {
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:
-		return fmt.Sprintf("\nTransfer failed: %v\n\nPress Enter to try again.", m.sender.lastError)
+		errorText := "An unknown error occurred."
+		if m.err != nil {
+			errorText = m.err.Error()
+		}
+		return fmt.Sprintf("\nTransfer failed: %s\n\nPress Enter to try again.", style.ErrorStyle.Render(errorText))
 	default:
 		return "Internal error: unknown sender state"
 	}
+}
+
+func (m *senderModel) reset() {
+	*m = initSenderModel()
+}
+
+func (m *senderModel) adjustTableCursor(newRowCount int) {
+    if newRowCount <= 0 {
+        m.table.SetCursor(0)
+		return
+    }
+    
+    currentCursor := m.table.Cursor()
+    if currentCursor >= newRowCount {
+        newCursor := newRowCount - 1
+        slog.Debug("Adjusting table cursor due to service list shrink", 
+            "old_cursor", currentCursor,
+            "new_cursor", newCursor,
+            "row_count", newRowCount)
+        
+        m.table.SetCursor(newCursor)
+    }
 }
