@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -63,7 +64,12 @@ func (c *Client) SendICECandidateRequest(ctx context.Context, receiverURL string
 		return fmt.Errorf("failed to marshal candidate payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", receiverURL+"/candidate", bytes.NewBuffer(jsonData))
+	endpoint, err := url.JoinPath(receiverURL, "candidate")
+	if err != nil {
+		return fmt.Errorf("failed to create candidate url: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create candidate request: %w", err)
 	}
