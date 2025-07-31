@@ -18,24 +18,26 @@ import (
 var ErrTransferRejected = errors.New("transfer rejected by the receiver")
 
 // APISignaler is the client-side implementation of the Signaler interface.
-// It communicates with the Receiver's API endpoint to exchange WebRTC signaling messages.
+// It communicates with the receiver's API endpoint to exchange WebRTC signaling messages.
 type APISignaler struct {
 	apiClient           *Client
+	receiverURL         string                              // URL of the receiver's API endpoint
 	addIceCandidateFunc func(webrtc.ICECandidateInit) error // Callback to add candidates to the sender's connection
 	answerChan          chan *webrtc.SessionDescription
 	errChan             chan error
 }
 
-// Sender
-// NewAPISignaler creates a new signaler.
-// It requires a callback function, which will be used to pass ICE candidates received
-// from the receiver back to the sender's PeerConnection.
+// NewAPISignaler creates a new signaler for the sender side.
+// It requires the receiver's URL and a callback function, which will be used to pass
+// ICE candidates received from the receiver back to the sender's PeerConnection.
 func NewAPISignaler(
 	apiClient *Client,
+	receiverURL string,
 	addIceCandidateFunc func(webrtc.ICECandidateInit) error,
 ) *APISignaler {
 	return &APISignaler{
 		apiClient:           apiClient,
+		receiverURL:         receiverURL,
 		addIceCandidateFunc: addIceCandidateFunc,
 		answerChan:          make(chan *webrtc.SessionDescription, 1),
 		errChan:             make(chan error, 1),
@@ -47,7 +49,7 @@ func NewAPISignaler(
 func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, files []fileInfo.FileNode) error {
 	// The /ask endpoint is the single point of contact.
 	// It receives the offer and returns an SSE stream.
-	url := s.apiClient.receiverURL + "/ask"
+	url := s.receiverURL + "/ask"
 
 	payload := AskPayload{
 		Files: files,
@@ -84,19 +86,39 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 	defer resp.Body.Close()
 	scanner := bufio.NewScanner(resp.Body)
 	var currentEvent string
+	var dataBuffer *bytes.Buffer
+	var answerReceived, rejectionReceived bool
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "event:") {
-			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		} else if strings.HasPrefix(line, "data:") {
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			s.routeEvent(currentEvent, data)
+
+		if line == "" { // Event boundary
+			if dataBuffer.Len() > 0 {
+				// Dispatch the buffered data
+				s.routeEvent(currentEvent, strings.TrimSuffix(dataBuffer.String(), "\n"))
+				dataBuffer.Reset()
+			}
+			continue
+		}
+
+		if eventValue, found := strings.CutPrefix(line, "event:"); found {
+			currentEvent = strings.TrimSpace(eventValue)
+		} else if dataValue, found := strings.CutPrefix(line, "data:"); found {
+			dataBuffer.WriteString(strings.TrimSpace(dataValue))
+			dataBuffer.WriteString("\n")
+
+			if currentEvent == "answer" {
+				answerReceived = true
+			} else if currentEvent == "rejection" {
+				rejectionReceived = true
+			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		s.sendError(fmt.Errorf("error reading SSE stream: %w", err))
+	} else if !answerReceived && !rejectionReceived {
+		s.sendError(fmt.Errorf("no answer or rejection received"))
 	}
 }
 
@@ -120,7 +142,7 @@ func (s *APISignaler) handleAnswerEvent(data string) {
 	var respData struct {
 		Answer webrtc.SessionDescription `json:"answer"`
 	}
-	// answer is an import part of webrtc conn.
+	// Answer is an important part of WebRTC connection establishment
 	if err := json.Unmarshal([]byte(data), &respData); err != nil {
 		s.sendError(fmt.Errorf("failed to unmarshal answer event: %w", err))
 		return
@@ -133,8 +155,8 @@ func (s *APISignaler) handleCandidateEvent(data string) {
 		Candidate webrtc.ICECandidateInit `json:"candidate"`
 	}
 	if err := json.Unmarshal([]byte(data), &respData); err != nil {
-		slog.Error("Failed to unmarshal candidate event", "error", err)
-		return // Don't kill the whole connection for one bad candidate.
+		slog.Warn("Failed to unmarshal candidate event", "error", err)
+		return // Don't kill the whole connection for one bad candidate
 	}
 
 	if err := s.addIceCandidateFunc(respData.Candidate); err != nil {
@@ -147,32 +169,40 @@ func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescrip
 	select {
 	case answer := <-s.answerChan:
 		if answer == nil {
-			return nil, fmt.Errorf("answer is nil") // This should never happen, but just in case.
+			return nil, fmt.Errorf("answer is nil") // This should never happen, but just in case
 		}
 		return answer, nil
 	case err := <-s.errChan:
-		// TODO receiver reject opt
+		// TODO: Handle receiver rejection options
 		return nil, err
-	case <- ctx.Done():
+	case <-ctx.Done():
 		return nil, fmt.Errorf("signaler context cancelled: %w", ctx.Err())
 	}
 }
 
-
-func (s *APISignaler) SendICECandidate(ctx context.Context, candidate webrtc.ICECandidateInit) {
-	slog.Info("Sending ICE candidate to receiver", "candidate", candidate)
-	// This is a fire-and-forget action.
+func (s *APISignaler) SendICECandidate(ctx context.Context, candidate webrtc.ICECandidateInit) error {
+	sendCandErr := make(chan error, 1)
 	go func() {
-		if err := s.apiClient.SendICECandidateRequest(ctx, candidate); err != nil {
-			slog.Warn("failed to send ICE candidate to receiver", "error", err)
+		if err := s.apiClient.SendICECandidateRequest(ctx, s.receiverURL, candidate); err != nil {
+			slog.Warn("Failed to send ICE candidate to receiver", "error", err, "candidate", candidate.Candidate)
+			sendCandErr <- err
+		} else {
+			slog.Debug("ICE candidate sent successfully", "candidate", candidate.Candidate)
+			sendCandErr <- nil
 		}
 	}()
+	select {
+	case err := <-sendCandErr:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled while sending ICE candidate: %w", ctx.Err())
+	}
 }
 
 func (s *APISignaler) sendError(err error) {
 	select {
-		case s.errChan <- err:
-		default:
-			slog.Warn("Could not send error on channel (already full)", "error", err)
+	case s.errChan <- err:
+	default:
+		slog.Warn("Could not send error on channel (already full)", "error", err)
 	}
 }

@@ -86,42 +86,58 @@ func (m *model) resetReceiver() (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateReceiver(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// If we are in a final state, only handle key presses to exit or restart.
-	if m.receiver.state == receiveComplete || m.receiver.state == receiveFailed {
-		return m.handleReceiveFinishedOrFailed(msg)
-	}
-	var cmds []tea.Cmd
-	if m.receiver.state == awaitingConfirmation {
-		_, cmd := m.handleAwaitingConfirmation(msg)
-		cmds = append(cmds, cmd)
-	}
-
 	switch msg := msg.(type) {
+	// Handle global events first
 	case appevents.Error:
 		m.receiver.lastError = msg.Err
 		m.receiver.state = receiveFailed
 		return m, nil
-	case receiverEvent.FileNodeUpdateMsg:
-		if m.receiver.state == awaitingConnection {
-			m.receiver.state = awaitingConfirmation // Transition to confirmation state
-			m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
-		}
 	case receiverEvent.TransferFinishedMsg:
 		m.receiver.state = receiveComplete
-		return m, nil // Stop listening for other app messages
+		return m, nil
 	}
 
-	var spinCmd tea.Cmd
-	if m.receiver.state == awaitingConnection || m.receiver.state == receivingFiles {
-		m.receiver.spinner, spinCmd = m.receiver.spinner.Update(msg)
+	switch m.receiver.state {
+	case awaitingConnection:
+		return m.updateAwaitingConnection(msg)
+	case awaitingConfirmation:
+		return m.updateAwaitingConfirmation(msg)
+	case receivingFiles:
+		return m.updateReceivingFiles(msg)
+	case receiveComplete, receiveFailed:
+		return m.updateReceiveFinishedOrFailed(msg)
 	}
-	cmds = append(cmds, spinCmd)
 
-	return m, tea.Batch(cmds...)
-
+	return m, nil
 }
 
-func (m *model) handleAwaitingConfirmation(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) updateReceivingFiles(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case receiverEvent.FileNodeUpdateMsg:
+		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.receiver.spinner, cmd = m.receiver.spinner.Update(msg)
+		return m, cmd
+	}
+}
+
+// Example of a new state-specific update function
+func (m *model) updateAwaitingConnection(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case receiverEvent.FileNodeUpdateMsg:
+		m.receiver.state = awaitingConfirmation
+		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.receiver.spinner, cmd = m.receiver.spinner.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m *model) updateAwaitingConfirmation(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch {
 		case key.Matches(keyMsg, DefaultKeyMap.Accept):
@@ -140,7 +156,7 @@ func (m *model) handleAwaitingConfirmation(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) handleReceiveFinishedOrFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) updateReceiveFinishedOrFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch m.receiver.state {
 		case receiveComplete:

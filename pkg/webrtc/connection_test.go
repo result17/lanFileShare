@@ -3,9 +3,9 @@ package webrtc
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
-	"sync"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
@@ -34,14 +34,19 @@ func newMockSignaler() *mockSignaler {
 
 // --- Methods for the Signaler interface (used by Sender) ---
 
-func (m *mockSignaler) SendOffer(offer webrtc.SessionDescription, fileNodes []fileInfo.FileNode) error {
+func (m *mockSignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, fileNodes []fileInfo.FileNode) error {
 	m.offerChan <- offer
 	return nil
 }
 
-func (m *mockSignaler) SendICECandidate(candidate webrtc.ICECandidateInit) {
+func (m *mockSignaler) SendICECandidate(ctx context.Context, candidate webrtc.ICECandidateInit) error {
 	// This is called by the Sender, so the candidate is for the Receiver.
-	m.senderCandidates <- candidate
+	select {
+	case m.senderCandidates <- candidate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (m *mockSignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
@@ -96,7 +101,6 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 
-
 	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
 	require.NoError(t, err)
@@ -121,17 +125,24 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	})
 
 	// 2. Setup Sender (gets the signaler)
-	// We pass the mockSignaler, which satisfies the Signaler interface.
-	senderConn, err := api.NewSenderConnection(ctx, config, nil)
+	// Create a basic sender connection first, then we'll replace its signaler
+	senderConn, err := api.NewSenderConnection(ctx, config, nil, "http://mock-receiver")
 	require.NoError(t, err)
 	defer senderConn.Close()
+
+	// Replace the signaler with our mock using the SetSignaler method
+	if sc, ok := senderConn.(*SenderConn); ok {
+		sc.SetSignaler(signaler)
+	} else {
+		t.Fatal("Failed to cast senderConn to *SenderConn")
+	}
 
 	// The Sender's OnICECandidate will call the required SendICECandidate method
 	// from the Signaler interface.
 	senderConn.Peer().OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
 			t.Log("Sender: Got ICE candidate, sending via Signaler interface")
-			signaler.SendICECandidate(candidate.ToJSON())
+			signaler.SendICECandidate(ctx, candidate.ToJSON())
 		}
 	})
 
@@ -158,20 +169,28 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		t.Log("Receiver: Sent answer via mock helper")
 
 		// Process candidates sent from the Sender
-		processCandidates(t, ctx, receiverConn.Connection, signaler.senderCandidates, done, "Receiver")
+		processCandidates(t, ctx, receiverConn, signaler.senderCandidates, done, "Receiver")
 	}()
 
 	// 4. Run Sender logic in a goroutine
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		dc, err := senderConn.Peer().CreateDataChannel("file-transfer", nil)
 		if err != nil {
-			errChan <- fmt.Errorf("sender failed to create data channel: %w", err)
+			select {
+			case errChan <- fmt.Errorf("sender failed to create data channel: %w", err):
+			default:
+			}
 			return
 		}
 		dc.OnOpen(func() {
 			t.Log("Sender: DataChannel opened, sending message")
 			if err := dc.SendText("Hello, Receiver!"); err != nil {
-				errChan <- fmt.Errorf("sender failed to send text: %w", err)
+				select {
+				case errChan <- fmt.Errorf("sender failed to send text: %w", err):
+				default:
+				}
 			}
 		})
 
@@ -183,11 +202,13 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 
 		// This will create offer, send it, and wait for the answer
 		if err := senderConn.Establish(ctx, nil); err != nil {
-			errChan <- fmt.Errorf("sender failed to establish connection: %w", err)
+			select {
+			case errChan <- fmt.Errorf("sender failed to establish connection: %w", err):
+			default:
+			}
 			return
 		}
 		t.Log("Sender: Connection established")
-
 	}()
 
 	// 5. Wait for the final message or a timeout/error
@@ -201,7 +222,6 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("Test timed out waiting for message")
 	}
-	close(done)
+
 	wg.Wait()
 }
-

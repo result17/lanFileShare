@@ -34,7 +34,7 @@ type App struct {
 	appEvents            chan appevents.AppEvent
 	stateManager         *app.SingleRequestManager
 	inboundCandidateChan chan webrtc.ICECandidateInit
-	activeConn           *webrtcPkg.ReceiverConn
+	activeConn           webrtcPkg.ReceiverConnection
 	connMu               sync.Mutex
 	errChan              chan error
 }
@@ -99,7 +99,9 @@ func (a *App) Run(ctx context.Context) error {
 		case err := <-a.errChan:
 			return fmt.Errorf("application service failed: %w", err)
 		case candidate := <-a.inboundCandidateChan:
-			return a.handleInboundCandidate(candidate)
+			if err := a.handleInboundCandidate(candidate); err != nil {
+				slog.Warn("Failed to handle inbound ICE candidate", "error", err)
+			}
 		case event := <-a.appEvents:
 			switch event.(type) {
 			case receiver.FileRequestAccepted:
@@ -184,7 +186,8 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 
 	var success bool
 	defer func() {
-		if success {
+		if !success {
+			slog.Warn("Closing receiver connection due to setup failure.")
 			receiverConn.Close()
 		}
 	}()
@@ -229,7 +232,7 @@ func (a *App) startRegistration(ctx context.Context, port int, cancel context.Ca
 		err := a.registrar.Announce(ctx, serviceInfo)
 		if err != nil {
 			a.sendAndLogError("Failed to start mDNS announcement", err)
-			cancel()
+			a.errChan <- err
 		}
 	}()
 }
@@ -256,7 +259,7 @@ func (a *App) startServer(ctx context.Context, port int) {
 	}()
 }
 
-func (a *App) closeActiveConnectionIfSameConn(receiverConn *webrtcPkg.ReceiverConn) {
+func (a *App) closeActiveConnectionIfSameConn(receiverConn webrtcPkg.ReceiverConnection) {
 	a.connMu.Lock()
 	defer a.connMu.Unlock()
 
@@ -267,7 +270,7 @@ func (a *App) closeActiveConnectionIfSameConn(receiverConn *webrtcPkg.ReceiverCo
 	}
 }
 
-func (a *App) setActiveConn(conn *webrtcPkg.ReceiverConn) {
+func (a *App) setActiveConn(conn webrtcPkg.ReceiverConnection) {
 	a.connMu.Lock()
 	oldConn := a.activeConn
 	a.activeConn = conn

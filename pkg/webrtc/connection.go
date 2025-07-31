@@ -21,7 +21,7 @@ type SenderConnection interface {
 	CommonConnection
 	Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error
 	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
-	SendFiles(ctx context.Context, files []fileInfo.FileNode) error 
+	SendFiles(ctx context.Context, files []fileInfo.FileNode) error
 }
 
 type ReceiverConnection interface {
@@ -54,6 +54,11 @@ func (c *Connection) Close() error {
 type SenderConn struct {
 	*Connection
 	signaler Signaler // Used to send signals to the remote peer
+}
+
+// SetSignaler allows setting a custom signaler (mainly for testing)
+func (s *SenderConn) SetSignaler(signaler Signaler) {
+	s.signaler = signaler
 }
 
 type ReceiverConn struct {
@@ -98,10 +103,10 @@ func (a *WebrtcAPI) createPeerConnection(config Config) (*webrtc.PeerConnection,
 }
 
 func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
-    return c.peerConnection.AddICECandidate(candidate)
+	return c.peerConnection.AddICECandidate(candidate)
 }
 
-func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiClient *api.Client) (SenderConnection, error) {
+func (a *WebrtcAPI) NewSenderConnection(transferCtx context.Context, config Config, apiClient *api.Client, receiverURL string) (SenderConnection, error) {
 	pc, err := a.createPeerConnection(config)
 	if err != nil {
 		return nil, err
@@ -112,12 +117,15 @@ func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiC
 		},
 	}
 
-	signaler := api.NewAPISignaler(apiClient, conn.AddICECandidate)
+	signaler := api.NewAPISignaler(apiClient, receiverURL, conn.AddICECandidate)
 	conn.signaler = signaler
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
-			signaler.SendICECandidate(ctx, candidate.ToJSON())
+			err := signaler.SendICECandidate(transferCtx, candidate.ToJSON())
+			if err != nil {
+				slog.Error("Failed to send ICE candidate", "error", err)
+			}
 		}
 	})
 
@@ -125,7 +133,7 @@ func (a *WebrtcAPI) NewSenderConnection(ctx context.Context, config Config, apiC
 
 }
 
-func (a *WebrtcAPI) NewReceiverConnection(config Config) (*ReceiverConn, error) {
+func (a *WebrtcAPI) NewReceiverConnection(config Config) (ReceiverConnection, error) {
 	pc, err := a.createPeerConnection(config)
 	if err != nil {
 		slog.Error("Failed to create peer connection for receiver", "error", err)
@@ -172,19 +180,16 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 
 func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	if err := c.Peer().SetRemoteDescription(offer); err != nil {
-		slog.Error("Failed to set remote description", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to set remote description: %w", err)
 	}
 
 	answer, err := c.Peer().CreateAnswer(nil)
 	if err != nil {
-		slog.Error("Failed to create answer", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to create answer: %w", err)
 	}
 
 	if err := c.Peer().SetLocalDescription(answer); err != nil {
-		slog.Error("Failed to set local description for answer", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to set local description for answer: %w", err)
 	}
 	return &answer, nil
 }

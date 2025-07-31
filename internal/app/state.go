@@ -96,8 +96,10 @@ func (m *SingleRequestManager) SetAnswer(answer webrtc.SessionDescription) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state == nil || m.state.AnswerChan == nil || m.state.answerSent {
-		slog.Error("an answer has already been sent")
+	if m.state == nil {
+		return errors.New("no active request state")
+	}
+	if m.state.AnswerChan == nil { // Assumes we nil the channel after use
 		return errors.New("an answer has already been sent")
 	}
 
@@ -138,16 +140,11 @@ func (m *SingleRequestManager) CloseCandidateChan() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state != nil || m.state.CandidateChan != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				// Ignore "send on closed channel" panic
-				slog.Warn("Attempted to send candidate on closed channel", "error", r)
-			}
-		}()
+	if m.state != nil && m.state.CandidateChan != nil {
 		close(m.state.CandidateChan)
 		m.state.candidateChanClose = true
 	}
+	m.state = nil
 }
 
 // GetCandidateChan returns the channel from which ICE candidates can be read.

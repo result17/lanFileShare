@@ -20,5 +20,5 @@ type ServiceInfo struct {
 
 type Adapter interface {
 	Announce(ctx context.Context, service ServiceInfo) error
-	Discover(ctx context.Context, service string) (chan []ServiceInfo, error)
+	Discover(ctx context.Context, service string) (<-chan []ServiceInfo, error)
 }

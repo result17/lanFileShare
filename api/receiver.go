@@ -258,9 +258,11 @@ func (s *ReceiverService) CandidateHandler(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{
+    if err := json.NewEncoder(w).Encode(map[string]string{
         "message": "Candidate received successfully",
-    })
+    }); err != nil {
+		slog.Error("Failed to encode response", "error", err)
+	}
 }
 
 func sendErrorEvent(w http.ResponseWriter, flusher http.Flusher, err error) {
@@ -270,6 +272,8 @@ func sendErrorEvent(w http.ResponseWriter, flusher http.Flusher, err error) {
 		slog.Error("failed to marshal error response", "error", marshalErr)
 		return
 	}
-	fmt.Fprintf(w, "event: error\ndata: %s\n\n", jsonResponse)
+	if _, writeErr := fmt.Fprintf(w, "event: error\ndata: %s\n\n", jsonResponse); writeErr != nil {
+		slog.Warn("failed to write error event to client", "error", writeErr)
+	}
 	flusher.Flush()
 }

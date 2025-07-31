@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,6 +30,7 @@ type App struct {
 	appEvents       chan appevents.AppEvent // TUI -> App
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
+	transferWG      sync.WaitGroup // Track active transfer goroutines
 }
 
 // NewApp creates a new sender application instance.
@@ -69,11 +71,13 @@ func (a *App) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
+				// Wait for any active transfers to complete gracefully
+				a.transferWG.Wait()
 				return nil
 			case event := <-a.appEvents:
 				switch e := event.(type) {
 				case sender.SendFilesMsg:
-					// show files to users
+					// Show files to users and start the transfer process
 					a.StartSendProcess(ctx, e.Receiver, e.Files)
 				}
 			}
@@ -82,9 +86,9 @@ func (a *App) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
-// startDiscovery begins the process of finding receivers on the network.
+// runDiscovery begins the process of finding receivers on the network.
 func (a *App) runDiscovery(ctx context.Context) error {
-	// TODO use https
+	// TODO: Use HTTPS for secure communication
 	serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 	if err != nil {
 		a.sendAndLogError("Failed to start discovery", err)
@@ -100,7 +104,6 @@ func (a *App) runDiscovery(ctx context.Context) error {
 				return nil
 			}
 			a.uiMessages <- sender.FoundServicesMsg{Services: services}
-
 		}
 	}
 
@@ -114,18 +117,19 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 
 // StartSendProcess is the main entry point for starting a file transfer.
 func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
-	task := func() error {
-		transferCtx, cancel := context.WithTimeout(ctx, a.transferTimeout)
+	task := func(taskCtx context.Context) error {
+		// Use the shorter of the two timeouts: main context or transfer timeout
+		transferCtx, cancel := context.WithTimeout(taskCtx, a.transferTimeout)
 		defer cancel()
+
 		a.uiMessages <- sender.TransferStartedMsg{}
-		// TODO use https
+		// TODO: Use HTTPS for secure communication
 		receiverURL := fmt.Sprintf("http://%s", net.JoinHostPort(receiver.Addr.String(), fmt.Sprintf("%d", receiver.Port)))
-		a.apiClient.SetReceiverURL(receiverURL)
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
 		config := webrtcPkg.Config{}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(transferCtx, config, a.apiClient)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnection(transferCtx, config, a.apiClient, receiverURL)
 		if err != nil {
 			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
@@ -138,17 +142,19 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
 
-		// TODO: Add actual file transfer logic over the webrtcConn.
+		// TODO: Add actual file transfer logic over the WebRTC connection
 
-		if err := webrtcConn.SendFiles(ctx, files); err != nil {
+		if err := webrtcConn.SendFiles(transferCtx, files); err != nil {
 			return fmt.Errorf("failed to send files: %w", err)
 		}
 
 		return nil // Success
 	}
 
+	a.transferWG.Add(1)
 	go func() {
-		err := a.guard.Execute(task)
+		defer a.transferWG.Done()
+		err := a.guard.ExecuteWithContext(ctx, task)
 		if err != nil {
 			if err == concurrency.ErrBusy {
 				a.sendAndLogError("A transfer is already in progress", err)

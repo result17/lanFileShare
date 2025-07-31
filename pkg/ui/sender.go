@@ -102,7 +102,6 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case transferComplete, transferFailed:
 		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
 			m.sender.reset()
-			m.sender.state = findingReceivers // Explicitly set state
 			return m, m.initSender()
 		}
 	}
@@ -145,6 +144,7 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 		m.sender.state = transferComplete
 		return m.listenForAppMessages(), true
 	case appevents.Error:
+		m.err = msg.Err
 		m.sender.state = transferFailed
 		return m.listenForAppMessages(), true
 	}
@@ -229,8 +229,9 @@ func (m *senderModel) reset() {
 }
 
 func (m *senderModel) adjustTableCursor(newRowCount int) {
-    if newRowCount == 0 {
+    if newRowCount <= 0 {
         m.table.SetCursor(0)
+		return
     }
     
     currentCursor := m.table.Cursor()

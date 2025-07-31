@@ -42,7 +42,7 @@ func (m *MDNSAdapter) Announce(ctx context.Context, serviceInfo ServiceInfo) err
 }
 
 // windows does not support ipv6 multicast, so we need to use ipv4
-func (m *MDNSAdapter) Discover(ctx context.Context, service string) (chan []ServiceInfo, error) {
+func (m *MDNSAdapter) Discover(ctx context.Context, service string) (<-chan []ServiceInfo, error) {
 	var (
 		mu      sync.RWMutex
 		entries = make(map[string]ServiceInfo)

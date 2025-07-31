@@ -34,4 +34,6 @@ type Error struct {
     Err       error // Optional: when the error occurred
 }
 
-type AppFinishedMsg struct{}
+type AppFinishedMsg struct{
+    Event
+}

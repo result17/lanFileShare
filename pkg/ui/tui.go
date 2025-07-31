@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,6 +73,10 @@ func (m model) Init() tea.Cmd {
 	runCmd := func() tea.Msg {
 		if err := m.appController.Run(m.ctx); err != nil {
 			slog.Error("App runtime error", "error", err)
+
+			if errors.Is(err, context.Canceled) {
+				return appevents.AppFinishedMsg{}
+			}
 			return appevents.Error{Err: err}
 		}
 		return appevents.AppFinishedMsg{}
@@ -100,25 +105,25 @@ func (m model) View() string {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
-			if m.cancel != nil {
-				m.cancel()
-			}
-			return m, tea.Quit
-		}
+	// case tea.KeyMsg:
+	// 	switch msg.Type {
+	// 	case tea.KeyCtrlC:
+	// 		if m.cancel != nil {
+	// 			m.cancel()
+	// 		}
+	// 		return m, tea.Quit
+	// 	}
 	case tea.QuitMsg:
+		// This is sent on Ctrl+C by default.
 		if m.cancel != nil {
 			m.cancel()
 		}
 		return m, tea.Quit
 	case appevents.Error:
 		m.err = msg.Err
-		return m, nil
+		return m, tea.Quit
 	case appevents.AppFinishedMsg:
-		// TODO
-		return m, nil
+		return m, tea.Quit
 	}
 
 	switch m.mode {
