@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>crypto: Go Coverage Report</title>
+    <style>
+      body {
+        background: black;
+        color: rgb(80, 80, 80);
+      }
+      body,
+      pre,
+      #legend span {
+        font-family: Menlo, monospace;
+        font-weight: bold;
+      }
+      #topbar {
+        background: black;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 42px;
+        border-bottom: 1px solid rgb(80, 80, 80);
+      }
+      #content {
+        margin-top: 50px;
+      }
+      #nav,
+      #legend {
+        float: left;
+        margin-left: 10px;
+      }
+      #legend {
+        margin-top: 12px;
+      }
+      #nav {
+        margin-top: 10px;
+      }
+      #legend span {
+        margin: 0 5px;
+      }
+      .cov0 {
+        color: rgb(192, 0, 0);
+      }
+      .cov1 {
+        color: rgb(128, 128, 128);
+      }
+      .cov2 {
+        color: rgb(116, 140, 131);
+      }
+      .cov3 {
+        color: rgb(104, 152, 134);
+      }
+      .cov4 {
+        color: rgb(92, 164, 137);
+      }
+      .cov5 {
+        color: rgb(80, 176, 140);
+      }
+      .cov6 {
+        color: rgb(68, 188, 143);
+      }
+      .cov7 {
+        color: rgb(56, 200, 146);
+      }
+      .cov8 {
+        color: rgb(44, 212, 149);
+      }
+      .cov9 {
+        color: rgb(32, 224, 152);
+      }
+      .cov10 {
+        color: rgb(20, 236, 155);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="topbar">
+      <div id="nav">
+        <select id="files">
+          <option value="file0">
+            github.com/rescp17/lanFileSharer/pkg/crypto/signature.go (82.9%)
+          </option>
+
+          <option value="file1">
+            github.com/rescp17/lanFileSharer/pkg/crypto/utils.go (88.1%)
+          </option>
+        </select>
+      </div>
+      <div id="legend">
+        <span>not tracked</span>
+
+        <span class="cov0">not covered</span>
+        <span class="cov8">covered</span>
+      </div>
+    </div>
+    <div id="content">
+      <pre class="file" id="file0" style="display: none">package crypto
+
+import (
+        "crypto"
+        "crypto/rand"
+        "crypto/rsa"
+        "crypto/sha256"
+        "crypto/x509"
+        "encoding/json"
+        "fmt"
+
+        "github.com/rescp17/lanFileSharer/pkg/fileInfo"
+)
+
+// FileStructureSigner handles RSA key generation and signing for FileNode structures
+type FileStructureSigner struct {
+        privateKey *rsa.PrivateKey
+        publicKey  *rsa.PublicKey
+}
+
+// SignedFileStructure contains the file structure with digital signature
+type SignedFileStructure struct {
+        Files     []fileInfo.FileNode `json:"files"`
+        PublicKey []byte              `json:"public_key"`
+        Signature []byte              `json:"signature"`
+}
+
+// NewFileStructureSigner creates a new signer with generated RSA key pair
+func NewFileStructureSigner() (*FileStructureSigner, error) <span class="cov8" title="1">{
+        // Generate 2048-bit RSA key pair
+        privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to generate RSA key pair: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return &amp;FileStructureSigner{
+                privateKey: privateKey,
+                publicKey:  &amp;privateKey.PublicKey,
+        }, nil</span>
+}
+
+// SignFileStructure creates a signed file structure from FileNode array
+func (s *FileStructureSigner) SignFileStructure(files []fileInfo.FileNode) (*SignedFileStructure, error) <span class="cov8" title="1">{
+        // Serialize the file structure for signing
+        filesJSON, err := json.Marshal(files)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to marshal files for signing: %w", err)
+        }</span>
+
+        // Create hash of the file structure
+        <span class="cov8" title="1">hash := sha256.Sum256(filesJSON)
+
+        // Sign the hash
+        signature, err := rsa.SignPKCS1v15(rand.Reader, s.privateKey, crypto.SHA256, hash[:])
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to sign file structure: %w", err)
+        }</span>
+
+        // Encode public key for transmission
+        <span class="cov8" title="1">publicKeyBytes, err := x509.MarshalPKIXPublicKey(s.publicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to marshal public key: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return &amp;SignedFileStructure{
+                Files:     files,
+                PublicKey: publicKeyBytes,
+                Signature: signature,
+        }, nil</span>
+}
+
+// VerifyFileStructure verifies the signature of a signed file structure
+func VerifyFileStructure(signed *SignedFileStructure) error <span class="cov8" title="1">{
+        // Parse the public key
+        publicKeyInterface, err := x509.ParsePKIXPublicKey(signed.PublicKey)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to parse public key: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">publicKey, ok := publicKeyInterface.(*rsa.PublicKey)
+        if !ok </span><span class="cov0" title="0">{
+                return fmt.Errorf("public key is not RSA key")
+        }</span>
+
+        // Serialize the file structure for verification
+        <span class="cov8" title="1">filesJSON, err := json.Marshal(signed.Files)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to marshal files for verification: %w", err)
+        }</span>
+
+        // Create hash of the file structure
+        <span class="cov8" title="1">hash := sha256.Sum256(filesJSON)
+
+        // Verify the signature
+        err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hash[:], signed.Signature)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("signature verification failed: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// CreateSignedFileStructure is a helper function to create signed structure from file paths
+func CreateSignedFileStructure(filePaths []string) (*SignedFileStructure, error) <span class="cov8" title="1">{
+        var nodes []fileInfo.FileNode
+        for _, path := range filePaths </span><span class="cov8" title="1">{
+                node, err := fileInfo.CreateNode(path)
+                if err != nil </span><span class="cov8" title="1">{
+                        return nil, fmt.Errorf("failed to create node for %s: %w", path, err)
+                }</span>
+                <span class="cov8" title="1">nodes = append(nodes, node)</span>
+        }
+
+        <span class="cov8" title="1">signer, err := NewFileStructureSigner()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to create signer: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return signer.SignFileStructure(nodes)</span>
+}
+
+// GetPublicKeyBytes returns the public key as bytes for external use
+func (s *FileStructureSigner) GetPublicKeyBytes() ([]byte, error) <span class="cov8" title="1">{
+        return x509.MarshalPKIXPublicKey(s.publicKey)
+}</span>
+
+// GetPrivateKeyBytes returns the private key as bytes (for testing/debugging only)
+func (s *FileStructureSigner) GetPrivateKeyBytes() ([]byte, error) <span class="cov8" title="1">{
+        return x509.MarshalPKCS1PrivateKey(s.privateKey), nil
+}</span>
+</pre>
+
+      <pre class="file" id="file1" style="display: none">package crypto
+
+import (
+        "crypto/rand"
+        "crypto/rsa"
+        "crypto/x509"
+        "encoding/pem"
+        "fmt"
+)
+
+// KeyPair represents an RSA key pair
+type KeyPair struct {
+        PrivateKey *rsa.PrivateKey
+        PublicKey  *rsa.PublicKey
+}
+
+// GenerateKeyPair generates a new RSA key pair with the specified bit size
+func GenerateKeyPair(bitSize int) (*KeyPair, error) <span class="cov8" title="1">{
+        if bitSize &lt; 1024 </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("key size must be at least 1024 bits")
+        }</span>
+
+        <span class="cov8" title="1">privateKey, err := rsa.GenerateKey(rand.Reader, bitSize)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to generate RSA key pair: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return &amp;KeyPair{
+                PrivateKey: privateKey,
+                PublicKey:  &amp;privateKey.PublicKey,
+        }, nil</span>
+}
+
+// PrivateKeyToPEM converts an RSA private key to PEM format
+func PrivateKeyToPEM(privateKey *rsa.PrivateKey) ([]byte, error) <span class="cov8" title="1">{
+        privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+        privateKeyPEM := pem.EncodeToMemory(&amp;pem.Block{
+                Type:  "RSA PRIVATE KEY",
+                Bytes: privateKeyBytes,
+        })
+        return privateKeyPEM, nil
+}</span>
+
+// PublicKeyToPEM converts an RSA public key to PEM format
+func PublicKeyToPEM(publicKey *rsa.PublicKey) ([]byte, error) <span class="cov8" title="1">{
+        publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to marshal public key: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">publicKeyPEM := pem.EncodeToMemory(&amp;pem.Block{
+                Type:  "PUBLIC KEY",
+                Bytes: publicKeyBytes,
+        })
+        return publicKeyPEM, nil</span>
+}
+
+// PrivateKeyFromPEM parses an RSA private key from PEM format
+func PrivateKeyFromPEM(pemData []byte) (*rsa.PrivateKey, error) <span class="cov8" title="1">{
+        block, _ := pem.Decode(pemData)
+        if block == nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("failed to decode PEM block")
+        }</span>
+
+        <span class="cov8" title="1">if block.Type != "RSA PRIVATE KEY" </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("invalid PEM block type: %s", block.Type)
+        }</span>
+
+        <span class="cov8" title="1">privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to parse private key: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return privateKey, nil</span>
+}
+
+// PublicKeyFromPEM parses an RSA public key from PEM format
+func PublicKeyFromPEM(pemData []byte) (*rsa.PublicKey, error) <span class="cov8" title="1">{
+        block, _ := pem.Decode(pemData)
+        if block == nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("failed to decode PEM block")
+        }</span>
+
+        <span class="cov8" title="1">if block.Type != "PUBLIC KEY" </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("invalid PEM block type: %s", block.Type)
+        }</span>
+
+        <span class="cov8" title="1">publicKeyInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to parse public key: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">publicKey, ok := publicKeyInterface.(*rsa.PublicKey)
+        if !ok </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("key is not an RSA public key")
+        }</span>
+
+        <span class="cov8" title="1">return publicKey, nil</span>
+}
+
+// ValidateKeyPair validates that a private and public key form a valid pair
+func ValidateKeyPair(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error <span class="cov8" title="1">{
+        // Check if the public key from private key matches the provided public key
+        if privateKey.PublicKey.N.Cmp(publicKey.N) != 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("public key does not match private key")
+        }</span>
+
+        <span class="cov8" title="1">if privateKey.PublicKey.E != publicKey.E </span><span class="cov8" title="1">{
+                return fmt.Errorf("public key exponent does not match private key")
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// ValidatePublicKey performs basic validation on an RSA public key
+func ValidatePublicKey(publicKey *rsa.PublicKey) error <span class="cov8" title="1">{
+        if publicKey == nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("public key is nil")
+        }</span>
+
+        <span class="cov8" title="1">if publicKey.N == nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("public key modulus is nil")
+        }</span>
+
+        // Check minimum key size (1024 bits)
+        <span class="cov8" title="1">if publicKey.N.BitLen() &lt; 1024 </span><span class="cov0" title="0">{
+                return fmt.Errorf("public key size (%d bits) is too small, minimum 1024 bits required", publicKey.N.BitLen())
+        }</span>
+
+        // Check common exponent values
+        <span class="cov8" title="1">if publicKey.E != 65537 &amp;&amp; publicKey.E != 3 </span><span class="cov8" title="1">{
+                return fmt.Errorf("unusual public exponent: %d", publicKey.E)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// ValidatePrivateKey performs basic validation on an RSA private key
+func ValidatePrivateKey(privateKey *rsa.PrivateKey) error <span class="cov8" title="1">{
+        if privateKey == nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("private key is nil")
+        }</span>
+
+        // Validate the public key component
+        <span class="cov8" title="1">if err := ValidatePublicKey(&amp;privateKey.PublicKey); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("invalid public key component: %w", err)
+        }</span>
+
+        // Validate private key components
+        <span class="cov8" title="1">if privateKey.D == nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("private exponent is nil")
+        }</span>
+
+        <span class="cov8" title="1">if len(privateKey.Primes) &lt; 2 </span><span class="cov8" title="1">{
+                return fmt.Errorf("insufficient prime factors")
+        }</span>
+
+        // Validate that the key is mathematically consistent
+        <span class="cov8" title="1">err := privateKey.Validate()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("private key validation failed: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// SecureCompareBytes performs constant-time comparison of byte slices
+func SecureCompareBytes(a, b []byte) bool <span class="cov8" title="1">{
+        if len(a) != len(b) </span><span class="cov8" title="1">{
+                return false
+        }</span>
+
+        <span class="cov8" title="1">var result byte
+        for i := 0; i &lt; len(a); i++ </span><span class="cov8" title="1">{
+                result |= a[i] ^ b[i]
+        }</span>
+
+        <span class="cov8" title="1">return result == 0</span>
+}
+</pre>
+    </div>
+  </body>
+  <script>
+    (function () {
+      var files = document.getElementById("files");
+      var visible;
+      files.addEventListener("change", onChange, false);
+      function select(part) {
+        if (visible) visible.style.display = "none";
+        visible = document.getElementById(part);
+        if (!visible) return;
+        files.value = part;
+        visible.style.display = "block";
+        location.hash = part;
+      }
+      function onChange() {
+        select(files.value);
+        window.scrollTo(0, 0);
+      }
+      if (location.hash != "") {
+        select(location.hash.substr(1));
+      }
+      if (!visible) {
+        select("file0");
+      }
+    })();
+  </script>
+</html>
