@@ -11,7 +11,11 @@
   - Add cryptographic utilities for secure key handling and validation
   - _Requirements: 3.1, 3.2, 3.5_
 
-- [ ] 2. Enhance API payload structure with signature support
+- [x] 2. Enhance API payload structure with signature support
+
+
+
+
   - Modify AskPayload struct to include SignedFileStructure instead of plain files array
   - Update API request/response handling to process signature verification
   - Implement signature validation in receiver's AskHandler before processing transfer request

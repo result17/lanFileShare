@@ -24,9 +24,13 @@ type SignedFileStructure struct {
 	Signature []byte              `json:"signature"`
 }
 
+const (
+	KEY_PAIR_BIT_SIZE = 2048
+)
+
 // NewFileStructureSigner creates a new signer with generated RSA key pair
 func NewFileStructureSigner() (*FileStructureSigner, error) {
-	keyPair, err := GenerateKeyPair(2048)
+	keyPair, err := GenerateKeyPair(KEY_PAIR_BIT_SIZE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate key pair: %w", err)
 	}

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +34,7 @@ func newMockSignaler() *mockSignaler {
 
 // --- Methods for the Signaler interface (used by Sender) ---
 
-func (m *mockSignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, fileNodes []fileInfo.FileNode) error {
+func (m *mockSignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, signedFiles *crypto.SignedFileStructure) error {
 	m.offerChan <- offer
 	return nil
 }

@@ -13,13 +13,19 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/app"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/crypto"
 )
 
 // API is the main entry point for the entire receiver API.
 type API struct {
 	server *ReceiverService
 	mux    *http.ServeMux
+}
+
+// AskPayload is the structure of the request body for the /ask endpoint.
+type AskPayload struct {
+	SignedFiles *crypto.SignedFileStructure `json:"signed_files"`
+	Offer       webrtc.SessionDescription   `json:"offer"`
 }
 
 // NewAPI creates and initializes a new API instance.
@@ -89,12 +95,6 @@ func (s *ReceiverService) ConcurrencyControlMiddleware(next http.Handler) http.H
 	})
 }
 
-// AskPayload is the structure of the request body for the /ask endpoint.
-type AskPayload struct {
-	Files []fileInfo.FileNode       `json:"files"`
-	Offer webrtc.SessionDescription `json:"offer"`
-}
-
 // AskHandler is the core business logic for handling /ask requests.
 func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 	var req AskPayload
@@ -103,7 +103,14 @@ func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+
 	slog.Info("Ask received", "offer_type", req.Offer.Type)
+	if err := crypto.VerifyFileStructure(req.SignedFiles); err != nil {
+		slog.Error("failed to verify file structure", "error", err)
+		http.Error(w, "Invalid file structure", http.StatusBadRequest)
+		return
+	}
+	slog.Info("success to verify file structure")
 
 	decisionChan, err := s.stateManager.CreateRequest(req.Offer)
 	if err != nil {
@@ -113,7 +120,7 @@ func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.stateManager.CloseRequest()
 
-	s.uiMessages <- receiver.FileNodeUpdateMsg{Nodes: req.Files}
+	s.uiMessages <- receiver.FileNodeUpdateMsg{Nodes: req.SignedFiles.Files}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -138,7 +145,7 @@ func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if decision == app.Rejected {
 			slog.Info("Request rejected by user")
-			if err := s.sendRejection(w, flusher); err  != nil {
+			if err := s.sendRejection(w, flusher); err != nil {
 				slog.Error("Failed to send rejection", "error", err)
 			}
 			return
@@ -257,10 +264,10 @@ func (s *ReceiverService) CandidateHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    if err := json.NewEncoder(w).Encode(map[string]string{
-        "message": "Candidate received successfully",
-    }); err != nil {
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"message": "Candidate received successfully",
+	}); err != nil {
 		slog.Error("Failed to encode response", "error", err)
 	}
 }

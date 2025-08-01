@@ -10,9 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"net/url"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/crypto"
 )
 
 var ErrTransferRejected = errors.New("transfer rejected by the receiver")
@@ -46,24 +47,26 @@ func NewAPISignaler(
 
 // SendOffer sends the offer to the receiver and starts listening for the SSE event stream.
 // This is the main entry point that triggers the entire signaling process.
-func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, files []fileInfo.FileNode) error {
+func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescription, signedFiles *crypto.SignedFileStructure) error {
 	// The /ask endpoint is the single point of contact.
 	// It receives the offer and returns an SSE stream.
-	url := s.receiverURL + "/ask"
+
+	endpoint, err := url.JoinPath(s.receiverURL, "ask")
+
+	if err != nil {
+		return fmt.Errorf("failed to create ask url: %w", err)
+	}
 
 	payload := AskPayload{
-		Files: files,
+		SignedFiles: signedFiles,
 		Offer: offer,
-		// The actual offer is now part of the AppController/StateManager logic,
-		// but for the purpose of the request, we can imagine it being sent here
-		// or handled implicitly by the session.
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal offer payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create /ask request: %w", err)
 	}

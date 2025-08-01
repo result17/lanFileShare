@@ -9,6 +9,7 @@ import (
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/api"
+	"github.com/rescp17/lanFileSharer/pkg/crypto"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
@@ -162,7 +163,17 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 		return fmt.Errorf("failed to set local description: %w", err)
 	}
 
-	if err := c.signaler.SendOffer(ctx, offer, fileNodes); err != nil {
+	fileStructureSigner, err := crypto.NewFileStructureSigner()
+	if err != nil {
+		return fmt.Errorf("failed to create file structure signer: %w", err)
+	}
+
+	signed, err := fileStructureSigner.SignFileStructure(fileNodes)
+	if err != nil {
+		return fmt.Errorf("failed to sign file structure: %w", err)
+	}
+
+	if err := c.signaler.SendOffer(ctx, offer, signed); err != nil {
 		return fmt.Errorf("failed to send offer via signaler: %w", err)
 	}
 
