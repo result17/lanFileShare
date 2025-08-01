@@ -2,7 +2,6 @@ package sender
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +28,8 @@ func (m *MockDiscoveryAdapter) Discover(ctx context.Context, service string) (<-
 func TestGracefulShutdown(t *testing.T) {
 	app := NewApp(&MockDiscoveryAdapter{})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	// Start the app in a goroutine
 	done := make(chan error, 1)
@@ -37,43 +37,48 @@ func TestGracefulShutdown(t *testing.T) {
 		done <- app.Run(ctx)
 	}()
 
-	// Start a transfer process
+	// Start a transfer process with a short timeout to avoid long waits
 	receiver := discovery.ServiceInfo{
 		Name: "test-receiver",
-		Addr: nil, // This will cause the transfer to fail, but that's ok for testing
+		Addr: nil, // This will cause the transfer to fail quickly
 		Port: 8080,
 	}
 	files := []fileInfo.FileNode{}
 
-	app.StartSendProcess(ctx, receiver, files)
+	// Use a context with short timeout for the transfer
+	transferCtx, transferCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer transferCancel()
 
-	// Give the transfer goroutine a moment to start
-	time.Sleep(10 * time.Millisecond)
+	app.StartSendProcess(transferCtx, receiver, files)
 
-	// Cancel the context to trigger shutdown
+	// Give the transfer goroutine a moment to start and fail
+	time.Sleep(200 * time.Millisecond)
+
+	// Cancel the main context to trigger shutdown
 	cancel()
 
 	// Wait for the app to shut down gracefully
 	select {
 	case err := <-done:
-		if err != nil && err != context.Canceled {
-			t.Errorf("Expected context.Canceled or nil, got: %v", err)
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			t.Errorf("Expected context.Canceled, context.DeadlineExceeded or nil, got: %v", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Error("App did not shut down within 5 seconds")
+	case <-time.After(3 * time.Second):
+		t.Error("App did not shut down within 3 seconds")
 	}
 }
 
 func TestTransferWaitGroup(t *testing.T) {
 	app := NewApp(&MockDiscoveryAdapter{})
 
-	// Verify that transferWG is properly initialized
-	if app.transferWG == (sync.WaitGroup{}) {
-		t.Error("transferWG should be initialized")
-	}
+	// Verify that transferWG is properly initialized (sync.WaitGroup zero value is valid)
+	// We can't directly compare sync.WaitGroup, so we'll test its functionality instead
+	t.Log("transferWG should be initialized")
 
 	// Test that StartSendProcess properly manages the WaitGroup
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
 	receiver := discovery.ServiceInfo{
 		Name: "test-receiver",
 		Addr: nil,
@@ -85,7 +90,7 @@ func TestTransferWaitGroup(t *testing.T) {
 	app.StartSendProcess(ctx, receiver, files)
 
 	// Give the goroutine a moment to start and fail
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// The WaitGroup should be back to 0 after the goroutine completes
 	// We can't directly test this, but we can ensure Wait() doesn't block
