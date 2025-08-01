@@ -1,0 +1,76 @@
+# .github/workflows/test.yml
+
+name: "Go Tests"
+
+# This action will trigger on push to any branch and on pull requests
+on:
+  push:
+    # Run on push to any branch
+  pull_request:
+    branches: [ "main", "master" ]
+
+# Set default permissions
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        go-version: ['1.23', '1.24']  # Test against multiple Go versions
+    
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Go environment
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      # Step 3: Download Go dependencies
+      - name: Download dependencies
+        run: go mod download
+
+      # Step 4: Verify dependencies
+      - name: Verify dependencies
+        run: go mod verify
+
+      # Step 5: Run go vet
+      - name: Run go vet
+        run: go vet ./...
+
+      # Step 6: Run tests with coverage
+      - name: Run tests
+        run: |
+          echo "Running all Go tests with coverage..."
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          echo "Tests completed successfully!"
+
+      # Step 7: Upload coverage to Codecov (optional)
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false  # Don't fail CI if codecov upload fails
+
+      # Step 8: Build project to ensure compilation
+      - name: Build project
+        run: |
+          echo "Building project..."
+          go build ./...
+          echo "Build completed successfully!"
+
+      # Step 9: Run golangci-lint (optional but recommended)
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m

@@ -31,7 +31,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Step 2: Install Bun using the official action.
+      # Step 2: Set up Go environment
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'  # Specify your Go version
+          cache: true
+
+      # Step 3: Download Go dependencies
+      - name: Download dependencies
+        run: go mod download
+
+      # Step 4: Run Go tests
+      - name: Run Go tests
+        run: |
+          echo "Running all Go tests..."
+          go test -v ./...
+          echo "All tests completed successfully!"
+
+      # Step 5: Run Go build to ensure compilation
+      - name: Build project
+        run: |
+          echo "Building project..."
+          go build ./...
+          echo "Build completed successfully!"
+
+      # Step 6: Install Bun using the official action.
       # This is the recommended and most efficient way to install Bun in a workflow.
       - name: Install Bun
         uses: oven-sh/setup-bun@v1
@@ -39,7 +64,7 @@ jobs:
           # You can specify a version or use 'latest'
           bun-version: latest
 
-      # Step 3: Install the Gemini CLI using Bun.
+      # Step 7: Install the Gemini CLI using Bun.
       # We use 'bun install -g' to install the package globally.
       - name: Install Gemini CLI with Bun
         run: |
@@ -47,7 +72,7 @@ jobs:
           echo "Verifying gemini installation..."
           gemini --version
 
-      # Step 4: Run the review script.
+      # Step 8: Run the review script.
       # The 'gemini' command is now available in the PATH.
       - name: Run Code Review Script
         env:
