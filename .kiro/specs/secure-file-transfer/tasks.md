@@ -21,7 +21,8 @@
   - Implement signature validation in receiver's AskHandler before processing transfer request
   - _Requirements: 3.3, 3.4_
 
-- [-] 3. Implement file transfer protocol with chunking mechanism
+- [ ] 3. Implement file transfer protocol with chunking mechanism
+
 
   - Create ChunkMessage protocol structures for reliable file transmission
   - Implement file chunking logic with sequence numbers and chunk hashing
