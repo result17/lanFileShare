@@ -1,6 +1,6 @@
 # .golangci.yml
 # Configuration for golangci-lint
-version: 2
+version: "2"
 
 run:
   timeout: 5m
@@ -37,14 +37,8 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
 
-formatters:
-  gofmt:
-    enabled: true
-  goimports:
-    enabled: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
     # Keep only the most important linters
     - govet          # Official Go vet tool

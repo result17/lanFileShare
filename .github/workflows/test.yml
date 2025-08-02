@@ -49,7 +49,7 @@ jobs:
       - name: Run tests
         run: |
           echo "Running all Go tests with coverage..."
-          
+
           # Run tests for each package separately to isolate failures
           for pkg in $(go list ./...); do
             echo "Testing package: $pkg"
@@ -58,7 +58,7 @@ jobs:
               exit 1
             fi
           done
-          
+
           # Run all tests together for coverage (with short flag to skip unreliable tests)
           go test -v -race -short -coverprofile=coverage.out -covermode=atomic ./...
           echo "Tests completed successfully!"
@@ -81,7 +81,7 @@ jobs:
 
       # Step 9: Run golangci-lint (optional but recommended)
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.2
+          version: latest
           args: --timeout=5m
