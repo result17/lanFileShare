@@ -104,7 +104,11 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
 	require.NoError(t, err)
-	defer receiverConn.Close()
+	defer func () {
+		if err := receiverConn.Close(); err != nil {
+			t.Logf("Error closing receiver connection: %v", err)
+		}
+	} ()
 
 	receiverConn.Peer().OnDataChannel(func(dc *webrtc.DataChannel) {
 		assert.Equal(t, "file-transfer", dc.Label())
@@ -128,7 +132,11 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	// Create a basic sender connection first, then we'll replace its signaler
 	senderConn, err := api.NewSenderConnection(ctx, config, nil, "http://mock-receiver")
 	require.NoError(t, err)
-	defer senderConn.Close()
+	defer func() {
+		if err := senderConn.Close(); err != nil {
+			t.Logf("Error closing sender connection: %v", err)
+		}
+	} ()
 
 	// Replace the signaler with our mock using the SetSignaler method
 	if sc, ok := senderConn.(*SenderConn); ok {
@@ -142,7 +150,10 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	senderConn.Peer().OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
 			t.Log("Sender: Got ICE candidate, sending via Signaler interface")
-			signaler.SendICECandidate(ctx, candidate.ToJSON())
+			if err := signaler.SendICECandidate(ctx, candidate.ToJSON()); err != nil {
+				errChan <- fmt.Errorf("sender failed to send ICE candidate: %w", err)
+				return
+			}
 		}
 	})
 

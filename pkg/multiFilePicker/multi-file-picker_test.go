@@ -48,7 +48,9 @@ func TestInitialModel(t *testing.T) {
 
 	m := InitialModel()
 
-	m.SetPath(tempDir)
+	if err := m.SetPath(tempDir); err != nil {
+		t.Errorf("failed to set path: %v", err)
+	}
 
 	absPath, err := filepath.Abs(tempDir)
 
@@ -138,12 +140,13 @@ func TestUpdateSelection(t *testing.T) {
 
 	// Select item at cursor 0 ('file_a.txt')
 	newModel, _ := m.Update(spaceKey)
+	m = newModel.(Model)
 	newModel, _ = m.Update(enterKey)
 	m = newModel.(Model)
 	absPath, err := filepath.Abs(tempDir)
 
 	if err != nil {
-		t.Errorf("invalid temp dir %s", tempDir)
+		t.Errorf("invalid temp dir %s: %v", tempDir, err)
 	}
 	item0Path := filepath.Join(absPath, m.items[0].Name())
 	if _, ok := m.selected[item0Path]; !ok {
@@ -164,7 +167,7 @@ func TestConfirmSelection(t *testing.T) {
 	absPath, err := filepath.Abs(tempDir)
 
 	if err != nil {
-		t.Errorf("invalid temp dir %s", tempDir)
+		t.Errorf("invalid temp dir %s: %v", tempDir, err)
 	}
 
 	// Sorted items are: file_a.txt, file_d.txt, subdir_b
@@ -208,9 +211,6 @@ func TestConfirmSelection(t *testing.T) {
 
 func TestQuit(t *testing.T) {
 	m := Model{keys: DefaultKeyMap}
-
-	// Test with 'esc'
-	m = Model{keys: DefaultKeyMap} // reset model
 	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	if !finalModel.(Model).quitting {
 		t.Errorf("expected model to be quitting after 'esc' key, but it's not")

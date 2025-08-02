@@ -141,7 +141,10 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	a.stateManager.SetDecision(app.Accepted)
+	if err := a.stateManager.SetDecision(app.Accepted); err != nil {
+		a.sendAndLogError("Failed to set decision", err)
+		return err
+	}
 
 	webrtcAPI := webrtcPkg.NewWebrtcAPI()
 
@@ -189,7 +192,9 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	defer func() {
 		if !success {
 			slog.Warn("Closing receiver connection due to setup failure.")
-			receiverConn.Close()
+			if err := receiverConn.Close(); err != nil {
+				slog.Error("Failed to close receiver connection", "error", err)
+			}
 		}
 	}()
 
@@ -268,7 +273,9 @@ func (a *App) closeActiveConnectionIfSameConn(receiverConn webrtcPkg.ReceiverCon
 
 	if a.activeConn != nil && a.activeConn == receiverConn {
 		slog.Info("Closing active connection.")
-		a.activeConn.Close()
+		if err := a.activeConn.Close(); err != nil {
+			slog.Error("Failed to close active connection", "error", err)
+		}
 		a.activeConn = nil
 	}
 }

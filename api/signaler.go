@@ -89,7 +89,7 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 	defer func () {
 		if err := resp.Body.Close(); err != nil {
-			
+			slog.Error("Failed to close response body", "error", err)
 		}
 	}()
 	scanner := bufio.NewScanner(resp.Body)

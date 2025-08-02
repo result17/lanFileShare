@@ -389,13 +389,15 @@ func TestGetPublicAndPrivateKey(t *testing.T) {
 	// Test GetPublicKey
 	publicKey := signer.GetPublicKey()
 	if publicKey == nil {
-		t.Error("Public key should not be nil")
+		t.Fatal("Public key should not be nil")
+		return
 	}
 
 	// Test GetPrivateKey
 	privateKey := signer.GetPrivateKey()
 	if privateKey == nil {
-		t.Error("Private key should not be nil")
+		t.Fatal("Private key should not be nil")
+		return
 	}
 
 	// Verify they form a valid key pair
