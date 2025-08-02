@@ -2,41 +2,6 @@
 # Configuration for golangci-lint
 version: "2"
 
-run:
-  timeout: 5m
-  tests: true
-  modules-download-mode: readonly
-
-linters-settings:
-  govet:
-    check-shadowing: true
-  gocyclo:
-    min-complexity: 15
-  dupl:
-    threshold: 100
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  misspell:
-    locale: US
-  lll:
-    line-length: 120
-  goimports:
-    local-prefixes: github.com/rescp17/lanFileSharer
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - dupImport # https://github.com/go-critic/go-critic/issues/845
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-      - wrapperFunc
-
 linters:
   default: none
   enable:
@@ -47,59 +12,87 @@ linters:
     - gocyclo        # Complexity checking
     - unconvert      # Unnecessary type conversions
     - unparam        # Unused parameters
+    - bodyclose
     
     # Optional quality checks (enable if you want stricter checking)
-    # - bodyclose
     # - errcheck
     # - staticcheck
     # - gocritic
     # - ineffassign
     # - lll
+  settings:
+    govet:
+      enable:
+        - shadow
+      settings:
+        shadow:
+          strict: true
+    gocyclo:
+      min-complexity: 15
+    dupl:
+      threshold: 100
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    misspell:
+      locale: US
+    lll:
+      line-length: 120
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - dupImport # https://github.com/go-critic/go-critic/issues/845
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+        - wrapperFunc
+
 
 issues:
-  exclude-rules:
-    # Relax rules for test files
-    - path: _test\.go
-      linters:
-        - mnd
-        - goconst
-        - dupl
-        - gosec
-        - errcheck
-        - lll
-    # Ignore underscore in package name warnings
-    - path: pkg/
-      text: "don't use an underscore in package name"
-    # Ignore line length for generated code
-    - linters:
-        - lll
-      source: "^//go:generate "
-    # Ignore common errcheck issues
-    - linters:
-        - errcheck
-      text: "Error return value of.*Close.*is not checked"
-    - linters:
-        - errcheck
-      text: "Error return value of.*RemoveAll.*is not checked"
-    - linters:
-        - errcheck
-      text: "Error return value of.*Encode.*is not checked"
-    - linters:
-        - errcheck
-      text: "Error return value of.*Fprintf.*is not checked"
-    - linters:
-        - errcheck
-      text: "Error return value.*recover.*is not checked"
-    # Ignore some magic numbers
-    - linters:
-        - mnd
-      text: "Magic number: (10|20|30|100|1000|1024), in"
-    # Ignore file permission issues in tests
-    - path: _test\.go
-      linters:
-        - gosec
-      text: "G30[1-6]:"
+  # Maximum issues count per one linter.
+  # Set to 0 to disable.
+  # Default: 50
+  max-issues-per-linter: 0
+  
+  # Maximum count of issues with the same text.
+  # Set to 0 to disable.
+  # Default: 3
+  max-same-issues: 0
+  
+  # Make issues output unique by line.
+  # Default: true
+  uniq-by-line: false
+  
+  # Show only new issues: if there are unstaged changes or untracked files,
+  # only those changes are analyzed, else only changes in HEAD~ are analyzed.
+  # It's a super-useful option for integration of golangci-lint into existing large codebase.
+  # It's not practical to fix all existing issues at the moment of integration:
+  # much better don't allow issues in new code.
+  # Default: false
+  new: true
+  
+  # Show only new issues created after the best common ancestor (merge-base against HEAD).
+  # Default: ""
+  new-from-merge-base: main
+  
+  # Show only new issues created after git revision `REV`.
+  # Default: ""
+  new-from-rev: HEAD
+  
+  # Show issues in any part of update files (requires new-from-rev or new-from-patch).
+  # Default: false
+  whole-files: true
+  
+  # Fix found issues (if it's supported by the linter).
+  # Default: false
+  fix: true
 
-  exclude-use-default: false
-  max-issues-per-linter: 50  # Limit each linter to report max 50 issues
-  max-same-issues: 10        # Limit same issue to be reported max 10 times
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
