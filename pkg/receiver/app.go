@@ -120,7 +120,8 @@ func (a *App) Run(ctx context.Context) error {
 				}()
 			case receiver.FileRequestRejected:
 				slog.Info("User rejected file transfer.")
-				a.stateManager.SetDecision(app.Rejected)
+				err := a.stateManager.SetDecision(app.Rejected)
+				return fmt.Errorf("file request rejected: %w", err)
 			default:
 				slog.Warn("Received unhandled app event", "event", event)
 			}
@@ -197,7 +198,10 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		return err
 	}
 	a.setActiveConn(receiverConn)
-	a.stateManager.SetAnswer(*answer)
+	if err := a.stateManager.SetAnswer(*answer); err != nil {
+		a.sendAndLogError("Failed to send answer", err)
+		return err
+	}
 	slog.Info("Answer created and sent to state manager.")
 	success = true
 	return nil
@@ -276,6 +280,8 @@ func (a *App) setActiveConn(conn webrtcPkg.ReceiverConnection) {
 	a.connMu.Unlock()
 	if oldConn != nil {
 		slog.Warn("An active connection already exits. Closing it before creating a new one.")
-		oldConn.Close()
+		if err := oldConn.Close(); err != nil {
+			slog.Error("Failed to close old connection", "error", err)
+		}
 	}
 }

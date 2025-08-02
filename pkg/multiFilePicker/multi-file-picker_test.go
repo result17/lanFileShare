@@ -34,7 +34,9 @@ func setupTestDir(t *testing.T) (string, func()) {
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Errorf("Failed to clean up temp dir: %v", err)
+		}
 	}
 
 	return tempDir, cleanup
@@ -127,7 +129,9 @@ func TestUpdateSelection(t *testing.T) {
 
 	m := InitialModel()
 
-	m.SetPath(tempDir)
+	if err := m.SetPath(tempDir); err != nil {
+		t.Fatalf("Failed to set path: %v", err)
+	}
 
 	spaceKey := tea.KeyMsg{Type: tea.KeySpace}
 	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
@@ -153,7 +157,9 @@ func TestConfirmSelection(t *testing.T) {
 
 	m := InitialModel()
 
-	m.SetPath(tempDir)
+	if err := m.SetPath(tempDir); err != nil {
+		t.Fatalf("Failed to set path: %v", err)
+	}
 
 	absPath, err := filepath.Abs(tempDir)
 

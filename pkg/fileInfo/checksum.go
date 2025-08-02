@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -14,7 +15,11 @@ func calculateSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func () {
+		if err := file.Close(); err != nil {
+			slog.Error("fail to close file", "error", err.Error())
+		}
+	}()
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
 		return "", err
