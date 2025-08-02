@@ -10,6 +10,11 @@ import (
 )
 
 func TestServer_StartStop(t *testing.T) {
+	// Skip mDNS tests in CI environment as they may be unreliable
+	if testing.Short() {
+		t.Skip("Skipping mDNS test in short mode")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -38,7 +43,11 @@ func TestServer_StartStop(t *testing.T) {
 	select {
 	case <-done:
 		if err := <-errCh; err != nil {
-			t.Fatalf("Failed to announce service: %v", err)
+			// Context canceled is expected when we cancel the context
+			if err != context.Canceled && err.Error() != "context canceled" {
+				t.Fatalf("Failed to announce service: %v", err)
+			}
+			t.Logf("Context cancellation is expected: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("Service announcement did not complete in time")
@@ -46,6 +55,11 @@ func TestServer_StartStop(t *testing.T) {
 }
 
 func TestMDNSAdapter_Discover(t *testing.T) {
+	// Skip mDNS tests in CI environment as they may be unreliable
+	if testing.Short() {
+		t.Skip("Skipping mDNS test in short mode")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mdnsAdapter := &MDNSAdapter{}

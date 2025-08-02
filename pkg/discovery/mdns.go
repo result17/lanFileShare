@@ -39,6 +39,10 @@ func (m *MDNSAdapter) Announce(ctx context.Context, serviceInfo ServiceInfo) err
 	}
 
 	if err = rp.Respond(ctx); err != nil {
+		// Context cancellation is not an error in normal operation
+		if err == context.Canceled {
+			return nil
+		}
 		return fmt.Errorf("failed to respond to mDNS service: %w", err)
 	}
 
