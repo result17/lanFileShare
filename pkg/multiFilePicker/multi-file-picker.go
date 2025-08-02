@@ -102,7 +102,6 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-
 	if m.quitting {
 		return m, nil
 	}
@@ -362,7 +361,7 @@ func (m Model) View() string {
 		}
 		nameStr := item.Name()
 		if item.IsDir() {
-			nameStr = nameStr + "/"
+			nameStr += "/"
 		}
 		typeStr := ""
 		mime, err := mimetype.DetectFile(path)

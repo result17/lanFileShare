@@ -174,7 +174,6 @@ func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 				_, cmd := m.sender.table.Update(msg)
 				return cmd
 			}
-
 		}
 	}
 	// Update the table on every message to handle navigation
@@ -229,19 +228,19 @@ func (m *senderModel) reset() {
 }
 
 func (m *senderModel) adjustTableCursor(newRowCount int) {
-    if newRowCount <= 0 {
-        m.table.SetCursor(0)
+	if newRowCount <= 0 {
+		m.table.SetCursor(0)
 		return
-    }
-    
-    currentCursor := m.table.Cursor()
-    if currentCursor >= newRowCount {
-        newCursor := newRowCount - 1
-        slog.Debug("Adjusting table cursor due to service list shrink", 
-            "old_cursor", currentCursor,
-            "new_cursor", newCursor,
-            "row_count", newRowCount)
-        
-        m.table.SetCursor(newCursor)
-    }
+	}
+
+	currentCursor := m.table.Cursor()
+	if currentCursor >= newRowCount {
+		newCursor := newRowCount - 1
+		slog.Debug("Adjusting table cursor due to service list shrink",
+			"old_cursor", currentCursor,
+			"new_cursor", newCursor,
+			"row_count", newRowCount)
+
+		m.table.SetCursor(newCursor)
+	}
 }

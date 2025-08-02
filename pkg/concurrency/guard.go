@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-var ErrBusy = errors.New("System is busy!")
+var ErrBusy = errors.New("system is busy")
 
 type ConcurrencyGuard struct {
 	mu     sync.Mutex

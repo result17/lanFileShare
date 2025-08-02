@@ -101,11 +101,11 @@ func PublicKeyFromPEM(pemData []byte) (*rsa.PublicKey, error) {
 // ValidateKeyPair validates that a private and public key form a valid pair
 func ValidateKeyPair(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
 	// Check if the public key from private key matches the provided public key
-	if privateKey.PublicKey.N.Cmp(publicKey.N) != 0 {
+	if privateKey.N.Cmp(publicKey.N) != 0 {
 		return fmt.Errorf("public key does not match private key")
 	}
 
-	if privateKey.PublicKey.E != publicKey.E {
+	if privateKey.E != publicKey.E {
 		return fmt.Errorf("public key exponent does not match private key")
 	}
 

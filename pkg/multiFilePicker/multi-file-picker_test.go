@@ -197,7 +197,6 @@ func TestConfirmSelection(t *testing.T) {
 		if info.Path != expected[i] {
 			t.Errorf("expected path to be %v, got %v", expected[i], info.Path)
 		}
-
 	}
 }
 

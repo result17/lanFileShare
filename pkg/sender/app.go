@@ -89,24 +89,21 @@ func (a *App) Run(ctx context.Context) error {
 // runDiscovery begins the process of finding receivers on the network.
 func (a *App) runDiscovery(ctx context.Context) error {
 	// TODO: Use HTTPS for secure communication
-	serviceChan, err := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
-	if err != nil {
-		a.sendAndLogError("Failed to start discovery", err)
-		return err
-	}
+	serviceChan := a.discoverer.Discover(ctx, fmt.Sprintf("%s.%s.", discovery.DefaultServerType, discovery.DefaultDomain))
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case services, ok := <-serviceChan:
-			if !ok {
-				return nil
+		case result:= <-serviceChan:
+			if result.Error != nil {
+				a.sendAndLogError("Failed to discover service", result.Error)
+				return result.Error
 			}
-			a.uiMessages <- sender.FoundServicesMsg{Services: services}
+
+			a.uiMessages <- sender.FoundServicesMsg{Services: result.Services}
 		}
 	}
-
 }
 
 // sendAndLogError is a helper function to both log an error and send it to the UI.

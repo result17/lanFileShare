@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"log/slog"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -13,10 +14,14 @@ func ExampleCreateSignedFileStructure() {
 	// Create a temporary directory with test files
 	tempDir, err := os.MkdirTemp("", "signature_example")
 	if err != nil {
-		fmt.Printf("Error creating temp dir: %v\n", err)
+		slog.Warn("Error creating temp dir", "error", err)
 		return
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			slog.Warn("Error removing temp dir:", "error", err)
+		}
+	} ()
 
 	// Create test files
 	testFile1 := filepath.Join(tempDir, "document.txt")

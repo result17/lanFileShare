@@ -167,7 +167,9 @@ func (m *SingleRequestManager) CloseRequest() {
 
 	if m.state != nil {
 		defer func() {
-			recover()
+			if err := recover(); err != nil {
+				slog.Error("panic in CloseRequest", "error", err)
+			}
 		}()
 		close(m.state.TransferDone)
 		m.state.transferDoneClose = true

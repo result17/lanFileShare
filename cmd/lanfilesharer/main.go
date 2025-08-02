@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,7 +16,11 @@ import (
 
 func main() {
 	f, _ := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Warn("failed to close log file", "error", err)
+		}
+	}()
 	log.SetOutput(f)
 
 	var port int

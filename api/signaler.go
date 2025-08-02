@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"net/url"
+	"strings"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/pkg/crypto"
@@ -59,7 +59,7 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 
 	payload := AskPayload{
 		SignedFiles: signedFiles,
-		Offer: offer,
+		Offer:       offer,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -74,6 +74,7 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := s.apiClient.HttpClient.Do(req)
+
 	if err != nil {
 		return fmt.Errorf("failed to connect to /ask endpoint: %w", err)
 	}
@@ -86,7 +87,11 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 
 // listenToSSEResponse runs in a goroutine, processing events from the receiver.
 func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
-	defer resp.Body.Close()
+	defer func () {
+		if err := resp.Body.Close(); err != nil {
+			
+		}
+	}()
 	scanner := bufio.NewScanner(resp.Body)
 	var currentEvent string
 	var dataBuffer *bytes.Buffer
@@ -110,9 +115,10 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 			dataBuffer.WriteString(strings.TrimSpace(dataValue))
 			dataBuffer.WriteString("\n")
 
-			if currentEvent == "answer" {
+			switch currentEvent {
+			case "answer":
 				answerReceived = true
-			} else if currentEvent == "rejection" {
+			case "rejection":
 				rejectionReceived = true
 			}
 		}

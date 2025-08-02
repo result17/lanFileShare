@@ -85,9 +85,12 @@ func (s *ReceiverService) ConcurrencyControlMiddleware(next http.Handler) http.H
 			slog.Info("Request rejected, server is busy!")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{
+			err := json.NewEncoder(w).Encode(map[string]string{
 				"error": concurrency.ErrBusy.Error(),
 			})
+			if err != nil {
+				slog.Error("Failed to encode busy response", "error", err)
+			}
 		} else if err != nil {
 			slog.Error("Unexpected error in concurrency control middleware", "error", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -227,7 +230,10 @@ func (s *ReceiverService) streamCandidates(w http.ResponseWriter, flusher http.F
 			if !ok {
 				// Channel closed, successfully finished streaming.
 				slog.Info("Finished streaming candidates.")
-				fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
+				_, err := fmt.Fprintf(w, "event: candidates_done\ndata: {}\n\n")
+				if err != nil {
+					return fmt.Errorf("failed to write candidates_done event: %w", err)
+				}
 				flusher.Flush()
 				return nil
 			}

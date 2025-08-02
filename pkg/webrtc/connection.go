@@ -131,7 +131,6 @@ func (a *WebrtcAPI) NewSenderConnection(transferCtx context.Context, config Conf
 	})
 
 	return conn, nil
-
 }
 
 func (a *WebrtcAPI) NewReceiverConnection(config Config) (ReceiverConnection, error) {

@@ -399,7 +399,7 @@ func TestGetPublicAndPrivateKey(t *testing.T) {
 	}
 
 	// Verify they form a valid key pair
-	if publicKey.N.Cmp(privateKey.PublicKey.N) != 0 {
+	if publicKey.N.Cmp(privateKey.N) != 0 {
 		t.Error("Public and private keys should match")
 	}
 }

@@ -201,7 +201,6 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	slog.Info("Answer created and sent to state manager.")
 	success = true
 	return nil
-
 }
 
 func (a *App) UIMessages() <-chan tea.Msg {

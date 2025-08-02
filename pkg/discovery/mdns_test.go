@@ -67,11 +67,13 @@ func TestMDNSAdapter_Discover(t *testing.T) {
 	defer queryCancel()
 
 	service := fmt.Sprintf("%s.%s.", serviceInfo.Type, serviceInfo.Domain)
-	outCh, err := mdnsAdapter.Discover(queryCtx, service)
+	outCh := mdnsAdapter.Discover(queryCtx, service)
+	result := <-outCh
+	err := result.Error
+	discoveredService := result.Services
 	if err != nil {
 		t.Fatalf("Failed to discover service: %v", err)
 	}
-	discoveredService := <-outCh
 	assert.Equalf(t, serviceInfo.Name, discoveredService[0].Name,
 		"Expected service instance %s, got %s", serviceInfo.Name, discoveredService[0].Name)
 

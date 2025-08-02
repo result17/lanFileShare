@@ -16,13 +16,13 @@ func (m *MockDiscoveryAdapter) Announce(ctx context.Context, service discovery.S
 	return nil // Not used in sender tests
 }
 
-func (m *MockDiscoveryAdapter) Discover(ctx context.Context, service string) (<-chan []discovery.ServiceInfo, error) {
-	ch := make(chan []discovery.ServiceInfo)
+func (m *MockDiscoveryAdapter) Discover(ctx context.Context, service string) <-chan discovery.DiscoveryResult {
+	ch := make(chan discovery.DiscoveryResult)
 	go func() {
 		defer close(ch)
 		<-ctx.Done() // Wait for context cancellation
 	}()
-	return ch, nil
+	return ch
 }
 
 func TestGracefulShutdown(t *testing.T) {

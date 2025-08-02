@@ -34,19 +34,25 @@ func (m *MDNSAdapter) Announce(ctx context.Context, serviceInfo ServiceInfo) err
 		return fmt.Errorf("failed to create mDNS responder: %w", err)
 	}
 
-	rp.Add(service)
-	rp.Respond(ctx)
+	if _, err = rp.Add(service); err != nil {
+		return fmt.Errorf("failed to add mDNS service: %w", err)
+	}
+
+	if err = rp.Respond(ctx); err != nil {
+		return fmt.Errorf("failed to respond to mDNS service: %w", err)
+	}
 
 	fmt.Println("Shutting down mDNS server")
 	return nil
 }
 
-// windows does not support ipv6 multicast, so we need to use ipv4
-func (m *MDNSAdapter) Discover(ctx context.Context, service string) (<-chan []ServiceInfo, error) {
+// DiscoveryResult contains either service info or an error
+// DiscoverWithErrors returns a channel that can contain both services and errors
+func (m *MDNSAdapter) Discover(ctx context.Context, service string) <-chan DiscoveryResult {
 	var (
 		mu      sync.RWMutex
 		entries = make(map[string]ServiceInfo)
-		outCh   = make(chan []ServiceInfo, 10)
+		outCh   = make(chan DiscoveryResult, 10)
 	)
 
 	sendSnapshot := func() {
@@ -57,7 +63,14 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (<-chan []Se
 			snapshot = append(snapshot, entry)
 		}
 		select {
-		case outCh <- snapshot:
+		case outCh <- DiscoveryResult{Services: snapshot, Error: nil}:
+		default:
+		}
+	}
+
+	sendError := func(err error) {
+		select {
+		case outCh <- DiscoveryResult{Services: nil, Error: err}:
 		default:
 		}
 	}
@@ -83,9 +96,11 @@ func (m *MDNSAdapter) Discover(ctx context.Context, service string) (<-chan []Se
 	}
 
 	go func() {
-		dnssd.LookupType(ctx, service, addFn, rmvFn)
-		close(outCh)
+		defer close(outCh)
+		if err := dnssd.LookupType(ctx, service, addFn, rmvFn); err != nil {
+			sendError(fmt.Errorf("mDNS lookup failed: %w", err))
+		}
 	}()
 
-	return outCh, nil
+	return outCh
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -78,7 +79,11 @@ func (c *Client) SendICECandidateRequest(ctx context.Context, receiverURL string
 	if err != nil {
 		return fmt.Errorf("failed to send candidate request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func () {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("failed to close response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("candidate responded with non-OK status: %s", resp.Status)
