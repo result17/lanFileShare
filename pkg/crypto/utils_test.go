@@ -2,7 +2,6 @@ package crypto
 
 import (
 	"crypto/rsa"
-	"math/big"
 	"testing"
 )
 
@@ -429,8 +428,8 @@ func TestValidatePrivateKeyWithInvalidKey(t *testing.T) {
 
 	// Test with corrupted key that will fail Validate()
 	corruptKey := *keyPair.PrivateKey
-	// Corrupt the key by setting an invalid relationship between components
-	corruptKey.Primes = []*big.Int{big.NewInt(2), big.NewInt(3)} // Too small primes
+	// Corrupt the key by setting D to nil, which should cause validation to fail
+	corruptKey.D = nil
 
 	err = ValidatePrivateKey(&corruptKey)
 	if err == nil {
