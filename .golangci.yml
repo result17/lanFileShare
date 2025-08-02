@@ -1,5 +1,6 @@
 # .golangci.yml
 # Configuration for golangci-lint
+version: 2
 
 run:
   timeout: 5m
@@ -36,26 +37,27 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
 
+formatters:
+  gofmt:
+    enabled: true
+  goimports:
+    enabled: true
+
 linters:
   disable-all: true
   enable:
     - bodyclose
-    - depguard
     - dogsled
     - dupl
     - errcheck
-    - exportloopref
     - exhaustive
     - gochecknoinits
     - goconst
     - gocritic
     - gocyclo
-    - gofmt
-    - goimports
     - mnd
     - goprintffuncname
     - gosec
-    - gosimple
     - govet
     - ineffassign
     - lll
@@ -65,8 +67,6 @@ linters:
     - nolintlint
     - rowserrcheck
     - staticcheck
-    - stylecheck
-    - typecheck
     - unconvert
     - unparam
     - unused
