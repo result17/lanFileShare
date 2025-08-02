@@ -1,6 +1,6 @@
 module github.com/rescp17/lanFileSharer
 
-go 1.23.2
+go 1.24.5
 
 require (
 	github.com/brutella/dnssd v1.2.14
