@@ -49,7 +49,7 @@ var DefaultKeyMap = KeyMap{
 	ToggleSelect: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
 	ToggleInput:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
 	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
-	Quit:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "quit/back")),
+	Quit:         key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc/ctrl+c", "quit/back")),
 }
 
 // --- Model ---
