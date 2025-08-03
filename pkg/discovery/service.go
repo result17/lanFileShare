@@ -10,7 +10,6 @@ const (
 	DefaultDomain     = "local"
 )
 
-
 type DiscoveryResult struct {
 	Services []ServiceInfo
 	Error    error

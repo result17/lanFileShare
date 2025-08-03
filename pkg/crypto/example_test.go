@@ -2,9 +2,9 @@ package crypto
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"log/slog"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -21,7 +21,7 @@ func ExampleCreateSignedFileStructure() {
 		if err := os.RemoveAll(tempDir); err != nil {
 			slog.Warn("Error removing temp dir:", "error", err)
 		}
-	} ()
+	}()
 
 	// Create test files
 	testFile1 := filepath.Join(tempDir, "document.txt")

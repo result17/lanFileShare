@@ -18,19 +18,19 @@ const (
 
 // RequestState holds all the necessary information for a single file transfer request.
 type RequestState struct {
-	Offer         webrtc.SessionDescription
-	DecisionChan  chan Decision
-	AnswerChan    chan webrtc.SessionDescription
-	CandidateChan chan webrtc.ICECandidateInit
-	TransferDone  chan struct{}
-	decisionSent  bool
-	answerSent    bool
+	Offer              webrtc.SessionDescription
+	DecisionChan       chan Decision
+	AnswerChan         chan webrtc.SessionDescription
+	CandidateChan      chan webrtc.ICECandidateInit
+	TransferDone       chan struct{}
+	decisionSent       bool
+	answerSent         bool
 	candidateChanClose bool
-	transferDoneClose bool
+	transferDoneClose  bool
 }
 
 // StateManager manages the lifecycle of a file transfer request state in a concurrent-safe manner.
-type SingleRequestManager  struct {
+type SingleRequestManager struct {
 	mu    sync.Mutex
 	state *RequestState // Holds the state for the *single* active request
 }

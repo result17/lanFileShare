@@ -14,9 +14,10 @@ type Event struct{}
 func (Event) isAppEvent() {}
 
 // AppUIMessage is a marker interface for messages sent from the App's logic controller to the TUI.
- type AppUIMessage interface {
+type AppUIMessage interface {
 	isUIMessage()
- }
+}
+
 // UIMessage is a base struct that can be embedded in other types to implement the AppUIMessage interface.
 type UIMessage struct{}
 
@@ -29,11 +30,11 @@ func (UIMessage) isUIMessage() {}
 // - As an AppUIMessage (App -> TUI) when embedded UIMessage provides isUIMessage()
 // The direction is determined by which channel it's sent on.
 type Error struct {
-    Event     // Embeds Event to implement AppEvent interface
-    UIMessage // Embeds UIMessage to implement AppUIMessage interface
-    Err       error // Optional: when the error occurred
+	Event           // Embeds Event to implement AppEvent interface
+	UIMessage       // Embeds UIMessage to implement AppUIMessage interface
+	Err       error // Optional: when the error occurred
 }
 
-type AppFinishedMsg struct{
-    Event
+type AppFinishedMsg struct {
+	Event
 }

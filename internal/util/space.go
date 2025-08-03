@@ -1,8 +1,8 @@
 package util
 
 import (
-	"strings"
 	"github.com/mattn/go-runewidth"
+	"strings"
 )
 
 // PadRight pads or truncates a string to a fixed width.

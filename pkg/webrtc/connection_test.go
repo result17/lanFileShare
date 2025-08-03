@@ -104,11 +104,11 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	// 1. Setup Receiver (does NOT get a signaler)
 	receiverConn, err := api.NewReceiverConnection(config)
 	require.NoError(t, err)
-	defer func () {
+	defer func() {
 		if err := receiverConn.Close(); err != nil {
 			t.Logf("Error closing receiver connection: %v", err)
 		}
-	} ()
+	}()
 
 	receiverConn.Peer().OnDataChannel(func(dc *webrtc.DataChannel) {
 		assert.Equal(t, "file-transfer", dc.Label())
@@ -136,7 +136,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		if err := senderConn.Close(); err != nil {
 			t.Logf("Error closing sender connection: %v", err)
 		}
-	} ()
+	}()
 
 	// Replace the signaler with our mock using the SetSignaler method
 	if sc, ok := senderConn.(*SenderConn); ok {

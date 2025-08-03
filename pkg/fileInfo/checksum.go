@@ -15,7 +15,7 @@ func calculateSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func () {
+	defer func() {
 		if err := file.Close(); err != nil {
 			slog.Error("fail to close file", "error", err.Error())
 		}

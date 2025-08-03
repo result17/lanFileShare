@@ -79,9 +79,9 @@ func (c *Client) SendICECandidateRequest(ctx context.Context, receiverURL string
 	if err != nil {
 		return fmt.Errorf("failed to send candidate request: %w", err)
 	}
-	defer func () {
+	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			slog.Warn("failed to close response body", "error",err)
+			slog.Warn("failed to close response body", "error", err)
 		}
 	}()
 

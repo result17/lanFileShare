@@ -87,7 +87,7 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 
 // listenToSSEResponse runs in a goroutine, processing events from the receiver.
 func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
-	defer func () {
+	defer func() {
 		if err := resp.Body.Close(); err != nil {
 			slog.Error("Failed to close response body", "error", err)
 		}

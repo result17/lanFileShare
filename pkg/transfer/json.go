@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 )
 
-type JSONSerializer struct {}
+type JSONSerializer struct{}
 
 func NewJSONSerializer() *JSONSerializer {
 	return &JSONSerializer{}
 }
 
-type JSONChunkMessage struct  {
+type JSONChunkMessage struct {
 	Type         MessageType     `json:"type"`
 	Session      TransferSession `json:"session"`
 	FileID       string          `json:"file_id"`
@@ -58,10 +58,9 @@ func (j *JSONSerializer) Unmarshal(data []byte) (*ChunkMessage, error) {
 }
 
 func (j *JSONSerializer) Name() string {
-    return "json"
+	return "json"
 }
 
 func (j *JSONSerializer) IsBinary() bool {
-    return false
+	return false
 }
-

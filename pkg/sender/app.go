@@ -95,7 +95,7 @@ func (a *App) runDiscovery(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case result:= <-serviceChan:
+		case result := <-serviceChan:
 			if result.Error != nil {
 				a.sendAndLogError("Failed to discover service", result.Error)
 				return result.Error
@@ -130,11 +130,11 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		if err != nil {
 			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
-		defer func () {
+		defer func() {
 			if err := webrtcConn.Close(); err != nil {
 				slog.Error("Failed to close webrtc connection", "error", err)
 			}
-		} ()
+		}()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
 		if err := webrtcConn.Establish(transferCtx, files); err != nil {
