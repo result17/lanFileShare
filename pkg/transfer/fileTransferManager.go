@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
@@ -20,6 +21,9 @@ func NewFileTransferManager() *FileTransferManager {
 }
 
 func (ftm *FileTransferManager) AddFileNode(node *fileInfo.FileNode) error {
+	if node == nil {
+		return fmt.Errorf("node cannot be nil")
+	}
 	if node.IsDir {
 		return ftm.processDirConcurrent(node)
 	}

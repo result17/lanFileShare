@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -52,8 +53,21 @@ func setupTestDir(tb testing.TB) (string, func()) {
 	}
 	
 	cleanup := func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			tb.Errorf("Failed to clean up temp dir: %v", err)
+		// On Windows, we need to be more careful about file cleanup
+		// Try multiple times with a small delay
+		var lastErr error
+		for i := 0; i < 3; i++ {
+			lastErr = os.RemoveAll(tempDir)
+			if lastErr == nil {
+				return
+			}
+			if i < 2 {
+				// Small delay before retry
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		if lastErr != nil {
+			tb.Errorf("Failed to clean up temp dir after retries: %v", lastErr)
 		}
 	}
 	
@@ -78,10 +92,13 @@ func TestNewFileTransferManager(t *testing.T) {
 
 func TestFileTransferManager_AddSingleFile(t *testing.T) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(t)
-	defer cleanup()
+	defer func() {
+		// Close file transfer manager first to release file handles
+		ftm.Close()
+		cleanup()
+	}()
 	
 	filePath := filepath.Join(tempDir, "file1.txt")
 	node, err := fileInfo.CreateNode(filePath)
@@ -106,10 +123,12 @@ func TestFileTransferManager_AddSingleFile(t *testing.T) {
 
 func TestFileTransferManager_AddDirectory(t *testing.T) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(t)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	node, err := fileInfo.CreateNode(tempDir)
 	if err != nil {
@@ -143,10 +162,12 @@ func TestFileTransferManager_AddDirectory(t *testing.T) {
 
 func TestFileTransferManager_ReplaceExistingFile(t *testing.T) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(t)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	filePath := filepath.Join(tempDir, "file1.txt")
 	node, err := fileInfo.CreateNode(filePath)
@@ -181,10 +202,12 @@ func TestFileTransferManager_ReplaceExistingFile(t *testing.T) {
 
 func TestFileTransferManager_GetChunker(t *testing.T) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(t)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	filePath := filepath.Join(tempDir, "file1.txt")
 	node, err := fileInfo.CreateNode(filePath)
@@ -264,10 +287,12 @@ func TestFileTransferManager_Close(t *testing.T) {
 
 func TestFileTransferManager_ConcurrentAccess(t *testing.T) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(t)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	const numGoroutines = 10
 	var wg sync.WaitGroup
@@ -355,11 +380,13 @@ func TestFileTransferManager_AddFileNode_ErrorHandling(t *testing.T) {
 
 func TestFileTransferManager_ProcessDirConcurrent_ErrorHandling(t *testing.T) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	// Create a directory node with some invalid children
 	tempDir, cleanup := setupTestDir(t)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	// Create a valid directory node first
 	node, err := fileInfo.CreateNode(tempDir)
@@ -507,10 +534,12 @@ func BenchmarkFileTransferManager_AddDirectory(b *testing.B) {
 
 func BenchmarkFileTransferManager_GetChunker(b *testing.B) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(b)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	filePath := filepath.Join(tempDir, "file1.txt")
 	node, err := fileInfo.CreateNode(filePath)
@@ -535,10 +564,12 @@ func BenchmarkFileTransferManager_GetChunker(b *testing.B) {
 
 func BenchmarkFileTransferManager_ConcurrentAccess(b *testing.B) {
 	ftm := NewFileTransferManager()
-	defer ftm.Close()
 	
 	tempDir, cleanup := setupTestDir(b)
-	defer cleanup()
+	defer func() {
+		ftm.Close()
+		cleanup()
+	}()
 	
 	// Pre-populate with some files
 	filePaths := make([]string, 10)
