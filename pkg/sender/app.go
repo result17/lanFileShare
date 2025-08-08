@@ -145,7 +145,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 
 		// TODO: Add actual file transfer logic over the WebRTC connection
 
-		if err := webrtcConn.SendFiles(transferCtx, files); err != nil {
+		if err := webrtcConn.SendFiles(transferCtx, files, a.serviceID); err != nil {
 			return fmt.Errorf("failed to send files: %w", err)
 		}
 

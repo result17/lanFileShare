@@ -11,6 +11,7 @@ import (
 	"github.com/rescp17/lanFileSharer/api"
 	"github.com/rescp17/lanFileSharer/pkg/crypto"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 )
 
 type CommonConnection interface {
@@ -22,7 +23,7 @@ type SenderConnection interface {
 	CommonConnection
 	Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error
 	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
-	SendFiles(ctx context.Context, files []fileInfo.FileNode) error
+	SendFiles(ctx context.Context, files []fileInfo.FileNode, serviceID string) error
 }
 
 type ReceiverConnection interface {
@@ -55,6 +56,7 @@ func (c *Connection) Close() error {
 type SenderConn struct {
 	*Connection
 	signaler Signaler // Used to send signals to the remote peer
+	serializer transfer.MessageSerializer
 }
 
 // SetSignaler allows setting a custom signaler (mainly for testing)
@@ -116,6 +118,7 @@ func (a *WebrtcAPI) NewSenderConnection(transferCtx context.Context, config Conf
 		Connection: &Connection{
 			peerConnection: pc,
 		},
+		serializer: transfer.NewJSONSerializer(),
 	}
 
 	signaler := api.NewAPISignaler(apiClient, receiverURL, conn.AddICECandidate)
@@ -208,7 +211,70 @@ func (c *SenderConn) CreateDataChannel(label string, options *webrtc.DataChannel
 	return c.peerConnection.CreateDataChannel(label, options)
 }
 
-func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode) error {
-	// TODO
+func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, serviceID string) error {
+	ftm := transfer.NewFileTransferManager()
+	defer func() {
+		if err := ftm.Close(); err != nil {
+			slog.Error("Failed to close file transfer manager", "error", err)
+		}
+	}()
+
+	for _, file := range files {
+		if err := ftm.AddFileNode(&file); err != nil {
+			return fmt.Errorf("failed to add file node: %w", err)
+		}
+	}
+
+	var isChannelReadyClose = false
+	channelReady := make(chan struct{})
+	channelError := make(chan error, 1)
+
+	dataChannel, err := c.CreateDataChannel("file-transfer", &webrtc.DataChannelInit{
+		Ordered: &[]bool{true}[0],
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create data channel: %w", err)
+	}
+
+	dataChannel.OnOpen(func() {
+		slog.Info("Data channel opened for file transfer")
+		close(channelReady)
+		isChannelReadyClose = true
+	})
+
+	dataChannel.OnError(func(err error) {
+		channelError <- err
+	})
+
+	select {
+	case <- channelReady:
+		session := transfer.NewTransferSession(serviceID)
+		slog.Info("Sending files", "serviceID", serviceID)
+		// begin transfer
+	case err := <- channelError:
+		return fmt.Errorf("failed to open data channel: %w", err)
+	case <- ctx.Done():
+		return ctx.Err()
+	}
+
+
+	defer func() {
+		if err := dataChannel.Close(); err != nil {
+			slog.Error("Failed to close data channel", "error", err)
+		}
+		if !isChannelReadyClose {
+			close(channelReady)
+		}
+	} ()
+
 	return nil
+}
+
+func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.ChunkMessage) error {
+	data, err := c.serializer.Marshal(msg)
+	if err != nil {
+		// slog.Error("Failed to marshal message", "error", err)
+		return err
+	}
+	return dataChannel.Send(data)
 }
