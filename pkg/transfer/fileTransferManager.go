@@ -110,7 +110,6 @@ func (ftm *FileTransferManager) GetChunker(filePath string) (*Chunker, bool) {
     return chunker, exists
 }
 
-
 func (ftm *FileTransferManager) Close() error {
     ftm.mu.Lock()
     defer ftm.mu.Unlock()

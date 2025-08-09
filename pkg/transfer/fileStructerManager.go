@@ -79,6 +79,17 @@ func (fsm *FileStructureManager) GetAllFiles() []*fileInfo.FileNode {
     return files
 }
 
+func (fsm *FileStructureManager) GetAllDirs() []*fileInfo.FileNode {
+    fsm.mu.RLock()
+    defer fsm.mu.RUnlock()
+    
+    dirs := make([]*fileInfo.FileNode, 0, len(fsm.dirMap))
+    for _, node := range fsm.dirMap {
+        dirs = append(dirs, node)
+    }
+    return dirs
+}
+
 func (fsm *FileStructureManager) GetTotalSize() int64 {
     fsm.mu.RLock()
     defer fsm.mu.RUnlock()
