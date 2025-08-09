@@ -271,10 +271,15 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 }
 
 func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.ChunkMessage) error {
+	if dataChannel == nil {
+		return errors.New("data channel is nil")
+	}
+
 	data, err := c.serializer.Marshal(msg)
 	if err != nil {
 		// slog.Error("Failed to marshal message", "error", err)
 		return err
 	}
+
 	return dataChannel.Send(data)
 }

@@ -300,10 +300,15 @@ func TestFileStructureManager_Clear(t *testing.T) {
 
 // TestFileStructureManager_ConcurrentAccess tests thread safety
 func TestFileStructureManager_ConcurrentAccess(t *testing.T) {
-	fsm := NewFileStructureManager()
-
+	
 	tempDir, cleanup := setupTestDir(t)
 	defer cleanup()
+
+	fsm, err := NewFileStructureManagerFromPath(tempDir)
+
+	if err != nil  {
+		t.Fatalf("Failed to create FileStructureManager: %v", err)
+	}
 
 	const numWriters = 5
 	const numReaders = 3
@@ -418,27 +423,3 @@ func TestFileStructureManager_DuplicateFiles(t *testing.T) {
 		t.Errorf("Expected file name %s, got %s", node.Name, retrievedNode.Name)
 	}
 }
-
-// createFilesFromStructure creates actual files based on FileStructureManager structure
-// This is useful for testing scenarios where we need real files after structure operations
-func createFilesFromStructure(tb testing.TB, fsm *FileStructureManager, baseDir string) {
-	tb.Helper()
-	
-	// Create all directories first
-	for _, dir := range fsm.GetAllDirs() {
-		if err := os.MkdirAll(dir.Path, 0755); err != nil {
-			tb.Fatalf("Failed to create directory %s: %v", dir.Path, err)
-		}
-	}
-	
-	// Create all files
-	for _, file := range fsm.GetAllFiles() {
-		// Simple content: use filename as content
-		content := fmt.Sprintf("Content of %s", file.Name)
-		
-		if err := os.WriteFile(file.Path, []byte(content), 0644); err != nil {
-			tb.Fatalf("Failed to create file %s: %v", file.Path, err)
-		}
-	}
-}
-

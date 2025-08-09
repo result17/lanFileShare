@@ -2,6 +2,9 @@ package transfer
 
 import (
     "sync"
+    "fmt"
+    "log/slog"
+
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
@@ -20,6 +23,34 @@ func NewFileStructureManager () *FileStructureManager  {
     }
 }
 
+func NewFileStructureManagerWithRootNodes(rootNodes []*fileInfo.FileNode) *FileStructureManager {
+    fsm := NewFileStructureManager()
+    fsm.RootNodes = rootNodes
+    for _, node := range rootNodes {
+        err := fsm.addFileNodeUnsafe(node)
+        if err != nil {
+            slog.Error("failed to add root node", "path", node.Path, "error", err)
+        }
+    }
+    return fsm
+}
+
+// NewFileStructureManagerFromPath creates a FileStructureManager from a single path
+func NewFileStructureManagerFromPath(path string) (*FileStructureManager, error) {
+    fsm := NewFileStructureManager()
+    
+    node, err := fileInfo.CreateNode(path)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create node from path %s: %w", path, err)
+    }
+    
+    fsm.AddFileNode(&node)
+    fsm.RootNodes = append(fsm.RootNodes, &node)
+    
+    return fsm, nil
+}
+
+
 func (fsm *FileStructureManager) AddFileNode(node *fileInfo.FileNode) {
     fsm.mu.Lock()
     defer fsm.mu.Unlock()
@@ -27,7 +58,11 @@ func (fsm *FileStructureManager) AddFileNode(node *fileInfo.FileNode) {
     fsm.addFileNodeUnsafe(node)
 }
 
-func (fsm *FileStructureManager) addFileNodeUnsafe(node *fileInfo.FileNode) {
+func (fsm *FileStructureManager) addFileNodeUnsafe(node *fileInfo.FileNode) error {
+    if node == nil {
+        return fmt.Errorf("node cannot be nil")
+    }
+
     if node.IsDir {
         fsm.dirMap[node.Path] = node
 		for _, child := range node.Children {
@@ -36,6 +71,7 @@ func (fsm *FileStructureManager) addFileNodeUnsafe(node *fileInfo.FileNode) {
     } else {
 		fsm.fileMap[node.Path] = node
 	}
+    return nil
 }
 
 func (fsm *FileStructureManager) GetFileCount() int {
