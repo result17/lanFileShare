@@ -1,9 +1,9 @@
 package transfer
 
 import (
-    "sync"
-    "fmt"
-    "log/slog"
+	"fmt"
+	"log/slog"
+	"sync"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -50,12 +50,24 @@ func NewFileStructureManagerFromPath(path string) (*FileStructureManager, error)
     return fsm, nil
 }
 
-
-func (fsm *FileStructureManager) AddFileNode(node *fileInfo.FileNode) {
+func (fsm *FileStructureManager) AddPath(path string) error {
     fsm.mu.Lock()
     defer fsm.mu.Unlock()
 
-    fsm.addFileNodeUnsafe(node)
+    node, err := fileInfo.CreateNode(path)
+    if err != nil {
+        return fmt.Errorf("failed to create node from path %s: %w", path, err)
+    }
+
+    return fsm.addFileNodeUnsafe(&node)
+}
+
+
+func (fsm *FileStructureManager) AddFileNode(node *fileInfo.FileNode) error {
+    fsm.mu.Lock()
+    defer fsm.mu.Unlock()
+
+    return fsm.addFileNodeUnsafe(node)
 }
 
 func (fsm *FileStructureManager) addFileNodeUnsafe(node *fileInfo.FileNode) error {

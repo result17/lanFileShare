@@ -170,7 +170,7 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 		return fmt.Errorf("failed to create file structure signer: %w", err)
 	}
 
-	signed, err := fileStructureSigner.SignFileStructure(fileNodes)
+	signed, err := fileStructureSigner.SignFileStructureManager(fileNodes)
 	if err != nil {
 		return fmt.Errorf("failed to sign file structure: %w", err)
 	}

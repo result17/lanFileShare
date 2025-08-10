@@ -120,9 +120,3 @@ func (ftm *FileTransferManager) Close() error {
     ftm.chunkers = make(map[string]*Chunker)
     return nil
 }
-
-func (ftm *FileTransferManager) GetFileCount() int {
-    ftm.mu.RLock()
-    defer ftm.mu.RUnlock()
-    return len(ftm.chunkers)
-}
