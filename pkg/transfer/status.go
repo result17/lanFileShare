@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+// This file defines data structures for transfer STATUS MANAGEMENT.
+// It is separate from and complementary to the existing transfer protocol (protocol.go):
+//
+// protocol.go (MessageType):     Network protocol layer - defines messages sent over the wire
+// status.go (TransferState):     Status management layer - tracks persistent transfer state
+//
+// Example:
+// - MessageType.TransferBegin:   "I'm sending a message to start transfer" (network event)
+// - TransferState.Active:        "This transfer is currently active" (persistent state)
+//
+// The two systems work together:
+// 1. Send TransferBegin message → Update state to TransferStateActive
+// 2. Send ProgressUpdate message → Update TransferStatus.BytesSent
+// 3. Send TransferComplete message → Update state to TransferStateCompleted
+
 // TransferState represents the current state of a file transfer
 type TransferState int
 
@@ -182,34 +197,35 @@ func (op *OverallProgress) GetCompletionPercentage() float64 {
 	return float64(op.BytesSent) / float64(op.TotalBytes) * 100.0
 }
 
-// SessionState represents the state of a transfer session
-type SessionState int
+// StatusSessionState represents the state of a status tracking session
+// (renamed to avoid conflict with existing TransferSession)
+type StatusSessionState int
 
 const (
-	// SessionStateActive indicates the session has active transfers
-	SessionStateActive SessionState = iota
-	// SessionStatePaused indicates all transfers in the session are paused
-	SessionStatePaused
-	// SessionStateCompleted indicates all transfers completed successfully
-	SessionStateCompleted
-	// SessionStateFailed indicates the session failed due to critical errors
-	SessionStateFailed
-	// SessionStateCancelled indicates the session was cancelled by user
-	SessionStateCancelled
+	// StatusSessionStateActive indicates the session has active transfers
+	StatusSessionStateActive StatusSessionState = iota
+	// StatusSessionStatePaused indicates all transfers in the session are paused
+	StatusSessionStatePaused
+	// StatusSessionStateCompleted indicates all transfers completed successfully
+	StatusSessionStateCompleted
+	// StatusSessionStateFailed indicates the session failed due to critical errors
+	StatusSessionStateFailed
+	// StatusSessionStateCancelled indicates the session was cancelled by user
+	StatusSessionStateCancelled
 )
 
 // String returns a human-readable string representation of the session state
-func (ss SessionState) String() string {
+func (ss StatusSessionState) String() string {
 	switch ss {
-	case SessionStateActive:
+	case StatusSessionStateActive:
 		return "active"
-	case SessionStatePaused:
+	case StatusSessionStatePaused:
 		return "paused"
-	case SessionStateCompleted:
+	case StatusSessionStateCompleted:
 		return "completed"
-	case SessionStateFailed:
+	case StatusSessionStateFailed:
 		return "failed"
-	case SessionStateCancelled:
+	case StatusSessionStateCancelled:
 		return "cancelled"
 	default:
 		return "unknown"

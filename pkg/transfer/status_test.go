@@ -227,22 +227,22 @@ func TestOverallProgress_GetCompletionPercentage(t *testing.T) {
 	}
 }
 
-func TestSessionState_String(t *testing.T) {
+func TestStatusSessionState_String(t *testing.T) {
 	tests := []struct {
-		state    SessionState
+		state    StatusSessionState
 		expected string
 	}{
-		{SessionStateActive, "active"},
-		{SessionStatePaused, "paused"},
-		{SessionStateCompleted, "completed"},
-		{SessionStateFailed, "failed"},
-		{SessionStateCancelled, "cancelled"},
-		{SessionState(999), "unknown"},
+		{StatusSessionStateActive, "active"},
+		{StatusSessionStatePaused, "paused"},
+		{StatusSessionStateCompleted, "completed"},
+		{StatusSessionStateFailed, "failed"},
+		{StatusSessionStateCancelled, "cancelled"},
+		{StatusSessionState(999), "unknown"},
 	}
 
 	for _, test := range tests {
 		if got := test.state.String(); got != test.expected {
-			t.Errorf("SessionState(%d).String() = %q, want %q", test.state, got, test.expected)
+			t.Errorf("StatusSessionState(%d).String() = %q, want %q", test.state, got, test.expected)
 		}
 	}
 }
