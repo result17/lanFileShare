@@ -24,6 +24,7 @@ Get-Content -Path debug.log -Wait
 # For Linux or macOS
 tail -f debug.log
 ```
+
 Keep this terminal open and visible.
 
 ### Step 2: Start the Receiver
@@ -33,6 +34,7 @@ In the second terminal, start the `receiver` process.
 ```sh
 go run ./cmd/lanfilesharer receive
 ```
+
 The receiver is now running and broadcasting its presence on the network.
 
 ### Step 3: Start the Sender

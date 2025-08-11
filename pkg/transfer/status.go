@@ -317,6 +317,80 @@ var (
 	ErrTransferCancelled = errors.New("transfer cancelled")
 )
 
+// SessionTransferStatus represents the status of an entire transfer session
+// It tracks both overall progress and the current file being transferred
+type SessionTransferStatus struct {
+	// Session identification
+	SessionID string `json:"session_id"`
+	
+	// File counts
+	TotalFiles     int `json:"total_files"`
+	CompletedFiles int `json:"completed_files"`
+	FailedFiles    int `json:"failed_files"`
+	PendingFiles   int `json:"pending_files"`
+	
+	// Byte progress
+	TotalBytes      int64   `json:"total_bytes"`
+	BytesCompleted  int64   `json:"bytes_completed"`
+	OverallProgress float64 `json:"overall_progress"` // 0-100 percentage
+	
+	// Current file being transferred
+	CurrentFile *TransferStatus `json:"current_file,omitempty"`
+	
+	// Session timing
+	StartTime      time.Time  `json:"start_time"`
+	LastUpdateTime time.Time  `json:"last_update_time"`
+	CompletionTime *time.Time `json:"completion_time,omitempty"`
+	
+	// Session state
+	State StatusSessionState `json:"state"`
+}
+
+// GetSessionProgressPercentage calculates the overall session progress percentage
+func (sts *SessionTransferStatus) GetSessionProgressPercentage() float64 {
+	if sts.TotalBytes == 0 {
+		return 0.0
+	}
+	
+	currentFileBytes := int64(0)
+	if sts.CurrentFile != nil {
+		currentFileBytes = sts.CurrentFile.BytesSent
+	}
+	
+	totalCompleted := sts.BytesCompleted + currentFileBytes
+	return float64(totalCompleted) / float64(sts.TotalBytes) * 100.0
+}
+
+// GetRemainingFiles returns the number of files left to transfer
+func (sts *SessionTransferStatus) GetRemainingFiles() int {
+	return sts.TotalFiles - sts.CompletedFiles - sts.FailedFiles
+}
+
+// GetRemainingBytes returns the number of bytes left to transfer
+func (sts *SessionTransferStatus) GetRemainingBytes() int64 {
+	currentFileBytes := int64(0)
+	if sts.CurrentFile != nil {
+		currentFileBytes = sts.CurrentFile.BytesSent
+	}
+	
+	totalCompleted := sts.BytesCompleted + currentFileBytes
+	remaining := sts.TotalBytes - totalCompleted
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// IsSessionComplete returns true if all files have been processed (completed or failed)
+func (sts *SessionTransferStatus) IsSessionComplete() bool {
+	return sts.CompletedFiles + sts.FailedFiles >= sts.TotalFiles
+}
+
+// HasActiveTransfer returns true if there's currently a file being transferred
+func (sts *SessionTransferStatus) HasActiveTransfer() bool {
+	return sts.CurrentFile != nil && sts.CurrentFile.State == TransferStateActive
+}
+
 // Helper function to check if a string contains a substring (case-insensitive)
 func contains(s, substr string) bool {
 	// Simple case-insensitive substring check

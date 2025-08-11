@@ -6,24 +6,22 @@ import (
 	"time"
 )
 
-// TransferStatusManager manages the status of all file transfers
-// It provides thread-safe operations for tracking transfer progress,
-// managing transfer states, and querying transfer information.
+// TransferStatusManager manages a single SessionTransferStatus
+// It provides thread-safe operations for tracking session progress,
+// managing session states, and handling current file transfers.
 type TransferStatusManager struct {
-	// transfers maps file paths to their current transfer status
-	transfers map[string]*TransferStatus
+	// sessionStatus holds the current session status
+	sessionStatus *SessionTransferStatus
 	
 	// config holds the configuration for transfer management
 	config *TransferConfig
 	
-	// mu provides thread-safe access to the transfers map
+	// mu provides thread-safe access to the session status
 	mu sync.RWMutex
 	
-	// nextSessionID is used to generate unique session IDs
-	nextSessionID int64
-	
-	// sessionMu protects nextSessionID
-	sessionMu sync.Mutex
+	// Event system
+	listeners []StatusListener
+	eventsMu  sync.RWMutex
 }
 
 // NewTransferStatusManager creates a new TransferStatusManager with default configuration
@@ -38,133 +36,121 @@ func NewTransferStatusManagerWithConfig(config *TransferConfig) *TransferStatusM
 	}
 	
 	return &TransferStatusManager{
-		transfers:     make(map[string]*TransferStatus),
+		sessionStatus: nil, // Will be initialized when session is created
 		config:        config,
-		nextSessionID: time.Now().Unix(),
+		listeners:     make([]StatusListener, 0),
 	}
 }
 
-// GetConfig returns a copy of the current configuration
-func (tsm *TransferStatusManager) GetConfig() *TransferConfig {
-	// Return a copy to prevent external modification
-	configCopy := *tsm.config
-	return &configCopy
-}
-
-// UpdateConfig updates the manager's configuration
-// Returns an error if the new configuration is invalid
-func (tsm *TransferStatusManager) UpdateConfig(config *TransferConfig) error {
-	if config == nil {
-		return ErrInvalidConfiguration
+// InitializeSession initializes the transfer session
+func (tsm *TransferStatusManager) InitializeSession(sessionID string, totalFiles int, totalBytes int64) error {
+	if sessionID == "" {
+		return fmt.Errorf("session ID cannot be empty")
 	}
 	
-	if err := config.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidConfiguration, err)
+	if totalFiles < 0 {
+		return fmt.Errorf("total files cannot be negative")
 	}
 	
-	tsm.config = config
-	return nil
-}
-
-// StartTransfer initializes a new transfer with the given parameters
-// Returns an error if a transfer with the same file path already exists
-func (tsm *TransferStatusManager) StartTransfer(filePath string, totalSize int64) (*TransferStatus, error) {
-	if filePath == "" {
-		return nil, fmt.Errorf("file path cannot be empty")
-	}
-	
-	if totalSize < 0 {
-		return nil, fmt.Errorf("total size cannot be negative")
+	if totalBytes < 0 {
+		return fmt.Errorf("total bytes cannot be negative")
 	}
 	
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	// Check if transfer already exists
-	if _, exists := tsm.transfers[filePath]; exists {
-		return nil, ErrTransferAlreadyExists
+	// Check if session already exists
+	if tsm.sessionStatus != nil {
+		return ErrSessionAlreadyExists
 	}
 	
-	// Check concurrent transfer limit (count all non-terminal transfers)
-	nonTerminalCount := tsm.getNonTerminalTransferCountUnsafe()
-	if nonTerminalCount >= tsm.config.MaxConcurrentTransfers {
-		return nil, ErrMaxTransfersExceeded
+	// Create new session status
+	tsm.sessionStatus = &SessionTransferStatus{
+		SessionID:       sessionID,
+		TotalFiles:      totalFiles,
+		CompletedFiles:  0,
+		FailedFiles:     0,
+		PendingFiles:    totalFiles,
+		TotalBytes:      totalBytes,
+		BytesCompleted:  0,
+		OverallProgress: 0.0,
+		CurrentFile:     nil,
+		StartTime:       time.Now(),
+		LastUpdateTime:  time.Now(),
+		State:           StatusSessionStateActive,
 	}
 	
-	// Generate session ID
-	sessionID := tsm.generateSessionID()
-	
-	// Create new transfer status
-	status := &TransferStatus{
-		FilePath:    filePath,
-		SessionID:   sessionID,
-		State:       TransferStatePending,
-		BytesSent:   0,
-		TotalBytes:  totalSize,
-		ChunksSent:  0,
-		TotalChunks: int(totalSize / int64(tsm.config.ChunkSize)),
-		StartTime:   time.Now(),
-		LastUpdateTime: time.Now(),
-		RetryCount:  0,
-		MaxRetries:  tsm.config.DefaultRetryPolicy.MaxRetries,
-		FileSize:    totalSize,
-		Priority:    0, // Default priority
-	}
-	
-	// Adjust total chunks for remainder
-	if totalSize%int64(tsm.config.ChunkSize) != 0 {
-		status.TotalChunks++
-	}
-	
-	// Store the transfer
-	tsm.transfers[filePath] = status
-	
-	return status, nil
+	return nil
 }
 
-// GetTransferStatus retrieves the current status of a transfer
-// Returns ErrTransferNotFound if the transfer doesn't exist
-func (tsm *TransferStatusManager) GetTransferStatus(filePath string) (*TransferStatus, error) {
+// GetSessionStatus retrieves the current session status
+func (tsm *TransferStatusManager) GetSessionStatus() (*SessionTransferStatus, error) {
+	tsm.mu.RLock()
+	defer tsm.mu.RUnlock()
+	
+	if tsm.sessionStatus == nil {
+		return nil, ErrSessionNotFound
+	}
+	
+	// Return a deep copy to prevent external modification
+	statusCopy := *tsm.sessionStatus
+	if tsm.sessionStatus.CurrentFile != nil {
+		currentFileCopy := *tsm.sessionStatus.CurrentFile
+		statusCopy.CurrentFile = &currentFileCopy
+	}
+	
+	return &statusCopy, nil
+}
+
+// StartFileTransfer starts transferring a file
+func (tsm *TransferStatusManager) StartFileTransfer(filePath string, fileSize int64) (*TransferStatus, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("file path cannot be empty")
 	}
 	
-	tsm.mu.RLock()
-	defer tsm.mu.RUnlock()
-	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
-		return nil, ErrTransferNotFound
+	if fileSize < 0 {
+		return nil, fmt.Errorf("file size cannot be negative")
 	}
 	
-	// Return a copy to prevent external modification
-	statusCopy := *status
-	return &statusCopy, nil
+	tsm.mu.Lock()
+	defer tsm.mu.Unlock()
+	
+	if tsm.sessionStatus == nil {
+		return nil, ErrSessionNotFound
+	}
+	
+	// Check if there's already a current file transfer
+	if tsm.sessionStatus.CurrentFile != nil && tsm.sessionStatus.CurrentFile.State == TransferStateActive {
+		return nil, fmt.Errorf("session already has an active file transfer: %s", tsm.sessionStatus.CurrentFile.FilePath)
+	}
+	
+	oldSessionStatus := *tsm.sessionStatus
+	
+	// Create new transfer status for current file
+	currentFile := &TransferStatus{
+		FilePath:       filePath,
+		SessionID:      tsm.sessionStatus.SessionID,
+		State:          TransferStateActive,
+		TotalBytes:     fileSize,
+		FileSize:       fileSize,
+		StartTime:      time.Now(),
+		LastUpdateTime: time.Now(),
+		MaxRetries:     tsm.config.DefaultRetryPolicy.MaxRetries,
+	}
+	
+	oldCurrentFile := tsm.sessionStatus.CurrentFile
+	tsm.sessionStatus.CurrentFile = currentFile
+	tsm.sessionStatus.LastUpdateTime = time.Now()
+	
+	// Notify listeners
+	tsm.notifyFileStatusChanged(filePath, oldCurrentFile, currentFile)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	
+	return currentFile, nil
 }
 
-// GetAllTransfers returns a slice of all current transfer statuses
-// Returns copies of the statuses to prevent external modification
-func (tsm *TransferStatusManager) GetAllTransfers() []*TransferStatus {
-	tsm.mu.RLock()
-	defer tsm.mu.RUnlock()
-	
-	transfers := make([]*TransferStatus, 0, len(tsm.transfers))
-	for _, status := range tsm.transfers {
-		// Create a copy to prevent external modification
-		statusCopy := *status
-		transfers = append(transfers, &statusCopy)
-	}
-	
-	return transfers
-}
-
-// UpdateProgress updates the progress of a transfer
-// Returns an error if the transfer doesn't exist or if the update is invalid
-func (tsm *TransferStatusManager) UpdateProgress(filePath string, bytesSent int64) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
+// UpdateFileProgress updates the progress of the current file transfer
+func (tsm *TransferStatusManager) UpdateFileProgress(bytesSent int64) error {
 	if bytesSent < 0 {
 		return fmt.Errorf("bytes sent cannot be negative")
 	}
@@ -172,329 +158,259 @@ func (tsm *TransferStatusManager) UpdateProgress(filePath string, bytesSent int6
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
+	if tsm.sessionStatus == nil {
+		return ErrSessionNotFound
+	}
+	
+	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
 	
-	// Validate that we're not going backwards (unless it's a retry)
-	if bytesSent < status.BytesSent && status.State != TransferStatePaused {
-		return fmt.Errorf("bytes sent cannot decrease from %d to %d", status.BytesSent, bytesSent)
-	}
+	oldSessionStatus := *tsm.sessionStatus
+	oldFileStatus := *tsm.sessionStatus.CurrentFile
 	
-	// Validate that we're not exceeding total size
-	if bytesSent > status.TotalBytes {
-		return fmt.Errorf("bytes sent (%d) cannot exceed total size (%d)", bytesSent, status.TotalBytes)
-	}
+	// Update current file progress
+	tsm.sessionStatus.CurrentFile.BytesSent = bytesSent
+	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
+	tsm.sessionStatus.CurrentFile.calculateMetrics()
 	
-	// Calculate chunks sent
-	chunksSent := int(bytesSent / int64(tsm.config.ChunkSize))
-	if bytesSent%int64(tsm.config.ChunkSize) != 0 {
-		chunksSent++
-	}
+	// Update overall session progress
+	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
+	tsm.sessionStatus.LastUpdateTime = time.Now()
 	
-	// Update progress
-	status.UpdateProgress(bytesSent, chunksSent)
+	// Notify listeners
+	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
 	
 	return nil
 }
 
-// CompleteTransfer marks a transfer as completed
-// Returns an error if the transfer doesn't exist or cannot be completed
-func (tsm *TransferStatusManager) CompleteTransfer(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
+// CompleteCurrentFile marks the current file transfer as completed
+func (tsm *TransferStatusManager) CompleteCurrentFile() error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
+	if tsm.sessionStatus == nil {
+		return ErrSessionNotFound
+	}
+	
+	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
 	
-	// Validate state transition
-	if !status.State.CanTransitionTo(TransferStateCompleted) {
-		return fmt.Errorf("%w: cannot transition from %s to completed", 
-			ErrInvalidStateTransition, status.State)
-	}
+	oldSessionStatus := *tsm.sessionStatus
+	oldFileStatus := *tsm.sessionStatus.CurrentFile
 	
-	// Update state
-	status.State = TransferStateCompleted
+	// Mark current file as completed
+	tsm.sessionStatus.CurrentFile.State = TransferStateCompleted
 	now := time.Now()
-	status.CompletionTime = &now
-	status.LastUpdateTime = now
+	tsm.sessionStatus.CurrentFile.CompletionTime = &now
 	
-	// Ensure progress is at 100%
-	status.BytesSent = status.TotalBytes
-	status.ChunksSent = status.TotalChunks
+	// Update session counters
+	tsm.sessionStatus.CompletedFiles++
+	tsm.sessionStatus.PendingFiles--
+	tsm.sessionStatus.BytesCompleted += tsm.sessionStatus.CurrentFile.TotalBytes
+	
+	completedFile := tsm.sessionStatus.CurrentFile
+	tsm.sessionStatus.CurrentFile = nil // No current file until next one starts
+	tsm.sessionStatus.LastUpdateTime = now
+	
+	// Update overall progress
+	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
+	
+	// Check if session is complete
+	if tsm.sessionStatus.IsSessionComplete() {
+		tsm.sessionStatus.CompletionTime = &now
+		tsm.sessionStatus.State = StatusSessionStateCompleted
+	}
+	
+	// Notify listeners
+	tsm.notifyFileStatusChanged(completedFile.FilePath, &oldFileStatus, completedFile)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
 	
 	return nil
 }
 
-// FailTransfer marks a transfer as failed with the given error
-// Returns an error if the transfer doesn't exist or cannot be failed
-func (tsm *TransferStatusManager) FailTransfer(filePath string, transferError error) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
+// FailCurrentFile marks the current file transfer as failed
+func (tsm *TransferStatusManager) FailCurrentFile(err error) error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
+	if tsm.sessionStatus == nil {
+		return ErrSessionNotFound
+	}
+	
+	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
 	
-	// Validate state transition
-	if !status.State.CanTransitionTo(TransferStateFailed) {
-		return fmt.Errorf("%w: cannot transition from %s to failed", 
-			ErrInvalidStateTransition, status.State)
+	oldSessionStatus := *tsm.sessionStatus
+	oldFileStatus := *tsm.sessionStatus.CurrentFile
+	
+	// Mark current file as failed
+	tsm.sessionStatus.CurrentFile.State = TransferStateFailed
+	tsm.sessionStatus.CurrentFile.LastError = err
+	
+	// Update session counters
+	tsm.sessionStatus.FailedFiles++
+	tsm.sessionStatus.PendingFiles--
+	
+	failedFile := tsm.sessionStatus.CurrentFile
+	tsm.sessionStatus.CurrentFile = nil // No current file until next one starts
+	tsm.sessionStatus.LastUpdateTime = time.Now()
+	
+	// Update overall progress
+	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
+	
+	// Check if session should be marked as failed (all files failed)
+	if tsm.sessionStatus.FailedFiles >= tsm.sessionStatus.TotalFiles {
+		now := time.Now()
+		tsm.sessionStatus.CompletionTime = &now
+		tsm.sessionStatus.State = StatusSessionStateFailed
 	}
 	
-	// Update state
-	status.State = TransferStateFailed
-	status.LastError = transferError
-	now := time.Now()
-	status.CompletionTime = &now
-	status.LastUpdateTime = now
+	// Notify listeners
+	tsm.notifyFileStatusChanged(failedFile.FilePath, &oldFileStatus, failedFile)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
 	
 	return nil
 }
 
-// CancelTransfer marks a transfer as cancelled
-// Returns an error if the transfer doesn't exist or cannot be cancelled
-func (tsm *TransferStatusManager) CancelTransfer(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
+// PauseCurrentFile pauses the current file transfer
+func (tsm *TransferStatusManager) PauseCurrentFile() error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
+	if tsm.sessionStatus == nil {
+		return ErrSessionNotFound
+	}
+	
+	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
 	
-	// Validate state transition
-	if !status.State.CanTransitionTo(TransferStateCancelled) {
-		return fmt.Errorf("%w: cannot transition from %s to cancelled", 
-			ErrInvalidStateTransition, status.State)
+	if tsm.sessionStatus.CurrentFile.State != TransferStateActive {
+		return ErrInvalidStateTransition
 	}
 	
-	// Update state
-	status.State = TransferStateCancelled
-	status.LastError = ErrTransferCancelled
-	now := time.Now()
-	status.CompletionTime = &now
-	status.LastUpdateTime = now
+	oldSessionStatus := *tsm.sessionStatus
+	oldFileStatus := *tsm.sessionStatus.CurrentFile
+	
+	tsm.sessionStatus.CurrentFile.State = TransferStatePaused
+	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
+	tsm.sessionStatus.LastUpdateTime = time.Now()
+	
+	// Notify listeners
+	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
 	
 	return nil
 }
 
-// PauseTransfer pauses an active transfer
-// Returns an error if the transfer doesn't exist or cannot be paused
-func (tsm *TransferStatusManager) PauseTransfer(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
+// ResumeCurrentFile resumes a paused file transfer
+func (tsm *TransferStatusManager) ResumeCurrentFile() error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
+	if tsm.sessionStatus == nil {
+		return ErrSessionNotFound
+	}
+	
+	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
 	
-	// Validate state transition
-	if !status.State.CanTransitionTo(TransferStatePaused) {
-		return fmt.Errorf("%w: cannot transition from %s to paused", 
-			ErrInvalidStateTransition, status.State)
+	if tsm.sessionStatus.CurrentFile.State != TransferStatePaused {
+		return ErrInvalidStateTransition
 	}
 	
-	// Update state
-	status.State = TransferStatePaused
-	status.LastUpdateTime = time.Now()
+	oldSessionStatus := *tsm.sessionStatus
+	oldFileStatus := *tsm.sessionStatus.CurrentFile
+	
+	tsm.sessionStatus.CurrentFile.State = TransferStateActive
+	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
+	tsm.sessionStatus.LastUpdateTime = time.Now()
+	
+	// Notify listeners
+	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
 	
 	return nil
 }
 
-// ResumeTransfer resumes a paused transfer
-// Returns an error if the transfer doesn't exist or cannot be resumed
-func (tsm *TransferStatusManager) ResumeTransfer(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
-	tsm.mu.Lock()
-	defer tsm.mu.Unlock()
-	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
-		return ErrTransferNotFound
-	}
-	
-	// Validate state transition
-	if !status.State.CanTransitionTo(TransferStateActive) {
-		return fmt.Errorf("%w: cannot transition from %s to active", 
-			ErrInvalidStateTransition, status.State)
-	}
-	
-	// Update state
-	status.State = TransferStateActive
-	status.LastUpdateTime = time.Now()
-	
-	return nil
-}
-
-// RemoveTransfer removes a completed, failed, or cancelled transfer from tracking
-// Returns an error if the transfer doesn't exist or is still active
-func (tsm *TransferStatusManager) RemoveTransfer(filePath string) error {
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-	
-	tsm.mu.Lock()
-	defer tsm.mu.Unlock()
-	
-	status, exists := tsm.transfers[filePath]
-	if !exists {
-		return ErrTransferNotFound
-	}
-	
-	// Only allow removal of terminal states
-	if !status.State.IsTerminal() {
-		return fmt.Errorf("cannot remove active transfer (current state: %s)", status.State)
-	}
-	
-	delete(tsm.transfers, filePath)
-	return nil
-}
-
-// GetOverallProgress calculates and returns aggregated progress across all transfers
-func (tsm *TransferStatusManager) GetOverallProgress() *OverallProgress {
+// GetCurrentFile returns the current file being transferred
+func (tsm *TransferStatusManager) GetCurrentFile() (*TransferStatus, error) {
 	tsm.mu.RLock()
 	defer tsm.mu.RUnlock()
 	
-	progress := &OverallProgress{
-		LastUpdateTime: time.Now(),
+	if tsm.sessionStatus == nil {
+		return nil, ErrSessionNotFound
 	}
 	
-	var totalBytes, bytesSent int64
-	var totalRate float64
-	var activeTransfers int
-	
-	// Find the earliest start time
-	var earliestStart time.Time
-	firstTransfer := true
-	
-	for _, status := range tsm.transfers {
-		progress.TotalTransfers++
-		
-		// Track earliest start time
-		if firstTransfer || status.StartTime.Before(earliestStart) {
-			earliestStart = status.StartTime
-			firstTransfer = false
-		}
-		
-		// Accumulate bytes
-		totalBytes += status.TotalBytes
-		bytesSent += status.BytesSent
-		
-		// Count by state
-		switch status.State {
-		case TransferStateActive:
-			progress.ActiveTransfers++
-			activeTransfers++
-			totalRate += status.TransferRate
-		case TransferStateCompleted:
-			progress.CompletedTransfers++
-		case TransferStateFailed:
-			progress.FailedTransfers++
-		case TransferStateCancelled:
-			progress.CancelledTransfers++
-		}
+	if tsm.sessionStatus.CurrentFile == nil {
+		return nil, ErrTransferNotFound
 	}
 	
-	progress.TotalBytes = totalBytes
-	progress.BytesSent = bytesSent
-	progress.BytesRemaining = totalBytes - bytesSent
-	progress.SessionStartTime = earliestStart
-	
-	// Calculate overall percentage
-	if totalBytes > 0 {
-		progress.OverallPercentage = float64(bytesSent) / float64(totalBytes) * 100.0
-	}
-	
-	// Calculate average rate and ETA
-	if activeTransfers > 0 {
-		progress.AverageRate = totalRate / float64(activeTransfers)
-		if progress.AverageRate > 0 && progress.BytesRemaining > 0 {
-			progress.EstimatedETA = time.Duration(float64(progress.BytesRemaining)/progress.AverageRate) * time.Second
-		}
-	}
-	
-	return progress
+	// Return a copy to prevent external modification
+	statusCopy := *tsm.sessionStatus.CurrentFile
+	return &statusCopy, nil
 }
 
-// GetActiveTransferCount returns the number of currently active transfers
-func (tsm *TransferStatusManager) GetActiveTransferCount() int {
+// IsSessionActive returns true if there's an active session
+func (tsm *TransferStatusManager) IsSessionActive() bool {
 	tsm.mu.RLock()
 	defer tsm.mu.RUnlock()
 	
-	return tsm.getActiveTransferCountUnsafe()
+	return tsm.sessionStatus != nil && !tsm.sessionStatus.IsSessionComplete()
 }
 
-// getActiveTransferCountUnsafe returns the number of active transfers without locking
-// This method assumes the caller already holds the appropriate lock
-func (tsm *TransferStatusManager) getActiveTransferCountUnsafe() int {
-	count := 0
-	for _, status := range tsm.transfers {
-		if status.State == TransferStateActive {
-			count++
-		}
-	}
-	return count
-}
-
-// getNonTerminalTransferCountUnsafe returns the number of non-terminal transfers without locking
-// This includes pending, active, and paused transfers
-func (tsm *TransferStatusManager) getNonTerminalTransferCountUnsafe() int {
-	count := 0
-	for _, status := range tsm.transfers {
-		if !status.State.IsTerminal() {
-			count++
-		}
-	}
-	return count
-}
-
-// generateSessionID generates a unique session ID
-func (tsm *TransferStatusManager) generateSessionID() string {
-	tsm.sessionMu.Lock()
-	defer tsm.sessionMu.Unlock()
+// ResetSession clears the current session (for cleanup or new session)
+func (tsm *TransferStatusManager) ResetSession() {
+	tsm.mu.Lock()
+	defer tsm.mu.Unlock()
 	
-	tsm.nextSessionID++
-	return fmt.Sprintf("status-session-%d", tsm.nextSessionID)
+	tsm.sessionStatus = nil
 }
 
-// Clear removes all transfers from the manager
+// AddStatusListener adds a status change listener
+func (tsm *TransferStatusManager) AddStatusListener(listener StatusListener) {
+	tsm.eventsMu.Lock()
+	defer tsm.eventsMu.Unlock()
+	
+	tsm.listeners = append(tsm.listeners, listener)
+}
+
+// Clear removes the current session from the manager
 // This is primarily useful for testing and cleanup
 func (tsm *TransferStatusManager) Clear() {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
 	
-	tsm.transfers = make(map[string]*TransferStatus)
+	tsm.sessionStatus = nil
 }
 
-// GetTransferCount returns the total number of transfers being tracked
-func (tsm *TransferStatusManager) GetTransferCount() int {
-	tsm.mu.RLock()
-	defer tsm.mu.RUnlock()
+// Helper methods
+
+func (tsm *TransferStatusManager) notifyFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
+	tsm.eventsMu.RLock()
+	defer tsm.eventsMu.RUnlock()
 	
-	return len(tsm.transfers)
+	for _, listener := range tsm.listeners {
+		// Run in goroutine to prevent blocking
+		go func(l StatusListener) {
+			l.OnFileStatusChanged(filePath, oldStatus, newStatus)
+		}(listener)
+	}
+}
+
+func (tsm *TransferStatusManager) notifySessionStatusChanged(oldStatus, newStatus *SessionTransferStatus) {
+	tsm.eventsMu.RLock()
+	defer tsm.eventsMu.RUnlock()
+	
+	for _, listener := range tsm.listeners {
+		// Run in goroutine to prevent blocking
+		go func(l StatusListener) {
+			l.OnSessionStatusChanged(oldStatus, newStatus)
+		}(listener)
+	}
 }
