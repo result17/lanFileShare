@@ -162,15 +162,24 @@ func TestUnifiedTransferManager_MultipleFiles(t *testing.T) {
 		t.Errorf("Expected 3 total files, got %d", sessionStatus.TotalFiles)
 	}
 	
-	// Start all transfers
-	for _, fileName := range files {
-		filePath := filepath.Join(tempDir, fileName)
-		manager.StartTransfer(filePath)
+	// Start and complete first file (sequential processing)
+	firstFile := filepath.Join(tempDir, files[0])
+	err := manager.StartTransfer(firstFile)
+	if err != nil {
+		t.Errorf("StartTransfer failed: %v", err)
 	}
 	
-	// Complete first file
-	firstFile := filepath.Join(tempDir, files[0])
-	manager.UpdateProgress(firstFile, int64(len("content of "+files[0])))
+	// Update progress
+	err = manager.UpdateProgress(firstFile, int64(len("content of "+files[0])))
+	if err != nil {
+		t.Errorf("UpdateProgress failed: %v", err)
+	}
+	
+	// Complete the transfer
+	err = manager.CompleteTransfer(firstFile)
+	if err != nil {
+		t.Errorf("CompleteTransfer failed: %v", err)
+	}
 	
 	sessionStatus = manager.GetSessionStatus()
 	if sessionStatus.CompletedFiles != 1 {

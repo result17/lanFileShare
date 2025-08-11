@@ -91,11 +91,23 @@ func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfi
 }
 
 // AddFile adds a file to the transfer queue (focused on file management only)
+// AddFile adds a file or directory to the transfer queue
 func (utm *UnifiedTransferManager) AddFile(node *fileInfo.FileNode) error {
 	if node == nil {
 		return fmt.Errorf("file node cannot be nil")
 	}
 	
+	// Handle directories by adding all their files
+	if node.IsDir {
+		return utm.addDirectory(node)
+	}
+	
+	// Handle regular files
+	return utm.addSingleFile(node)
+}
+
+// addSingleFile adds a single file to the transfer queue
+func (utm *UnifiedTransferManager) addSingleFile(node *fileInfo.FileNode) error {
 	utm.filesMu.Lock()
 	utm.queueMu.Lock()
 	defer utm.filesMu.Unlock()
@@ -112,7 +124,7 @@ func (utm *UnifiedTransferManager) AddFile(node *fileInfo.FileNode) error {
 		return fmt.Errorf("failed to create chunker: %w", err)
 	}
 	
-	// Create managed file (no status tracking here)
+	// Create managed file
 	managedFile := &ManagedFile{
 		Node:    node,
 		Chunker: chunker,
@@ -120,6 +132,30 @@ func (utm *UnifiedTransferManager) AddFile(node *fileInfo.FileNode) error {
 	
 	utm.files[node.Path] = managedFile
 	utm.pendingFiles = append(utm.pendingFiles, node.Path)
+	
+	// Update session status
+	utm.statusMu.Lock()
+	utm.sessionStatus.TotalFiles = len(utm.files)
+	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
+	utm.sessionStatus.TotalBytes += node.Size
+	utm.sessionStatus.LastUpdateTime = time.Now()
+	utm.statusMu.Unlock()
+	
+	return nil
+}
+
+// addDirectory recursively adds all files in a directory to the transfer queue
+func (utm *UnifiedTransferManager) addDirectory(dirNode *fileInfo.FileNode) error {
+	if !dirNode.IsDir {
+		return fmt.Errorf("node is not a directory: %s", dirNode.Path)
+	}
+	
+	// Recursively add all files in the directory
+	for _, child := range dirNode.Children {
+		if err := utm.AddFile(&child); err != nil {
+			return fmt.Errorf("failed to add child %s: %w", child.Path, err)
+		}
+	}
 	
 	return nil
 }
@@ -161,6 +197,14 @@ func (utm *UnifiedTransferManager) MarkFileCompleted(filePath string) error {
 	
 	// Add to completed
 	utm.completedFiles = append(utm.completedFiles, filePath)
+	
+	// Update session status
+	utm.statusMu.Lock()
+	utm.sessionStatus.CompletedFiles = len(utm.completedFiles)
+	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
+	utm.sessionStatus.LastUpdateTime = time.Now()
+	utm.statusMu.Unlock()
+	
 	return nil
 }
 
@@ -179,6 +223,14 @@ func (utm *UnifiedTransferManager) MarkFileFailed(filePath string) error {
 	
 	// Add to failed
 	utm.failedFiles = append(utm.failedFiles, filePath)
+	
+	// Update session status
+	utm.statusMu.Lock()
+	utm.sessionStatus.FailedFiles = len(utm.failedFiles)
+	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
+	utm.sessionStatus.LastUpdateTime = time.Now()
+	utm.statusMu.Unlock()
+	
 	return nil
 }
 
@@ -371,8 +423,18 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 		utm.sessionStatus.State = StatusSessionStateCompleted
 	}
 	
-	// Also update the queue
-	utm.MarkFileCompleted(filePath)
+	// Also update the queue (avoid calling MarkFileCompleted to prevent deadlock)
+	utm.queueMu.Lock()
+	// Remove from pending
+	for i, path := range utm.pendingFiles {
+		if path == filePath {
+			utm.pendingFiles = append(utm.pendingFiles[:i], utm.pendingFiles[i+1:]...)
+			break
+		}
+	}
+	// Add to completed
+	utm.completedFiles = append(utm.completedFiles, filePath)
+	utm.queueMu.Unlock()
 	
 	// Notify listeners
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, completedFile)
@@ -415,8 +477,18 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 		utm.sessionStatus.State = StatusSessionStateFailed
 	}
 	
-	// Also update the queue
-	utm.MarkFileFailed(filePath)
+	// Also update the queue (avoid calling MarkFileFailed to prevent deadlock)
+	utm.queueMu.Lock()
+	// Remove from pending
+	for i, path := range utm.pendingFiles {
+		if path == filePath {
+			utm.pendingFiles = append(utm.pendingFiles[:i], utm.pendingFiles[i+1:]...)
+			break
+		}
+	}
+	// Add to failed
+	utm.failedFiles = append(utm.failedFiles, filePath)
+	utm.queueMu.Unlock()
 	
 	// Notify listeners
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, failedFile)
