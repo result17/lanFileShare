@@ -288,73 +288,7 @@ func (rp *RetryPolicy) IsRetryable(err error) bool {
 	return false
 }
 
-// TransferConfig holds configuration for transfer status management
-type TransferConfig struct {
-	// Concurrency limits
-	MaxConcurrentTransfers int `json:"max_concurrent_transfers"`
-	MaxConcurrentChunks    int `json:"max_concurrent_chunks"`
-
-	// Performance settings
-	ChunkSize             int32         `json:"chunk_size"`
-	BufferSize            int           `json:"buffer_size"`
-	RateCalculationWindow time.Duration `json:"rate_calculation_window"`
-
-	// Retry policy
-	DefaultRetryPolicy *RetryPolicy `json:"default_retry_policy"`
-
-	// History settings
-	HistoryRetentionDays int `json:"history_retention_days"`
-	MaxHistoryRecords    int `json:"max_history_records"`
-
-	// Event settings
-	EventBufferSize      int           `json:"event_buffer_size"`
-	EventDeliveryTimeout time.Duration `json:"event_delivery_timeout"`
-}
-
-// DefaultTransferConfig returns a configuration with sensible defaults
-func DefaultTransferConfig() *TransferConfig {
-	return &TransferConfig{
-		MaxConcurrentTransfers: 10,
-		MaxConcurrentChunks:    50,
-		ChunkSize:              1024 * 1024, // 1MB
-		BufferSize:             8192,        // 8KB
-		RateCalculationWindow:  30 * time.Second,
-		DefaultRetryPolicy:     DefaultRetryPolicy(),
-		HistoryRetentionDays:   30,
-		MaxHistoryRecords:      1000,
-		EventBufferSize:        100,
-		EventDeliveryTimeout:   5 * time.Second,
-	}
-}
-
-// Validate checks if the configuration values are valid
-func (tc *TransferConfig) Validate() error {
-	if tc.MaxConcurrentTransfers <= 0 {
-		return errors.New("max_concurrent_transfers must be positive")
-	}
-	if tc.MaxConcurrentChunks <= 0 {
-		return errors.New("max_concurrent_chunks must be positive")
-	}
-	if tc.ChunkSize <= 0 {
-		return errors.New("chunk_size must be positive")
-	}
-	if tc.BufferSize <= 0 {
-		return errors.New("buffer_size must be positive")
-	}
-	if tc.DefaultRetryPolicy == nil {
-		return errors.New("default_retry_policy cannot be nil")
-	}
-	if tc.HistoryRetentionDays < 0 {
-		return errors.New("history_retention_days cannot be negative")
-	}
-	if tc.MaxHistoryRecords < 0 {
-		return errors.New("max_history_records cannot be negative")
-	}
-	if tc.EventBufferSize <= 0 {
-		return errors.New("event_buffer_size must be positive")
-	}
-	return nil
-}
+// TransferConfig is now defined in config.go to avoid duplication
 
 // Error types for transfer status management
 var (

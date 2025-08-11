@@ -28,11 +28,7 @@ type Chunker struct {
 	buffer        []byte
 }
 
-const (
-	DefaultChunkSize = 64 * 1024
-	MaxChunkSize     = 256 * 1024
-	MinChunkSize     = 4 * 1024
-)
+// Chunk size constants are now defined in config.go to avoid duplication
 
 func NewChunkerFromFileNode(node *fileInfo.FileNode, chunkSize int32) (*Chunker, error) {
 	if node.IsDir {
