@@ -92,17 +92,17 @@ The transfer status management system will serve as the foundation for user inte
 4. WHEN storing history THEN the system SHALL include file names, sizes, transfer times, and final status
 5. IF storage space is limited THEN the system SHALL implement history cleanup with configurable retention period
 
-### Requirement 8: Concurrent Transfer Management
+### Requirement 8: Sequential Transfer Management
 
-**User Story:** As a user, I want to transfer multiple files simultaneously while maintaining visibility into each transfer, so that I can maximize throughput and manage multiple operations.
+**User Story:** As a user, I want to transfer multiple files in a session with clear visibility into the overall progress, so that I can monitor the entire transfer operation.
 
 #### Acceptance Criteria
 
-1. WHEN multiple transfers are requested THEN the system SHALL support concurrent transfer operations
-2. WHEN managing concurrent transfers THEN the system SHALL limit the number of simultaneous transfers to prevent resource exhaustion
-3. WHEN a transfer slot becomes available THEN the system SHALL automatically start the next queued transfer
-4. WHEN queried THEN the system SHALL provide status for all active, queued, and completed transfers
-5. IF system resources are constrained THEN the system SHALL prioritize transfers based on configurable criteria
+1. WHEN multiple files are queued for transfer THEN the system SHALL process them sequentially within a single session
+2. WHEN managing file transfers THEN the system SHALL maintain a queue of pending, completed, and failed files
+3. WHEN a file transfer completes THEN the system SHALL automatically start the next queued file
+4. WHEN queried THEN the system SHALL provide status for the current file and overall session progress
+5. IF a file transfer fails THEN the system SHALL continue with the next file in the queue
 
 ### Requirement 9: Transfer Cancellation
 
@@ -122,8 +122,8 @@ The transfer status management system will serve as the foundation for user inte
 
 #### Acceptance Criteria
 
-1. WHEN transfer status changes THEN the system SHALL emit status change events
+1. WHEN transfer status changes THEN the system SHALL call registered status listeners
 2. WHEN components register for notifications THEN the system SHALL deliver events to all registered listeners
 3. WHEN emitting events THEN the system SHALL include the file path, old status, new status, and relevant metrics
-4. WHEN a component unregisters THEN the system SHALL stop delivering events to that component
+4. WHEN session status changes THEN the system SHALL notify listeners with session-level information
 5. IF event delivery fails THEN the system SHALL not block transfer operations

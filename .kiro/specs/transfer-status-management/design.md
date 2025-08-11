@@ -10,39 +10,61 @@ This document outlines the design for implementing comprehensive transfer status
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   UI Layer      │    │  Transfer        │    │  File Transfer  │
-│                 │◄──►│  Status Manager  │◄──►│  Manager        │
-│ - Progress Bars │    │                  │    │                 │
-│ - Status Display│    │ - Status Tracking│    │ - Chunking      │
-│ - Controls      │    │ - Event Emission │    │ - Transmission  │
-└─────────────────┘    │ - State Mgmt     │    │ - Connection    │
+│   UI Layer      │    │  Unified         │    │  Transfer       │
+│                 │◄──►│  Transfer        │◄──►│  Status         │
+│ - Progress Bars │    │  Manager         │    │  Manager        │
+│ - Status Display│    │                  │    │                 │
+│ - Controls      │    │ - File Queue     │    │ - Session Status│
+└─────────────────┘    │ - Chunkers       │    │ - Event System  │
+                       │ - Coordination   │    │ - State Mgmt    │
                        └──────────────────┘    └─────────────────┘
-                                │
-                       ┌──────────────────┐
-                       │  Transfer        │
-                       │  History Store   │
-                       │                  │
-                       │ - Persistence    │
-                       │ - Querying       │
-                       │ - Cleanup        │
-                       └──────────────────┘
+                                │                        │
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │  Session         │    │  Transfer       │
+                       │  Transfer        │    │  Status         │
+                       │  Status          │    │                 │
+                       │                  │    │ - File Progress │
+                       │ - Overall Progress│    │ - State Info    │
+                       │ - Current File   │    │ - Metrics       │
+                       │ - Session State  │    │ - Timestamps    │
+                       └──────────────────┘    └─────────────────┘
 ```
 
 ### Core Components
 
-#### 1. TransferStatusManager
+#### 1. UnifiedTransferManager
 
 Central component responsible for:
 
-- Maintaining transfer status for all active transfers
-- Calculating progress metrics and statistics
-- Managing transfer state transitions
+- Managing file queue and chunkers
+- Coordinating file transfers
+- Integrating with TransferStatusManager
+- Providing compatibility with existing code
+- Managing transfer lifecycle
+
+#### 2. TransferStatusManager
+
+Simplified component focused on:
+
+- Managing single SessionTransferStatus
+- Tracking current file transfer progress
+- Managing session state transitions
 - Emitting status change events
-- Coordinating with FileTransferManager
+- Providing session-level metrics
 
-#### 2. TransferStatus
+#### 3. SessionTransferStatus
 
-Data structure representing the current state of a file transfer:
+Data structure representing the entire transfer session:
+
+- Overall session progress aggregation
+- Current file transfer status
+- Session state management
+- File counts (total, completed, failed, pending)
+- Session-level timestamps and metrics
+
+#### 4. TransferStatus
+
+Data structure representing individual file transfer state:
 
 - Progress information (bytes sent, total size, percentage)
 - State information (pending, active, paused, completed, failed)
@@ -50,58 +72,75 @@ Data structure representing the current state of a file transfer:
 - Error information and retry counts
 - Timestamps for lifecycle events
 
-#### 3. TransferSession
+#### 5. StatusListener Interface
 
-Container for managing multiple related file transfers:
+Simplified event system for real-time status updates:
 
-- Session-level progress aggregation
-- Concurrent transfer coordination
-- Session state management
-- Resource allocation and limits
-
-#### 4. StatusEventEmitter
-
-Event system for real-time status updates:
-
-- Observer pattern implementation
-- Type-safe event definitions
+- Direct method-based notifications
+- File status change events
+- Session status change events
 - Asynchronous event delivery
-- Error handling for failed deliveries
 
 ## Components and Interfaces
 
-### TransferStatusManager Interface
+### UnifiedTransferManager Interface
 
 ```go
-type TransferStatusManager interface {
-    // Transfer lifecycle management
-    StartTransfer(filePath string, totalSize int64) (*TransferStatus, error)
+type UnifiedTransferManager interface {
+    // File management
+    AddFile(node *fileInfo.FileNode) error
+    GetAllFiles() []*fileInfo.FileNode
+    GetChunker(filePath string) (*Chunker, bool)
+    GetTotalBytes() int64
+
+    // Queue management
+    GetNextPendingFile() (*fileInfo.FileNode, bool)
+    MarkFileCompleted(filePath string) error
+    MarkFileFailed(filePath string) error
+    GetQueueStatus() (pending, completed, failed int)
+
+    // Transfer control (integrated with status manager)
+    StartTransfer(filePath string) error
     UpdateProgress(filePath string, bytesSent int64) error
     CompleteTransfer(filePath string) error
     FailTransfer(filePath string, err error) error
-    CancelTransfer(filePath string) error
-
-    // State management
     PauseTransfer(filePath string) error
     ResumeTransfer(filePath string) error
 
     // Status querying
-    GetTransferStatus(filePath string) (*TransferStatus, error)
-    GetAllTransfers() ([]*TransferStatus, error)
-    GetOverallProgress() (*OverallProgress, error)
-
-    // Session management
-    CreateSession(sessionID string) (*TransferSession, error)
-    GetSession(sessionID string) (*TransferSession, error)
-    CloseSession(sessionID string) error
+    GetSessionStatus() *SessionTransferStatus
+    GetFileStatus(filePath string) (*TransferStatus, error)
 
     // Event management
-    Subscribe(listener StatusEventListener) error
-    Unsubscribe(listener StatusEventListener) error
+    AddStatusListener(listener StatusListener)
 
-    // History and persistence
-    GetTransferHistory(filter *HistoryFilter) ([]*TransferRecord, error)
-    CleanupHistory(olderThan time.Time) error
+    // Resource management
+    Close() error
+}
+
+type TransferStatusManager interface {
+    // Session management
+    InitializeSession(sessionID string, totalFiles int, totalBytes int64) error
+    GetSessionStatus() (*SessionTransferStatus, error)
+    ResetSession()
+
+    // File transfer management
+    StartFileTransfer(filePath string, fileSize int64) (*TransferStatus, error)
+    UpdateFileProgress(bytesSent int64) error
+    CompleteCurrentFile() error
+    FailCurrentFile(err error) error
+    PauseCurrentFile() error
+    ResumeCurrentFile() error
+
+    // Status querying
+    GetCurrentFile() (*TransferStatus, error)
+    IsSessionActive() bool
+
+    // Event management
+    AddStatusListener(listener StatusListener)
+
+    // Cleanup
+    Clear()
 }
 ```
 
@@ -150,75 +189,69 @@ const (
 )
 ```
 
-### TransferSession Management
+### SessionTransferStatus Management
 
 ```go
-type TransferSession struct {
-    SessionID       string
-    CreatedAt       time.Time
-    UpdatedAt       time.Time
+type SessionTransferStatus struct {
+    // Session identification
+    SessionID string
 
-    // Session configuration
-    MaxConcurrent   int
-    RetryPolicy     *RetryPolicy
-    Priority        int
+    // File counts
+    TotalFiles     int
+    CompletedFiles int
+    FailedFiles    int
+    PendingFiles   int
 
-    // Transfer tracking
-    Transfers       map[string]*TransferStatus
-    ActiveCount     int
-    CompletedCount  int
-    FailedCount     int
-
-    // Aggregated metrics
+    // Byte progress
     TotalBytes      int64
-    BytesSent       int64
-    OverallRate     float64
-    EstimatedETA    time.Duration
+    BytesCompleted  int64
+    OverallProgress float64 // 0-100 percentage
 
-    // State
-    State           SessionState
-    LastError       error
+    // Current file being transferred
+    CurrentFile *TransferStatus
+
+    // Session timing
+    StartTime      time.Time
+    LastUpdateTime time.Time
+    CompletionTime *time.Time
+
+    // Session state
+    State StatusSessionState
 }
 
-type SessionState int
+type StatusSessionState int
 const (
-    SessionStateActive SessionState = iota
-    SessionStatePaused
-    SessionStateCompleted
-    SessionStateFailed
-    SessionStateCancelled
+    StatusSessionStateActive StatusSessionState = iota
+    StatusSessionStatePaused
+    StatusSessionStateCompleted
+    StatusSessionStateFailed
+    StatusSessionStateCancelled
 )
 ```
 
 ### Event System Design
 
 ```go
-type StatusEvent struct {
-    Type        EventType
-    Timestamp   time.Time
-    FilePath    string
-    SessionID   string
-    OldStatus   *TransferStatus
-    NewStatus   *TransferStatus
-    Error       error
-}
+type StatusListener interface {
+    // OnFileStatusChanged is called when an individual file's status changes
+    OnFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus)
 
-type EventType int
-const (
-    EventTransferStarted EventType = iota
-    EventTransferProgress
-    EventTransferPaused
-    EventTransferResumed
-    EventTransferCompleted
-    EventTransferFailed
-    EventTransferCancelled
-    EventSessionCompleted
-)
-
-type StatusEventListener interface {
-    OnStatusEvent(event *StatusEvent) error
+    // OnSessionStatusChanged is called when the overall session status changes
+    OnSessionStatusChanged(oldStatus, newStatus *SessionTransferStatus)
 }
 ```
+
+### Simplified Event Flow
+
+The event system has been simplified to use direct method calls instead of complex event structures:
+
+1. **File Status Changes**: When a file's transfer status changes (start, progress, complete, fail), the `OnFileStatusChanged` method is called on all registered listeners.
+
+2. **Session Status Changes**: When the overall session status changes (progress updates, completion, failure), the `OnSessionStatusChanged` method is called.
+
+3. **Asynchronous Delivery**: Events are delivered asynchronously using goroutines to prevent blocking the main transfer operations.
+
+4. **Error Handling**: Event delivery failures are handled gracefully without affecting transfer operations.
 
 ## Data Models
 

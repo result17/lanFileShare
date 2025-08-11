@@ -1,76 +1,270 @@
-# Testing Service Discovery Delay
+# Testing Guide
 
-This document outlines the steps to manually test and observe the delay in service discovery when a `receiver` service is shut down.
+This document outlines testing procedures for the lanFileSharer project, including service discovery, transfer status management, and end-to-end transfer workflows.
 
-## Objective
+## Service Discovery Testing
+
+### Testing Service Discovery Delay
+
+#### Objective
 
 To measure the time it takes for the `sender` to recognize that a `receiver` service has gone offline.
 
-## Prerequisites
+#### Prerequisites
 
 - You need two separate terminal windows.
-- You should be in the root directory of the `lanFileSharer/server` project.
+- You should be in the root directory of the `lanFileSharer` project.
 
-## Test Steps
+#### Test Steps
 
-### Step 1: Start the Log Monitor
+1. **Start the Log Monitor**
 
-In the first terminal, start monitoring the `debug.log` file. This file will show us the `sender`'s view of the network in real-time.
+   ```sh
+   # For Windows (using PowerShell)
+   Get-Content -Path debug.log -Wait
+
+   # For Linux or macOS
+   tail -f debug.log
+   ```
+
+2. **Start the Receiver**
+
+   ```sh
+   go run ./cmd/lanfilesharer receive
+   ```
+
+3. **Start the Sender**
+
+   ```sh
+   go run ./cmd/lanfilesharer send
+   ```
+
+4. **Observe the Discovery**
+
+   Look for log messages like:
+
+   ```
+   Discovery Update: Found 1 services.
+     - Service: My-PC-Receiver-xxxx, Addr: 192.168.1.10, Port: 8080
+   ```
+
+5. **Test Service Offline Detection**
+
+   - Shut down the receiver with `Ctrl+C`
+   - Measure time until log shows `Discovery Update: Found 0 services.`
+
+## Transfer Status Management Testing
+
+### Unit Testing
+
+Run the transfer status management unit tests:
 
 ```sh
-# For Windows (using PowerShell)
-Get-Content -Path debug.log -Wait
+# Test the unified transfer manager
+go test ./pkg/transfer -run TestUnifiedTransferManager -v
 
-# For Linux or macOS
-tail -f debug.log
+# Test the session status manager
+go test ./pkg/transfer -run TestTransferStatusManager -v
+
+# Test all transfer package components
+go test ./pkg/transfer -v
 ```
 
-Keep this terminal open and visible.
+### Integration Testing
 
-### Step 2: Start the Receiver
-
-In the second terminal, start the `receiver` process.
+Test the complete transfer workflow:
 
 ```sh
-go run ./cmd/lanfilesharer receive
+# Run integration tests
+go test ./pkg/transfer -run TestIntegration -v
+
+# Test with multiple files
+go test ./pkg/transfer -run TestMultipleFiles -v
 ```
 
-The receiver is now running and broadcasting its presence on the network.
+### Manual Transfer Testing
 
-### Step 3: Start the Sender
+#### Single File Transfer Test
 
-In a third terminal (or you can reuse the second one after starting the receiver), start the `sender` process.
+1. **Setup Test Environment**
+
+   ```sh
+   # Create test files
+   mkdir -p test_files
+   echo "Test content for single file" > test_files/single.txt
+   ```
+
+2. **Start Receiver**
+
+   ```sh
+   go run ./cmd/lanfilesharer receive
+   ```
+
+3. **Send File and Monitor Status**
+
+   ```sh
+   go run ./cmd/lanfilesharer send test_files/single.txt
+   ```
+
+4. **Verify Transfer Status**
+
+   - Monitor real-time progress updates
+   - Verify completion status
+   - Check transfer metrics (rate, ETA)
+
+#### Multi-File Transfer Test
+
+1. **Create Multiple Test Files**
+
+   ```sh
+   mkdir -p test_files
+   for i in {1..5}; do
+     dd if=/dev/zero of=test_files/file$i.dat bs=1M count=$i 2>/dev/null
+   done
+   ```
+
+2. **Test Session Management**
+
+   ```sh
+   go run ./cmd/lanfilesharer send test_files/
+   ```
+
+3. **Verify Session Status**
+
+   - Check overall session progress
+   - Monitor individual file status
+   - Verify session completion
+
+### Performance Testing
+
+#### High-Throughput Testing
 
 ```sh
-go run ./cmd/lanfilesharer send
+# Create large test file
+dd if=/dev/zero of=large_test.dat bs=100M count=1
+
+# Test transfer performance
+go run ./cmd/lanfilesharer send large_test.dat
 ```
 
-### Step 4: Observe the Discovery
+#### Concurrent Transfer Testing
 
-Switch back to your **first terminal** (the log monitor). You should see log messages from the sender appearing every 5 seconds. Initially, it will find 0 services, but after a few seconds, it should discover the receiver.
-
-The log output should look something like this:
-
-```
-Discovery Update: Found 1 services.
-  - Service: My-PC-Receiver-xxxx, Addr: 192.168.1.10, Port: 8080
+```sh
+# Test multiple concurrent sessions (if supported)
+go test ./pkg/transfer -run TestConcurrent -v
 ```
 
-Wait for this message to appear. This confirms that the sender has successfully discovered the receiver.
+### Error Handling Testing
 
-### Step 5: Shut Down the Receiver and Measure the Delay
+#### Network Interruption Test
 
-1.  Go to the **second terminal** where the `receiver` is running.
-2.  Press `Ctrl+C` to shut down the receiver process.
-3.  **Immediately** switch back to the **first terminal** (the log monitor) and start a stopwatch or simply watch the clock.
-4.  Continue to observe the log output. The sender will **continue to report "Found 1 services"** for a period of time.
-5.  Wait until the log message changes to **`Discovery Update: Found 0 services.`**.
-6.  **Record the time** that elapsed between shutting down the receiver and the log message changing.
+1. Start a file transfer
+2. Disconnect network interface during transfer
+3. Reconnect network
+4. Verify transfer recovery
 
-## Expected Result (The Problem)
+#### Disk Space Test
 
-You will likely observe a significant delay, potentially **several minutes**, before the sender's log reflects that the receiver has disappeared. This delay is the problem we aim to solve.
+1. Fill up disk space on receiver
+2. Attempt file transfer
+3. Verify proper error handling
 
-## After Implementing a Fix
+### Status Event Testing
 
-After a fix (like the active health check) is implemented, you can run this test again. The expected result would be that the sender detects the offline status much faster, ideally within a few seconds.
+#### Event Listener Test
+
+```sh
+# Test status event notifications
+go test ./pkg/transfer -run TestStatusListener -v
+```
+
+#### Real-time Updates Test
+
+1. Start a transfer with status monitoring
+2. Verify events are emitted for:
+   - Transfer start
+   - Progress updates
+   - Transfer completion
+   - Error conditions
+
+## Test Data Management
+
+### Creating Test Files
+
+```sh
+# Small files for quick testing
+echo "Small test file" > small.txt
+
+# Medium files for progress testing
+dd if=/dev/zero of=medium.dat bs=1M count=10
+
+# Large files for performance testing
+dd if=/dev/zero of=large.dat bs=100M count=1
+
+# Binary files for integrity testing
+dd if=/dev/urandom of=binary.dat bs=1M count=5
+```
+
+### Cleanup Test Environment
+
+```sh
+# Remove test files
+rm -rf test_files/
+rm -f *.dat *.txt debug.log
+```
+
+## Automated Testing
+
+### Running All Tests
+
+```sh
+# Run all tests with coverage
+go test ./... -cover
+
+# Run tests with race detection
+go test ./... -race
+
+# Run tests with verbose output
+go test ./... -v
+```
+
+### Continuous Integration Testing
+
+The project includes automated testing for:
+
+- Unit tests for all components
+- Integration tests for transfer workflows
+- Performance benchmarks
+- Error handling scenarios
+
+### Test Coverage
+
+Check test coverage:
+
+```sh
+# Generate coverage report
+go test ./pkg/transfer -coverprofile=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+```
+
+## Expected Results
+
+### Service Discovery
+
+- Service discovery should complete within 2-5 seconds
+- Service offline detection should occur within 10-30 seconds
+- No false positives or negatives in service detection
+
+### Transfer Status Management
+
+- Real-time progress updates with <100ms latency
+- Accurate transfer rate calculations (within 5% of actual)
+- Proper state transitions and error handling
+- Event notifications delivered reliably
+
+### Performance
+
+- Transfer rates should approach network bandwidth limits
+- Memory usage should scale linearly with file count
+- CPU usage should remain reasonable during transfers
+- No memory leaks during long-running transfers
