@@ -22,7 +22,7 @@ type CommonConnection interface {
 
 type SenderConnection interface {
 	CommonConnection
-	Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error
+	Establish(ctx context.Context, fileNodes *transfer.FileStructureManager) error
 	CreateDataChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
 	SendFiles(ctx context.Context, files []fileInfo.FileNode, serviceID string) error
 }
@@ -151,7 +151,7 @@ func (a *WebrtcAPI) NewReceiverConnection(config Config) (ReceiverConnection, er
 	}, nil
 }
 
-func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNode) error {
+func (c *SenderConn) Establish(ctx context.Context, fsm *transfer.FileStructureManager) error {
 	if c.signaler == nil {
 		err := errors.New("signaler is not set for SenderConn")
 		return err
@@ -171,7 +171,7 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 		return fmt.Errorf("failed to create file structure signer: %w", err)
 	}
 
-	signed, err := fileStructureSigner.SignFileNodes(fileNodes)
+	signed, err := fileStructureSigner.SignFileStructureManager(fsm)
 	if err != nil {
 		return fmt.Errorf("failed to sign file structure: %w", err)
 	}

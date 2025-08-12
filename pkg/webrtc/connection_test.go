@@ -9,6 +9,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/pkg/crypto"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -212,7 +213,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		}()
 
 		// This will create offer, send it, and wait for the answer
-		if err := senderConn.Establish(ctx, nil); err != nil {
+		// Create empty FileStructureManager for testing
+		emptyFSM := transfer.NewFileStructureManager()
+		if err := senderConn.Establish(ctx, emptyFSM); err != nil {
 			select {
 			case errChan <- fmt.Errorf("sender failed to establish connection: %w", err):
 			default:

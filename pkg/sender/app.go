@@ -16,6 +16,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 	"golang.org/x/sync/errgroup"
 )
@@ -31,6 +32,10 @@ type App struct {
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
+	
+	// File structure management
+	fileStructure   *transfer.FileStructureManager
+	structureMu     sync.RWMutex // Protect file structure access
 }
 
 // NewApp creates a new sender application instance.
@@ -46,6 +51,7 @@ func NewApp(adapter discovery.Adapter) *App {
 		appEvents:       make(chan appevents.AppEvent),
 		webrtcAPI:       webrtcAPI,
 		transferTimeout: 2 * time.Minute,
+		fileStructure:   transfer.NewFileStructureManager(),
 	}
 }
 
@@ -57,6 +63,38 @@ func (a *App) UIMessages() <-chan tea.Msg {
 // AppEvents returns a write-only channel for the TUI to send events to the app.
 func (a *App) AppEvents() chan<- appevents.AppEvent {
 	return a.appEvents
+}
+
+// PrepareFiles adds files to the file structure manager for sending
+func (a *App) PrepareFiles(files []fileInfo.FileNode) error {
+	a.structureMu.Lock()
+	defer a.structureMu.Unlock()
+	
+	// Clear existing files
+	a.fileStructure.Clear()
+	
+	// Add new files
+	for _, file := range files {
+		if err := a.fileStructure.AddFileNode(&file); err != nil {
+			return fmt.Errorf("failed to add file %s: %w", file.Path, err)
+		}
+	}
+	
+	slog.Info("Files prepared for sending", 
+		"fileCount", a.fileStructure.GetFileCount(),
+		"dirCount", a.fileStructure.GetDirCount(),
+		"totalSize", a.fileStructure.GetTotalSize())
+	
+	return nil
+}
+
+// GetFileStructure returns a copy of the current file structure manager
+func (a *App) GetFileStructure() *transfer.FileStructureManager {
+	a.structureMu.RLock()
+	defer a.structureMu.RUnlock()
+	
+	// Return the file structure manager (it's thread-safe internally)
+	return a.fileStructure
 }
 
 // Run starts the application's main event loop.
@@ -115,6 +153,11 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 // StartSendProcess is the main entry point for starting a file transfer.
 func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
 	task := func(taskCtx context.Context) error {
+		// Prepare files in the structure manager
+		if err := a.PrepareFiles(files); err != nil {
+			return fmt.Errorf("failed to prepare files: %w", err)
+		}
+		
 		// Use the shorter of the two timeouts: main context or transfer timeout
 		transferCtx, cancel := context.WithTimeout(taskCtx, a.transferTimeout)
 		defer cancel()
@@ -137,7 +180,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		}()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
-		if err := webrtcConn.Establish(transferCtx, files); err != nil {
+		if err := webrtcConn.Establish(transferCtx, a.fileStructure); err != nil {
 			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
 
