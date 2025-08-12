@@ -32,9 +32,16 @@ func (ftm *FileTransferManager) AddFileNode(node *fileInfo.FileNode) error {
 	if node == nil {
 		return fmt.Errorf("node cannot be nil")
 	}
-	if len(ftm.chunkers) >= MaxSupportedFiles {
+	
+	// Check file limit with lock protection
+	ftm.mu.RLock()
+	currentCount := len(ftm.chunkers)
+	ftm.mu.RUnlock()
+	
+	if currentCount >= MaxSupportedFiles {
         return fmt.Errorf("file limit exceeded: maximum %d files supported", MaxSupportedFiles)
     }
+	
 	if node.IsDir {
 		return ftm.processDirConcurrent(node)
 	}

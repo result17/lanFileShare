@@ -336,9 +336,12 @@ func (utm *UnifiedTransferManager) StartTransfer(filePath string) error {
 	// Update session totals if this is the first time we're seeing this file
 	utm.updateSessionTotals()
 	
-	// Notify listeners
+	// Create copy for session status notification to avoid race conditions
+	newSessionStatus := *utm.sessionStatus
+	
+	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, oldCurrentFile, currentFile)
-	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
+	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 	
 	return nil
 }
@@ -368,9 +371,13 @@ func (utm *UnifiedTransferManager) UpdateProgress(filePath string, bytesSent int
 	utm.sessionStatus.OverallProgress = utm.sessionStatus.GetSessionProgressPercentage()
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	
-	// Notify listeners
-	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, utm.sessionStatus.CurrentFile)
-	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
+	// Create copies for notification to avoid race conditions
+	newFileStatus := *utm.sessionStatus.CurrentFile
+	newSessionStatus := *utm.sessionStatus
+	
+	// Notify listeners with copies
+	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &newFileStatus)
+	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 	
 	return nil
 }
@@ -423,9 +430,12 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 	utm.completedFiles = append(utm.completedFiles, filePath)
 	utm.queueMu.Unlock()
 	
-	// Notify listeners
+	// Create copy for session status notification to avoid race conditions
+	newSessionStatus := *utm.sessionStatus
+	
+	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, completedFile)
-	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
+	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 	
 	return nil
 }
@@ -477,9 +487,12 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 	utm.failedFiles = append(utm.failedFiles, filePath)
 	utm.queueMu.Unlock()
 	
-	// Notify listeners
+	// Create copy for session status notification to avoid race conditions
+	newSessionStatus := *utm.sessionStatus
+	
+	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, failedFile)
-	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
+	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 	
 	return nil
 }
@@ -504,9 +517,13 @@ func (utm *UnifiedTransferManager) PauseTransfer(filePath string) error {
 	utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	
-	// Notify listeners
-	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, utm.sessionStatus.CurrentFile)
-	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
+	// Create copies for notification to avoid race conditions
+	newFileStatus := *utm.sessionStatus.CurrentFile
+	newSessionStatus := *utm.sessionStatus
+	
+	// Notify listeners with copies
+	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &newFileStatus)
+	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 	
 	return nil
 }
@@ -531,9 +548,13 @@ func (utm *UnifiedTransferManager) ResumeTransfer(filePath string) error {
 	utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	
-	// Notify listeners
-	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, utm.sessionStatus.CurrentFile)
-	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
+	// Create copies for notification to avoid race conditions
+	newFileStatus := *utm.sessionStatus.CurrentFile
+	newSessionStatus := *utm.sessionStatus
+	
+	// Notify listeners with copies
+	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &newFileStatus)
+	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 	
 	return nil
 }

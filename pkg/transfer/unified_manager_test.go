@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -195,6 +196,7 @@ func TestUnifiedTransferManager_MultipleFiles(t *testing.T) {
 type testStatusListener struct {
 	fileEvents    []string  // Records file status change events as strings
 	sessionEvents []string  // Records session status change events as strings
+	mu            sync.Mutex // Protect concurrent access to slices
 }
 
 func (tsl *testStatusListener) OnFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
@@ -209,6 +211,9 @@ func (tsl *testStatusListener) OnFileStatusChanged(filePath string, oldStatus, n
 	} else {
 		newState = "nil"
 	}
+	
+	tsl.mu.Lock()
+	defer tsl.mu.Unlock()
 	tsl.fileEvents = append(tsl.fileEvents, fmt.Sprintf("%s: %s -> %s", filePath, oldState, newState))
 }
 
@@ -224,7 +229,41 @@ func (tsl *testStatusListener) OnSessionStatusChanged(oldStatus, newStatus *Sess
 	} else {
 		newState = "nil"
 	}
+	
+	tsl.mu.Lock()
+	defer tsl.mu.Unlock()
 	tsl.sessionEvents = append(tsl.sessionEvents, fmt.Sprintf("session: %s -> %s", oldState, newState))
+}
+
+// Thread-safe methods to access events
+func (tsl *testStatusListener) GetFileEvents() []string {
+	tsl.mu.Lock()
+	defer tsl.mu.Unlock()
+	// Return a copy to avoid race conditions
+	events := make([]string, len(tsl.fileEvents))
+	copy(events, tsl.fileEvents)
+	return events
+}
+
+func (tsl *testStatusListener) GetSessionEvents() []string {
+	tsl.mu.Lock()
+	defer tsl.mu.Unlock()
+	// Return a copy to avoid race conditions
+	events := make([]string, len(tsl.sessionEvents))
+	copy(events, tsl.sessionEvents)
+	return events
+}
+
+func (tsl *testStatusListener) GetFileEventCount() int {
+	tsl.mu.Lock()
+	defer tsl.mu.Unlock()
+	return len(tsl.fileEvents)
+}
+
+func (tsl *testStatusListener) GetSessionEventCount() int {
+	tsl.mu.Lock()
+	defer tsl.mu.Unlock()
+	return len(tsl.sessionEvents)
 }
 
 func TestUnifiedTransferManager_StatusListener(t *testing.T) {
@@ -258,7 +297,7 @@ func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	
 	// Check that events were received
-	if len(listener.fileEvents) == 0 {
+	if listener.GetFileEventCount() == 0 {
 		t.Error("Expected file status events")
 	}
 	
@@ -277,7 +316,7 @@ func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 	// Give time for async events
 	time.Sleep(10 * time.Millisecond)
 	
-	if len(listener.sessionEvents) == 0 {
+	if listener.GetSessionEventCount() == 0 {
 		t.Error("Expected session status events")
 	}
 }
