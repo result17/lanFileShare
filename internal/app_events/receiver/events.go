@@ -30,3 +30,9 @@ type TransferFinishedMsg struct {
 	appevents.AppUIMessage
 	Err error // nil if transfer was successful
 }
+
+// StatusUpdateMsg provides status updates during file transfer
+type StatusUpdateMsg struct {
+	appevents.AppUIMessage
+	Message string
+}

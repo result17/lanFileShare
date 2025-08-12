@@ -21,6 +21,7 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
@@ -37,6 +38,10 @@ type App struct {
 	activeConn           webrtcPkg.ReceiverConnection
 	connMu               sync.Mutex
 	errChan              chan error
+	
+	// File reception management
+	fileReceiver         *FileReceiver
+	receiverMu           sync.Mutex
 }
 
 // NewApp creates a new receiver application instance.
@@ -182,6 +187,33 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		}
 	})
 
+	// Set up data channel handler for file reception
+	receiverConn.Peer().OnDataChannel(func(dc *webrtc.DataChannel) {
+		slog.Info("Data channel opened for file reception", "label", dc.Label())
+		
+		dc.OnOpen(func() {
+			slog.Info("File transfer data channel opened")
+			a.uiMessages <- receiver.StatusUpdateMsg{Message: "Starting file reception..."}
+		})
+		
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			if err := a.handleFileChunk(msg.Data); err != nil {
+				slog.Error("Failed to handle file chunk", "error", err)
+				a.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Error receiving file: %v", err)}
+			}
+		})
+		
+		dc.OnError(func(err error) {
+			slog.Error("Data channel error", "error", err)
+			a.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Data channel error: %v", err)}
+		})
+		
+		dc.OnClose(func() {
+			slog.Info("File transfer data channel closed")
+			a.uiMessages <- receiver.StatusUpdateMsg{Message: "File transfer completed"}
+		})
+	})
+
 	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 	if err != nil {
 		a.sendAndLogError("Failed to create answer", err)
@@ -291,4 +323,147 @@ func (a *App) setActiveConn(conn webrtcPkg.ReceiverConnection) {
 			slog.Error("Failed to close old connection", "error", err)
 		}
 	}
+}
+// FileReceiver manages the reception and reconstruction of files
+type FileReceiver struct {
+	serializer    transfer.MessageSerializer
+	currentFiles  map[string]*FileReception // filePath -> FileReception
+	outputDir     string
+	mu            sync.RWMutex
+}
+
+// FileReception tracks the state of receiving a single file
+type FileReception struct {
+	FilePath     string
+	FileName     string
+	TotalSize    int64
+	ReceivedSize int64
+	ExpectedHash string
+	File         *os.File
+	Chunks       map[uint32][]byte // sequenceNo -> data
+	LastSequence uint32
+	IsComplete   bool
+}
+
+// NewFileReceiver creates a new file receiver
+func NewFileReceiver(outputDir string) *FileReceiver {
+	return &FileReceiver{
+		serializer:   transfer.NewJSONSerializer(),
+		currentFiles: make(map[string]*FileReception),
+		outputDir:    outputDir,
+	}
+}
+
+// handleFileChunk processes incoming file chunk messages
+func (a *App) handleFileChunk(data []byte) error {
+	a.receiverMu.Lock()
+	defer a.receiverMu.Unlock()
+	
+	// Initialize file receiver if not exists
+	if a.fileReceiver == nil {
+		// Use current directory as default output directory
+		outputDir, err := os.Getwd()
+		if err != nil {
+			outputDir = "."
+		}
+		a.fileReceiver = NewFileReceiver(outputDir)
+	}
+	
+	return a.fileReceiver.ProcessChunk(data)
+}
+
+// ProcessChunk processes a single chunk message
+func (fr *FileReceiver) ProcessChunk(data []byte) error {
+	// Deserialize the chunk message
+	chunkMsg, err := fr.serializer.Unmarshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal chunk message: %w", err)
+	}
+	
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	
+	// Get or create file reception
+	fileReception, exists := fr.currentFiles[chunkMsg.FileID]
+	if !exists {
+		// Create new file reception
+		fileReception = &FileReception{
+			FilePath:     chunkMsg.FileID,
+			FileName:     chunkMsg.FileName,
+			TotalSize:    chunkMsg.TotalSize,
+			ExpectedHash: chunkMsg.ExpectedHash,
+			Chunks:       make(map[uint32][]byte),
+		}
+		
+		// Create output file
+		outputPath := fmt.Sprintf("%s/%s", fr.outputDir, chunkMsg.FileName)
+		file, err := os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("failed to create output file %s: %w", outputPath, err)
+		}
+		fileReception.File = file
+		fr.currentFiles[chunkMsg.FileID] = fileReception
+		
+		slog.Info("Started receiving file", "fileName", chunkMsg.FileName, "totalSize", chunkMsg.TotalSize)
+	}
+	
+	// Store the chunk
+	fileReception.Chunks[chunkMsg.SequenceNo] = chunkMsg.Data
+	fileReception.ReceivedSize += int64(len(chunkMsg.Data))
+	
+	// Write sequential chunks to file
+	if err := fr.writeSequentialChunks(fileReception); err != nil {
+		return fmt.Errorf("failed to write chunks: %w", err)
+	}
+	
+	// Check if file is complete
+	if fileReception.ReceivedSize >= fileReception.TotalSize {
+		if err := fr.completeFile(fileReception); err != nil {
+			return fmt.Errorf("failed to complete file: %w", err)
+		}
+		delete(fr.currentFiles, chunkMsg.FileID)
+		slog.Info("File reception completed", "fileName", fileReception.FileName)
+	}
+	
+	return nil
+}
+
+// writeSequentialChunks writes chunks to file in sequence
+func (fr *FileReceiver) writeSequentialChunks(fileReception *FileReception) error {
+	for {
+		nextSeq := fileReception.LastSequence + 1
+		chunkData, exists := fileReception.Chunks[nextSeq]
+		if !exists {
+			break // No more sequential chunks available
+		}
+		
+		// Write chunk to file
+		if _, err := fileReception.File.Write(chunkData); err != nil {
+			return fmt.Errorf("failed to write chunk %d: %w", nextSeq, err)
+		}
+		
+		// Remove written chunk from memory
+		delete(fileReception.Chunks, nextSeq)
+		fileReception.LastSequence = nextSeq
+	}
+	
+	return nil
+}
+
+// completeFile finalizes the file reception
+func (fr *FileReceiver) completeFile(fileReception *FileReception) error {
+	// Close the file
+	if err := fileReception.File.Close(); err != nil {
+		return fmt.Errorf("failed to close file: %w", err)
+	}
+	
+	// TODO: Verify file hash if needed
+	// if fileReception.ExpectedHash != "" {
+	//     if err := fr.verifyFileHash(fileReception); err != nil {
+	//         return fmt.Errorf("file hash verification failed: %w", err)
+	//     }
+	// }
+	
+	fileReception.IsComplete = true
+	return nil
 }

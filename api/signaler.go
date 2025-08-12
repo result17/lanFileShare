@@ -94,7 +94,7 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 	}()
 	scanner := bufio.NewScanner(resp.Body)
 	var currentEvent string
-	var dataBuffer *bytes.Buffer
+	var dataBuffer = &bytes.Buffer{}
 	var answerReceived, rejectionReceived bool
 
 	for scanner.Scan() {
