@@ -190,6 +190,7 @@ func CreateSignedFileStructureFromManager(fsm *transfer.FileStructureManager) (*
 	
 	return signer.SignFileStructureManager(fsm)
 }
+
 // VerifyFileStructure verifies the digital signature of a SignedFileStructure
 func VerifyFileStructure(signedStructure *SignedFileStructure) error {
 	if signedStructure == nil {

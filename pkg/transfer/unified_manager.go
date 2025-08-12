@@ -8,15 +8,16 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
-// UnifiedTransferManager focuses on transfer management only
-// It manages file queue and chunkers, and tracks session status
+// UnifiedTransferManager combines file structure management with transfer control
+// It uses FileStructureManager for file organization and provides transfer management
 type UnifiedTransferManager struct {
 	// Core components
-	session *TransferSession // Reuse existing session from session.go
-	config  *TransferConfig  // Reuse existing config from config.go
+	session   *TransferSession        // Session management
+	config    *TransferConfig         // Configuration
+	structure *FileStructureManager   // File structure organization
 	
-	// File and chunk management (no status here)
-	files    map[string]*ManagedFile // Only FileNode + Chunker
+	// Chunking management
+	chunkers map[string]*Chunker      // File path -> Chunker
 	filesMu  sync.RWMutex
 	
 	// Transfer queue management
@@ -34,14 +35,8 @@ type UnifiedTransferManager struct {
 	eventsMu  sync.RWMutex
 }
 
-// ManagedFile only contains file and chunking information
-type ManagedFile struct {
-	// File information (from fileInfo.FileNode)
-	Node *fileInfo.FileNode
-	
-	// Chunking (from Chunker)
-	Chunker *Chunker
-}
+// ManagedFile is no longer needed since we use FileStructureManager
+// and separate chunkers map
 
 
 
@@ -81,7 +76,8 @@ func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfi
 	return &UnifiedTransferManager{
 		session:        session,
 		config:         config,
-		files:          make(map[string]*ManagedFile),
+		structure:      NewFileStructureManager(),
+		chunkers:       make(map[string]*Chunker),
 		pendingFiles:   make([]string, 0),
 		completedFiles: make([]string, 0),
 		failedFiles:    make([]string, 0),
@@ -113,9 +109,14 @@ func (utm *UnifiedTransferManager) addSingleFile(node *fileInfo.FileNode) error 
 	defer utm.filesMu.Unlock()
 	defer utm.queueMu.Unlock()
 	
-	// Check if file already exists
-	if _, exists := utm.files[node.Path]; exists {
+	// Check if file already exists in structure
+	if _, exists := utm.structure.GetFile(node.Path); exists {
 		return ErrTransferAlreadyExists
+	}
+	
+	// Add file to structure manager
+	if err := utm.structure.AddFileNode(node); err != nil {
+		return fmt.Errorf("failed to add file to structure: %w", err)
 	}
 	
 	// Create chunker for the file
@@ -124,24 +125,23 @@ func (utm *UnifiedTransferManager) addSingleFile(node *fileInfo.FileNode) error 
 		return fmt.Errorf("failed to create chunker: %w", err)
 	}
 	
-	// Create managed file
-	managedFile := &ManagedFile{
-		Node:    node,
-		Chunker: chunker,
-	}
-	
-	utm.files[node.Path] = managedFile
+	// Store chunker
+	utm.chunkers[node.Path] = chunker
 	utm.pendingFiles = append(utm.pendingFiles, node.Path)
 	
 	// Update session status
 	utm.statusMu.Lock()
-	utm.sessionStatus.TotalFiles = len(utm.files)
+	utm.sessionStatus.TotalFiles = utm.GetFileCount()
 	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
 	utm.sessionStatus.TotalBytes += node.Size
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	utm.statusMu.Unlock()
 	
 	return nil
+}
+
+func  (utm *UnifiedTransferManager) GetFileCount() int {
+	return  utm.structure.GetFileCount()
 }
 
 // addDirectory recursively adds all files in a directory to the transfer queue
@@ -171,15 +171,13 @@ func (utm *UnifiedTransferManager) GetNextPendingFile() (*fileInfo.FileNode, boo
 	
 	filePath := utm.pendingFiles[0]
 	
-	utm.filesMu.RLock()
-	defer utm.filesMu.RUnlock()
-	
-	managedFile, exists := utm.files[filePath]
+	// Get file from structure manager
+	fileNode, exists := utm.structure.GetFile(filePath)
 	if !exists {
 		return nil, false
 	}
 	
-	return managedFile.Node, true
+	return fileNode, true
 }
 
 // MarkFileCompleted moves a file from pending to completed
@@ -247,38 +245,18 @@ func (utm *UnifiedTransferManager) GetChunker(filePath string) (*Chunker, bool) 
 	utm.filesMu.RLock()
 	defer utm.filesMu.RUnlock()
 	
-	managedFile, exists := utm.files[filePath]
-	if !exists {
-		return nil, false
-	}
-	
-	return managedFile.Chunker, true
+	chunker, exists := utm.chunkers[filePath]
+	return chunker, exists
 }
 
 // GetAllFiles returns all file nodes (maintains compatibility)
 func (utm *UnifiedTransferManager) GetAllFiles() []*fileInfo.FileNode {
-	utm.filesMu.RLock()
-	defer utm.filesMu.RUnlock()
-	
-	files := make([]*fileInfo.FileNode, 0, len(utm.files))
-	for _, managedFile := range utm.files {
-		files = append(files, managedFile.Node)
-	}
-	
-	return files
+	return utm.structure.GetAllFiles()
 }
 
 // GetTotalBytes returns the total bytes of all files
 func (utm *UnifiedTransferManager) GetTotalBytes() int64 {
-	utm.filesMu.RLock()
-	defer utm.filesMu.RUnlock()
-	
-	var total int64
-	for _, managedFile := range utm.files {
-		total += managedFile.Node.Size
-	}
-	
-	return total
+	return utm.structure.GetTotalSize()
 }
 
 // Close cleans up all resources
@@ -289,14 +267,15 @@ func (utm *UnifiedTransferManager) Close() error {
 	defer utm.queueMu.Unlock()
 	
 	// Close all chunkers
-	for _, managedFile := range utm.files {
-		if managedFile.Chunker != nil {
-			managedFile.Chunker.Close()
+	for _, chunker := range utm.chunkers {
+		if chunker != nil {
+			chunker.Close()
 		}
 	}
 	
 	// Clear all data
-	utm.files = make(map[string]*ManagedFile)
+	utm.structure.Clear()
+	utm.chunkers = make(map[string]*Chunker)
 	utm.pendingFiles = make([]string, 0)
 	utm.completedFiles = make([]string, 0)
 	utm.failedFiles = make([]string, 0)
@@ -319,10 +298,14 @@ func (utm *UnifiedTransferManager) GetSessionStatus() *SessionTransferStatus {
 	return &statusCopy
 }
 
+func (utm *UnifiedTransferManager) GetFile(path string) (*fileInfo.FileNode, bool) {
+	return utm.structure.GetFile(path)
+}
+
 // StartTransfer starts transferring a file and updates session status
 func (utm *UnifiedTransferManager) StartTransfer(filePath string) error {
 	utm.filesMu.RLock()
-	managedFile, exists := utm.files[filePath]
+	managedFile, exists := utm.GetFile(filePath)
 	utm.filesMu.RUnlock()
 	
 	if !exists {
@@ -337,8 +320,8 @@ func (utm *UnifiedTransferManager) StartTransfer(filePath string) error {
 		FilePath:       filePath,
 		SessionID:      utm.sessionStatus.SessionID,
 		State:          TransferStateActive,
-		TotalBytes:     managedFile.Node.Size,
-		FileSize:       managedFile.Node.Size,
+		TotalBytes:     managedFile.Size,
+		FileSize:       managedFile.Size,
 		StartTime:      time.Now(),
 		LastUpdateTime: time.Now(),
 		MaxRetries:     utm.config.DefaultRetryPolicy.MaxRetries,
@@ -358,6 +341,10 @@ func (utm *UnifiedTransferManager) StartTransfer(filePath string) error {
 	go utm.notifySessionStatusChanged(&oldSessionStatus, utm.sessionStatus)
 	
 	return nil
+}
+
+func (utm *UnifiedTransferManager) GetTotalSize() int64 {
+	return utm.structure.GetTotalSize()
 }
 
 // UpdateProgress updates the progress of the current file transfer
@@ -615,7 +602,7 @@ func (utm *UnifiedTransferManager) AddStatusListener(listener StatusListener) {
 
 func (utm *UnifiedTransferManager) updateSessionTotals() {
 	// This method assumes statusMu is already locked
-	utm.sessionStatus.TotalFiles = len(utm.files)
+	utm.sessionStatus.TotalFiles = utm.GetFileCount()
 	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
 	utm.sessionStatus.TotalBytes = utm.GetTotalBytes()
 }

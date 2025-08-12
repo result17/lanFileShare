@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/pion/ice/v4"
@@ -170,7 +171,7 @@ func (c *SenderConn) Establish(ctx context.Context, fileNodes []fileInfo.FileNod
 		return fmt.Errorf("failed to create file structure signer: %w", err)
 	}
 
-	signed, err := fileStructureSigner.SignFileStructureManager(fileNodes)
+	signed, err := fileStructureSigner.SignFileNodes(fileNodes)
 	if err != nil {
 		return fmt.Errorf("failed to sign file structure: %w", err)
 	}
@@ -212,16 +213,18 @@ func (c *SenderConn) CreateDataChannel(label string, options *webrtc.DataChannel
 }
 
 func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, serviceID string) error {
-	ftm := transfer.NewFileTransferManager()
+	// Create unified transfer manager
+	utm := transfer.NewUnifiedTransferManager(serviceID)
 	defer func() {
-		if err := ftm.Close(); err != nil {
-			slog.Error("Failed to close file transfer manager", "error", err)
+		if err := utm.Close(); err != nil {
+			slog.Error("Failed to close unified transfer manager", "error", err)
 		}
 	}()
 
+	// Add files to the transfer manager
 	for _, file := range files {
-		if err := ftm.AddFileNode(&file); err != nil {
-			return fmt.Errorf("failed to add file node: %w", err)
+		if err := utm.AddFile(&file); err != nil {
+			return fmt.Errorf("failed to add file: %w", err)
 		}
 	}
 
@@ -246,28 +249,132 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 		channelError <- err
 	})
 
-	select {
-	case <- channelReady:
-		session := transfer.NewTransferSession(serviceID)
-		slog.Info("Sending files", "serviceID", serviceID)
-		// begin transfer
-	case err := <- channelError:
-		return fmt.Errorf("failed to open data channel: %w", err)
-	case <- ctx.Done():
-		return ctx.Err()
-	}
-
-
+	// Ensure data channel is closed when function exits
 	defer func() {
 		if err := dataChannel.Close(); err != nil {
 			slog.Error("Failed to close data channel", "error", err)
 		}
+		// Clean up channels if they weren't closed
 		if !isChannelReadyClose {
 			close(channelReady)
 		}
-	} ()
+	}()
 
+	select {
+	case <-channelReady:
+		slog.Info("Data channel ready, starting file transfer", "serviceID", serviceID)
+		return c.performFileTransfer(ctx, dataChannel, utm, serviceID)
+	case err := <-channelError:
+		return fmt.Errorf("data channel error: %w", err)
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled while waiting for data channel: %w", ctx.Err())
+	}
+}
+
+func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrtc.DataChannel, utm *transfer.UnifiedTransferManager, serviceID string) error {
+	slog.Info("Starting file transfer process")
+	
+	// Process files one by one
+	for {
+		// Get next pending file
+		fileNode, hasMore := utm.GetNextPendingFile()
+		if !hasMore {
+			slog.Info("All files have been processed")
+			break
+		}
+		
+		slog.Info("Starting transfer for file", "path", fileNode.Path, "size", fileNode.Size)
+		
+		// Start transfer for this file
+		if err := utm.StartTransfer(fileNode.Path); err != nil {
+			slog.Error("Failed to start transfer", "file", fileNode.Path, "error", err)
+			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
+				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
+			}
+			continue
+		}
+		
+		// Get chunker for this file
+		chunker, exists := utm.GetChunker(fileNode.Path)
+		if !exists {
+			err := fmt.Errorf("chunker not found for file: %s", fileNode.Path)
+			slog.Error("Chunker not found", "file", fileNode.Path)
+			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
+				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
+			}
+			continue
+		}
+		
+		// Transfer file chunks
+		if err := c.transferFileChunks(ctx, dataChannel, utm, fileNode, chunker, serviceID); err != nil {
+			slog.Error("Failed to transfer file chunks", "file", fileNode.Path, "error", err)
+			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
+				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
+			}
+			continue
+		}
+		
+		// Mark file as completed
+		if err := utm.CompleteTransfer(fileNode.Path); err != nil {
+			slog.Error("Failed to mark file as completed", "file", fileNode.Path, "error", err)
+			continue
+		}
+		
+		slog.Info("File transfer completed successfully", "file", fileNode.Path)
+	}
+	
+	slog.Info("File transfer process completed")
 	return nil
+}
+
+func (c *SenderConn) transferFileChunks(ctx context.Context, dataChannel *webrtc.DataChannel, utm *transfer.UnifiedTransferManager, fileNode *fileInfo.FileNode, chunker *transfer.Chunker, serviceID string) error {
+	var totalBytesSent int64 = 0
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			// Get next chunk
+			chunk, err := chunker.Next()
+			if err != nil {
+				if err == io.EOF {
+					// File transfer completed
+					return nil
+				}
+				return fmt.Errorf("failed to get next chunk: %w", err)
+			}
+			
+			// Create chunk message using the correct ChunkMessage structure
+			chunkMsg := &transfer.ChunkMessage{
+				Type:         transfer.ChunkData,        // Use ChunkData message type
+				Session:      *transfer.NewTransferSession(serviceID), // Create session with serviceID
+				FileID:       fileNode.Path,             // Use path as file ID
+				FileName:     fileNode.Name,
+				SequenceNo:   chunk.SequenceNo,
+				Data:         chunk.Data,
+				ChunkHash:    chunk.Hash,
+				TotalSize:    fileNode.Size,
+				ExpectedHash: fileNode.Checksum,
+			}
+			
+			// Send chunk
+			if err := c.sendMessage(dataChannel, chunkMsg); err != nil {
+				return fmt.Errorf("failed to send chunk %d: %w", chunk.SequenceNo, err)
+			}
+			
+			// Update progress
+			totalBytesSent += int64(len(chunk.Data))
+			if err := utm.UpdateProgress(fileNode.Path, totalBytesSent); err != nil {
+				slog.Warn("Failed to update progress", "file", fileNode.Path, "error", err)
+			}
+			
+			// If this was the last chunk, we're done
+			if chunk.IsLast {
+				return nil
+			}
+		}
+	}
 }
 
 func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.ChunkMessage) error {
@@ -277,8 +384,7 @@ func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.
 
 	data, err := c.serializer.Marshal(msg)
 	if err != nil {
-		// slog.Error("Failed to marshal message", "error", err)
-		return err
+		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	return dataChannel.Send(data)
