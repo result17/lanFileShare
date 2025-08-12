@@ -73,14 +73,14 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := s.apiClient.HttpClient.Do(req)
+	resp, err := s.apiClient.HttpClient.Do(req) //nolint:bodyclose // Body is closed in goroutine
 	if err != nil {
 		return fmt.Errorf("failed to connect to /ask endpoint: %w", err)
 	}
 
 	// Start a goroutine to process the streaming response.
 	// The response body will be closed in the goroutine via defer.
-	go s.listenToSSEResponse(resp) //nolint:bodyclose // Body is closed in goroutine
+	go s.listenToSSEResponse(resp)
 
 	return nil
 }

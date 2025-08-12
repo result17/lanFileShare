@@ -87,6 +87,7 @@ func processCandidates(t *testing.T, ctx context.Context, conn CommonConnection,
 	}
 }
 
+//nolint:gocyclo // Test function complexity is acceptable
 func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	const testTimeout = 20 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)

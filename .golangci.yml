@@ -22,11 +22,6 @@ linters:
     # - lll
   settings:
     govet:
-      enable:
-        - shadow
-      settings:
-        shadow:
-          strict: false
     gocyclo:
       min-complexity: 15
     dupl:

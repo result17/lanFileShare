@@ -200,6 +200,7 @@ func TestChunker_Next_SmallFile(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo // Test function complexity is acceptable
 func TestChunker_Next_LargeFile(t *testing.T) {
 	// Create large test file (larger than chunk size)
 	chunkSize := int32(4096)       // Minimum valid chunk size

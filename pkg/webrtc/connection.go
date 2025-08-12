@@ -290,6 +290,7 @@ func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrt
 			slog.Error("Failed to start transfer", "file", fileNode.Path, "error", err)
 			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
 				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
+				return err
 			}
 			continue
 		}
@@ -301,6 +302,7 @@ func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrt
 			slog.Error("Chunker not found", "file", fileNode.Path)
 			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
 				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
+				return err
 			}
 			continue
 		}
@@ -310,6 +312,7 @@ func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrt
 			slog.Error("Failed to transfer file chunks", "file", fileNode.Path, "error", err)
 			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
 				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
+				return err
 			}
 			continue
 		}

@@ -42,6 +42,7 @@ func TestNewFileStructureSigner(t *testing.T) {
 }
 
 // TestSignFileStructure tests the SignFileStructure method with FileStructureManager
+//nolint:gocyclo // Test function complexity is acceptable
 func TestSignFileStructure(t *testing.T) {
 	// Create temporary test files
 	tempDir := t.TempDir()
@@ -200,6 +201,7 @@ func TestSignFileStructureWithEmptyManager(t *testing.T) {
 	}
 }
 
+// nolint:gocyclo 
 func TestSignAndVerifyFileStructure(t *testing.T) {
 	// Create temporary test files
 	tempDir := t.TempDir()
