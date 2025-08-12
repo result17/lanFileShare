@@ -21,7 +21,6 @@ linters:
     # - ineffassign
     # - lll
   settings:
-    govet:
     gocyclo:
       min-complexity: 15
     dupl:
