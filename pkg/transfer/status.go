@@ -34,7 +34,7 @@ const (
 	TransferStateCompleted
 	// TransferStateFailed indicates the transfer failed due to an error
 	TransferStateFailed
-	// TransferStateCancelled indicates the transfer was cancelled by user
+	// TransferStateCancelled indicates the transfer was canceled by user
 	TransferStateCancelled
 )
 
@@ -52,13 +52,13 @@ func (ts TransferState) String() string {
 	case TransferStateFailed:
 		return "failed"
 	case TransferStateCancelled:
-		return "cancelled"
+		return "canceled"
 	default:
 		return "unknown"
 	}
 }
 
-// IsTerminal returns true if the transfer state is final (completed, failed, or cancelled)
+// IsTerminal returns true if the transfer state is final (completed, failed, or canceled)
 func (ts TransferState) IsTerminal() bool {
 	return ts == TransferStateCompleted || ts == TransferStateFailed || ts == TransferStateCancelled
 }
@@ -74,8 +74,8 @@ func (ts TransferState) CanTransitionTo(newState TransferState) bool {
 	case TransferStatePending:
 		return newState == TransferStateActive || newState == TransferStateCancelled
 	case TransferStateActive:
-		return newState == TransferStatePaused || newState == TransferStateCompleted || 
-			   newState == TransferStateFailed || newState == TransferStateCancelled
+		return newState == TransferStatePaused || newState == TransferStateCompleted ||
+			newState == TransferStateFailed || newState == TransferStateCancelled
 	case TransferStatePaused:
 		return newState == TransferStateActive || newState == TransferStateCancelled
 	default:
@@ -86,8 +86,8 @@ func (ts TransferState) CanTransitionTo(newState TransferState) bool {
 // TransferStatus represents the current status and progress of a file transfer
 type TransferStatus struct {
 	// Basic identification
-	FilePath  string `json:"file_path"`
-	SessionID string `json:"session_id"`
+	FilePath  string        `json:"file_path"`
+	SessionID string        `json:"session_id"`
 	State     TransferState `json:"state"`
 
 	// Progress information
@@ -143,7 +143,7 @@ func (ts *TransferStatus) UpdateProgress(bytesSent int64, chunksSent int) {
 	ts.BytesSent = bytesSent
 	ts.ChunksSent = chunksSent
 	ts.LastUpdateTime = time.Now()
-	
+
 	// Recalculate transfer rate and ETA
 	ts.calculateMetrics()
 }
@@ -157,7 +157,7 @@ func (ts *TransferStatus) calculateMetrics() {
 	elapsed := time.Since(ts.StartTime)
 	if elapsed.Seconds() > 0 {
 		ts.TransferRate = float64(ts.BytesSent) / elapsed.Seconds()
-		
+
 		if ts.TransferRate > 0 {
 			remainingBytes := ts.GetRemainingBytes()
 			ts.ETA = time.Duration(float64(remainingBytes)/ts.TransferRate) * time.Second
@@ -172,7 +172,7 @@ type OverallProgress struct {
 	ActiveTransfers    int `json:"active_transfers"`
 	CompletedTransfers int `json:"completed_transfers"`
 	FailedTransfers    int `json:"failed_transfers"`
-	CancelledTransfers int `json:"cancelled_transfers"`
+	CancelledTransfers int `json:"canceled_transfers"`
 
 	// Byte progress
 	TotalBytes     int64 `json:"total_bytes"`
@@ -210,7 +210,7 @@ const (
 	StatusSessionStateCompleted
 	// StatusSessionStateFailed indicates the session failed due to critical errors
 	StatusSessionStateFailed
-	// StatusSessionStateCancelled indicates the session was cancelled by user
+	// StatusSessionStateCancelled indicates the session was canceled by user
 	StatusSessionStateCancelled
 )
 
@@ -226,7 +226,7 @@ func (ss StatusSessionState) String() string {
 	case StatusSessionStateFailed:
 		return "failed"
 	case StatusSessionStateCancelled:
-		return "cancelled"
+		return "canceled"
 	default:
 		return "unknown"
 	}
@@ -294,27 +294,27 @@ func (rp *RetryPolicy) IsRetryable(err error) bool {
 var (
 	// ErrTransferNotFound is returned when a requested transfer doesn't exist
 	ErrTransferNotFound = errors.New("transfer not found")
-	
+
 	// ErrInvalidStateTransition is returned when an invalid state transition is attempted
 	ErrInvalidStateTransition = errors.New("invalid state transition")
-	
+
 	// ErrTransferAlreadyExists is returned when trying to start a transfer that already exists
 	ErrTransferAlreadyExists = errors.New("transfer already exists")
-	
+
 	// ErrSessionNotFound is returned when a requested session doesn't exist
 	ErrSessionNotFound = errors.New("session not found")
-	
+
 	// ErrSessionAlreadyExists is returned when trying to create a session that already exists
 	ErrSessionAlreadyExists = errors.New("session already exists")
-	
+
 	// ErrMaxTransfersExceeded is returned when the maximum number of concurrent transfers is reached
 	ErrMaxTransfersExceeded = errors.New("maximum concurrent transfers exceeded")
-	
+
 	// ErrInvalidConfiguration is returned when configuration validation fails
 	ErrInvalidConfiguration = errors.New("invalid configuration")
-	
-	// ErrTransferCancelled is returned when a transfer is cancelled
-	ErrTransferCancelled = errors.New("transfer cancelled")
+
+	// ErrTransferCancelled is returned when a transfer is canceled
+	ErrTransferCancelled = errors.New("transfer canceled")
 )
 
 // SessionTransferStatus represents the status of an entire transfer session
@@ -322,26 +322,26 @@ var (
 type SessionTransferStatus struct {
 	// Session identification
 	SessionID string `json:"session_id"`
-	
+
 	// File counts
 	TotalFiles     int `json:"total_files"`
 	CompletedFiles int `json:"completed_files"`
 	FailedFiles    int `json:"failed_files"`
 	PendingFiles   int `json:"pending_files"`
-	
+
 	// Byte progress
 	TotalBytes      int64   `json:"total_bytes"`
 	BytesCompleted  int64   `json:"bytes_completed"`
 	OverallProgress float64 `json:"overall_progress"` // 0-100 percentage
-	
+
 	// Current file being transferred
 	CurrentFile *TransferStatus `json:"current_file,omitempty"`
-	
+
 	// Session timing
 	StartTime      time.Time  `json:"start_time"`
 	LastUpdateTime time.Time  `json:"last_update_time"`
 	CompletionTime *time.Time `json:"completion_time,omitempty"`
-	
+
 	// Session state
 	State StatusSessionState `json:"state"`
 }
@@ -351,12 +351,12 @@ func (sts *SessionTransferStatus) GetSessionProgressPercentage() float64 {
 	if sts.TotalBytes == 0 {
 		return 0.0
 	}
-	
+
 	currentFileBytes := int64(0)
 	if sts.CurrentFile != nil {
 		currentFileBytes = sts.CurrentFile.BytesSent
 	}
-	
+
 	totalCompleted := sts.BytesCompleted + currentFileBytes
 	return float64(totalCompleted) / float64(sts.TotalBytes) * 100.0
 }
@@ -372,7 +372,7 @@ func (sts *SessionTransferStatus) GetRemainingBytes() int64 {
 	if sts.CurrentFile != nil {
 		currentFileBytes = sts.CurrentFile.BytesSent
 	}
-	
+
 	totalCompleted := sts.BytesCompleted + currentFileBytes
 	remaining := sts.TotalBytes - totalCompleted
 	if remaining < 0 {
@@ -383,7 +383,7 @@ func (sts *SessionTransferStatus) GetRemainingBytes() int64 {
 
 // IsSessionComplete returns true if all files have been processed (completed or failed)
 func (sts *SessionTransferStatus) IsSessionComplete() bool {
-	return sts.CompletedFiles + sts.FailedFiles >= sts.TotalFiles
+	return sts.CompletedFiles+sts.FailedFiles >= sts.TotalFiles
 }
 
 // HasActiveTransfer returns true if there's currently a file being transferred
@@ -395,10 +395,10 @@ func (sts *SessionTransferStatus) HasActiveTransfer() bool {
 func contains(s, substr string) bool {
 	// Simple case-insensitive substring check
 	// In a real implementation, you might want to use strings.Contains with strings.ToLower
-	return len(s) >= len(substr) && 
-		   (s == substr || (len(s) > len(substr) && 
-		   (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
-		   containsAt(s, substr, 1))))
+	return len(s) >= len(substr) &&
+		(s == substr || (len(s) > len(substr) &&
+			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+				containsAt(s, substr, 1))))
 }
 
 // Helper function for substring search

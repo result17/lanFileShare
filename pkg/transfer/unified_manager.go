@@ -12,24 +12,24 @@ import (
 // It uses FileStructureManager for file organization and provides transfer management
 type UnifiedTransferManager struct {
 	// Core components
-	session   *TransferSession        // Session management
-	config    *TransferConfig         // Configuration
-	structure *FileStructureManager   // File structure organization
-	
+	session   *TransferSession      // Session management
+	config    *TransferConfig       // Configuration
+	structure *FileStructureManager // File structure organization
+
 	// Chunking management
-	chunkers map[string]*Chunker      // File path -> Chunker
+	chunkers map[string]*Chunker // File path -> Chunker
 	filesMu  sync.RWMutex
-	
+
 	// Transfer queue management
 	pendingFiles   []string // Files waiting to be transferred
 	completedFiles []string // Files that have been transferred
 	failedFiles    []string // Files that failed transfer
 	queueMu        sync.RWMutex
-	
+
 	// Session status tracking
 	sessionStatus *SessionTransferStatus
 	statusMu      sync.RWMutex
-	
+
 	// Event system
 	listeners []StatusListener
 	eventsMu  sync.RWMutex
@@ -38,13 +38,11 @@ type UnifiedTransferManager struct {
 // ManagedFile is no longer needed since we use FileStructureManager
 // and separate chunkers map
 
-
-
 // StatusListener interface for transfer status events
 type StatusListener interface {
 	// OnFileStatusChanged is called when an individual file's status changes
 	OnFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus)
-	
+
 	// OnSessionStatusChanged is called when the overall session status changes
 	OnSessionStatusChanged(oldStatus, newStatus *SessionTransferStatus)
 }
@@ -57,7 +55,7 @@ func NewUnifiedTransferManager(serviceID string) *UnifiedTransferManager {
 // NewUnifiedTransferManagerWithConfig creates a manager with custom config
 func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfig) *UnifiedTransferManager {
 	session := NewTransferSession(serviceID)
-	
+
 	// Initialize session status
 	sessionStatus := &SessionTransferStatus{
 		SessionID:       serviceID,
@@ -72,7 +70,7 @@ func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfi
 		LastUpdateTime:  time.Now(),
 		State:           StatusSessionStateActive,
 	}
-	
+
 	return &UnifiedTransferManager{
 		session:        session,
 		config:         config,
@@ -92,12 +90,12 @@ func (utm *UnifiedTransferManager) AddFile(node *fileInfo.FileNode) error {
 	if node == nil {
 		return fmt.Errorf("file node cannot be nil")
 	}
-	
+
 	// Handle directories by adding all their files
 	if node.IsDir {
 		return utm.addDirectory(node)
 	}
-	
+
 	// Handle regular files
 	return utm.addSingleFile(node)
 }
@@ -108,27 +106,27 @@ func (utm *UnifiedTransferManager) addSingleFile(node *fileInfo.FileNode) error 
 	utm.queueMu.Lock()
 	defer utm.filesMu.Unlock()
 	defer utm.queueMu.Unlock()
-	
+
 	// Check if file already exists in structure
 	if _, exists := utm.structure.GetFile(node.Path); exists {
 		return ErrTransferAlreadyExists
 	}
-	
+
 	// Add file to structure manager
 	if err := utm.structure.AddFileNode(node); err != nil {
 		return fmt.Errorf("failed to add file to structure: %w", err)
 	}
-	
+
 	// Create chunker for the file
 	chunker, err := NewChunkerFromFileNode(node, utm.config.ChunkSize)
 	if err != nil {
 		return fmt.Errorf("failed to create chunker: %w", err)
 	}
-	
+
 	// Store chunker
 	utm.chunkers[node.Path] = chunker
 	utm.pendingFiles = append(utm.pendingFiles, node.Path)
-	
+
 	// Update session status
 	utm.statusMu.Lock()
 	utm.sessionStatus.TotalFiles = utm.GetFileCount()
@@ -136,12 +134,12 @@ func (utm *UnifiedTransferManager) addSingleFile(node *fileInfo.FileNode) error 
 	utm.sessionStatus.TotalBytes += node.Size
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	utm.statusMu.Unlock()
-	
+
 	return nil
 }
 
-func  (utm *UnifiedTransferManager) GetFileCount() int {
-	return  utm.structure.GetFileCount()
+func (utm *UnifiedTransferManager) GetFileCount() int {
+	return utm.structure.GetFileCount()
 }
 
 // addDirectory recursively adds all files in a directory to the transfer queue
@@ -149,14 +147,14 @@ func (utm *UnifiedTransferManager) addDirectory(dirNode *fileInfo.FileNode) erro
 	if !dirNode.IsDir {
 		return fmt.Errorf("node is not a directory: %s", dirNode.Path)
 	}
-	
+
 	// Recursively add all files in the directory
 	for _, child := range dirNode.Children {
 		if err := utm.AddFile(&child); err != nil {
 			return fmt.Errorf("failed to add child %s: %w", child.Path, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -164,19 +162,19 @@ func (utm *UnifiedTransferManager) addDirectory(dirNode *fileInfo.FileNode) erro
 func (utm *UnifiedTransferManager) GetNextPendingFile() (*fileInfo.FileNode, bool) {
 	utm.queueMu.RLock()
 	defer utm.queueMu.RUnlock()
-	
+
 	if len(utm.pendingFiles) == 0 {
 		return nil, false
 	}
-	
+
 	filePath := utm.pendingFiles[0]
-	
+
 	// Get file from structure manager
 	fileNode, exists := utm.structure.GetFile(filePath)
 	if !exists {
 		return nil, false
 	}
-	
+
 	return fileNode, true
 }
 
@@ -184,7 +182,7 @@ func (utm *UnifiedTransferManager) GetNextPendingFile() (*fileInfo.FileNode, boo
 func (utm *UnifiedTransferManager) MarkFileCompleted(filePath string) error {
 	utm.queueMu.Lock()
 	defer utm.queueMu.Unlock()
-	
+
 	// Remove from pending
 	for i, path := range utm.pendingFiles {
 		if path == filePath {
@@ -192,17 +190,17 @@ func (utm *UnifiedTransferManager) MarkFileCompleted(filePath string) error {
 			break
 		}
 	}
-	
+
 	// Add to completed
 	utm.completedFiles = append(utm.completedFiles, filePath)
-	
+
 	// Update session status
 	utm.statusMu.Lock()
 	utm.sessionStatus.CompletedFiles = len(utm.completedFiles)
 	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	utm.statusMu.Unlock()
-	
+
 	return nil
 }
 
@@ -210,7 +208,7 @@ func (utm *UnifiedTransferManager) MarkFileCompleted(filePath string) error {
 func (utm *UnifiedTransferManager) MarkFileFailed(filePath string) error {
 	utm.queueMu.Lock()
 	defer utm.queueMu.Unlock()
-	
+
 	// Remove from pending
 	for i, path := range utm.pendingFiles {
 		if path == filePath {
@@ -218,17 +216,17 @@ func (utm *UnifiedTransferManager) MarkFileFailed(filePath string) error {
 			break
 		}
 	}
-	
+
 	// Add to failed
 	utm.failedFiles = append(utm.failedFiles, filePath)
-	
+
 	// Update session status
 	utm.statusMu.Lock()
 	utm.sessionStatus.FailedFiles = len(utm.failedFiles)
 	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	utm.statusMu.Unlock()
-	
+
 	return nil
 }
 
@@ -236,7 +234,7 @@ func (utm *UnifiedTransferManager) MarkFileFailed(filePath string) error {
 func (utm *UnifiedTransferManager) GetQueueStatus() (pending, completed, failed int) {
 	utm.queueMu.RLock()
 	defer utm.queueMu.RUnlock()
-	
+
 	return len(utm.pendingFiles), len(utm.completedFiles), len(utm.failedFiles)
 }
 
@@ -244,7 +242,7 @@ func (utm *UnifiedTransferManager) GetQueueStatus() (pending, completed, failed 
 func (utm *UnifiedTransferManager) GetChunker(filePath string) (*Chunker, bool) {
 	utm.filesMu.RLock()
 	defer utm.filesMu.RUnlock()
-	
+
 	chunker, exists := utm.chunkers[filePath]
 	return chunker, exists
 }
@@ -265,21 +263,21 @@ func (utm *UnifiedTransferManager) Close() error {
 	utm.queueMu.Lock()
 	defer utm.filesMu.Unlock()
 	defer utm.queueMu.Unlock()
-	
+
 	// Close all chunkers
 	for _, chunker := range utm.chunkers {
 		if chunker != nil {
 			chunker.Close()
 		}
 	}
-	
+
 	// Clear all data
 	utm.structure.Clear()
 	utm.chunkers = make(map[string]*Chunker)
 	utm.pendingFiles = make([]string, 0)
 	utm.completedFiles = make([]string, 0)
 	utm.failedFiles = make([]string, 0)
-	
+
 	return nil
 }
 
@@ -287,14 +285,14 @@ func (utm *UnifiedTransferManager) Close() error {
 func (utm *UnifiedTransferManager) GetSessionStatus() *SessionTransferStatus {
 	utm.statusMu.RLock()
 	defer utm.statusMu.RUnlock()
-	
+
 	// Return a deep copy
 	statusCopy := *utm.sessionStatus
 	if utm.sessionStatus.CurrentFile != nil {
 		currentFileCopy := *utm.sessionStatus.CurrentFile
 		statusCopy.CurrentFile = &currentFileCopy
 	}
-	
+
 	return &statusCopy
 }
 
@@ -307,14 +305,14 @@ func (utm *UnifiedTransferManager) StartTransfer(filePath string) error {
 	utm.filesMu.RLock()
 	managedFile, exists := utm.GetFile(filePath)
 	utm.filesMu.RUnlock()
-	
+
 	if !exists {
 		return ErrTransferNotFound
 	}
-	
+
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
-	
+
 	// Create transfer status for current file
 	currentFile := &TransferStatus{
 		FilePath:       filePath,
@@ -326,23 +324,23 @@ func (utm *UnifiedTransferManager) StartTransfer(filePath string) error {
 		LastUpdateTime: time.Now(),
 		MaxRetries:     utm.config.DefaultRetryPolicy.MaxRetries,
 	}
-	
+
 	oldSessionStatus := *utm.sessionStatus
 	oldCurrentFile := utm.sessionStatus.CurrentFile
-	
+
 	utm.sessionStatus.CurrentFile = currentFile
 	utm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Update session totals if this is the first time we're seeing this file
 	utm.updateSessionTotals()
-	
+
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
-	
+
 	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, oldCurrentFile, currentFile)
 	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
-	
+
 	return nil
 }
 
@@ -354,31 +352,31 @@ func (utm *UnifiedTransferManager) GetTotalSize() int64 {
 func (utm *UnifiedTransferManager) UpdateProgress(filePath string, bytesSent int64) error {
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
-	
+
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
 	}
-	
+
 	oldSessionStatus := *utm.sessionStatus
 	oldFileStatus := *utm.sessionStatus.CurrentFile
-	
+
 	// Update current file progress
 	utm.sessionStatus.CurrentFile.BytesSent = bytesSent
 	utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	utm.sessionStatus.CurrentFile.calculateMetrics()
-	
+
 	// Update overall progress
 	utm.sessionStatus.OverallProgress = utm.sessionStatus.GetSessionProgressPercentage()
 	utm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Create copies for notification to avoid race conditions
 	newFileStatus := *utm.sessionStatus.CurrentFile
 	newSessionStatus := *utm.sessionStatus
-	
+
 	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &newFileStatus)
 	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
-	
+
 	return nil
 }
 
@@ -386,37 +384,37 @@ func (utm *UnifiedTransferManager) UpdateProgress(filePath string, bytesSent int
 func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
-	
+
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
 	}
-	
+
 	oldSessionStatus := *utm.sessionStatus
 	oldFileStatus := *utm.sessionStatus.CurrentFile
-	
+
 	// Mark current file as completed
 	utm.sessionStatus.CurrentFile.State = TransferStateCompleted
 	now := time.Now()
 	utm.sessionStatus.CurrentFile.CompletionTime = &now
-	
+
 	// Update session counters
 	utm.sessionStatus.CompletedFiles++
 	utm.sessionStatus.PendingFiles--
 	utm.sessionStatus.BytesCompleted += utm.sessionStatus.CurrentFile.TotalBytes
-	
+
 	completedFile := utm.sessionStatus.CurrentFile
 	utm.sessionStatus.CurrentFile = nil // No current file until next one starts
 	utm.sessionStatus.LastUpdateTime = now
-	
+
 	// Update overall progress
 	utm.sessionStatus.OverallProgress = utm.sessionStatus.GetSessionProgressPercentage()
-	
+
 	// Check if session is complete
 	if utm.sessionStatus.CompletedFiles+utm.sessionStatus.FailedFiles >= utm.sessionStatus.TotalFiles {
 		utm.sessionStatus.CompletionTime = &now
 		utm.sessionStatus.State = StatusSessionStateCompleted
 	}
-	
+
 	// Also update the queue (avoid calling MarkFileCompleted to prevent deadlock)
 	utm.queueMu.Lock()
 	// Remove from pending
@@ -429,14 +427,14 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 	// Add to completed
 	utm.completedFiles = append(utm.completedFiles, filePath)
 	utm.queueMu.Unlock()
-	
+
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
-	
+
 	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, completedFile)
 	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
-	
+
 	return nil
 }
 
@@ -444,36 +442,36 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) error {
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
-	
+
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
 	}
-	
+
 	oldSessionStatus := *utm.sessionStatus
 	oldFileStatus := *utm.sessionStatus.CurrentFile
-	
+
 	// Mark current file as failed
 	utm.sessionStatus.CurrentFile.State = TransferStateFailed
 	utm.sessionStatus.CurrentFile.LastError = err
-	
+
 	// Update session counters
 	utm.sessionStatus.FailedFiles++
 	utm.sessionStatus.PendingFiles--
-	
+
 	failedFile := utm.sessionStatus.CurrentFile
 	utm.sessionStatus.CurrentFile = nil // No current file until next one starts
 	utm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Update overall progress
 	utm.sessionStatus.OverallProgress = utm.sessionStatus.GetSessionProgressPercentage()
-	
+
 	// Check if session should be marked as failed (all files failed)
 	if utm.sessionStatus.FailedFiles >= utm.sessionStatus.TotalFiles {
 		now := time.Now()
 		utm.sessionStatus.CompletionTime = &now
 		utm.sessionStatus.State = StatusSessionStateFailed
 	}
-	
+
 	// Also update the queue (avoid calling MarkFileFailed to prevent deadlock)
 	utm.queueMu.Lock()
 	// Remove from pending
@@ -486,14 +484,14 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 	// Add to failed
 	utm.failedFiles = append(utm.failedFiles, filePath)
 	utm.queueMu.Unlock()
-	
+
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
-	
+
 	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, failedFile)
 	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
-	
+
 	return nil
 }
 
@@ -501,30 +499,30 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 func (utm *UnifiedTransferManager) PauseTransfer(filePath string) error {
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
-	
+
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
 	}
-	
+
 	if utm.sessionStatus.CurrentFile.State != TransferStateActive {
 		return ErrInvalidStateTransition
 	}
-	
+
 	oldSessionStatus := *utm.sessionStatus
 	oldFileStatus := *utm.sessionStatus.CurrentFile
-	
+
 	utm.sessionStatus.CurrentFile.State = TransferStatePaused
 	utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	utm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Create copies for notification to avoid race conditions
 	newFileStatus := *utm.sessionStatus.CurrentFile
 	newSessionStatus := *utm.sessionStatus
-	
+
 	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &newFileStatus)
 	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
-	
+
 	return nil
 }
 
@@ -532,30 +530,30 @@ func (utm *UnifiedTransferManager) PauseTransfer(filePath string) error {
 func (utm *UnifiedTransferManager) ResumeTransfer(filePath string) error {
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
-	
+
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
 	}
-	
+
 	if utm.sessionStatus.CurrentFile.State != TransferStatePaused {
 		return ErrInvalidStateTransition
 	}
-	
+
 	oldSessionStatus := *utm.sessionStatus
 	oldFileStatus := *utm.sessionStatus.CurrentFile
-	
+
 	utm.sessionStatus.CurrentFile.State = TransferStateActive
 	utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	utm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Create copies for notification to avoid race conditions
 	newFileStatus := *utm.sessionStatus.CurrentFile
 	newSessionStatus := *utm.sessionStatus
-	
+
 	// Notify listeners with copies
 	go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &newFileStatus)
 	go utm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
-	
+
 	return nil
 }
 
@@ -563,13 +561,13 @@ func (utm *UnifiedTransferManager) ResumeTransfer(filePath string) error {
 func (utm *UnifiedTransferManager) GetFileStatus(filePath string) (*TransferStatus, error) {
 	utm.statusMu.RLock()
 	defer utm.statusMu.RUnlock()
-	
+
 	// Check if it's the current file
 	if utm.sessionStatus.CurrentFile != nil && utm.sessionStatus.CurrentFile.FilePath == filePath {
 		statusCopy := *utm.sessionStatus.CurrentFile
 		return &statusCopy, nil
 	}
-	
+
 	// Check if it's in completed files
 	for _, completedPath := range utm.completedFiles {
 		if completedPath == filePath {
@@ -583,7 +581,7 @@ func (utm *UnifiedTransferManager) GetFileStatus(filePath string) (*TransferStat
 			}, nil
 		}
 	}
-	
+
 	// Check if it's in failed files
 	for _, failedPath := range utm.failedFiles {
 		if failedPath == filePath {
@@ -595,7 +593,7 @@ func (utm *UnifiedTransferManager) GetFileStatus(filePath string) (*TransferStat
 			}, nil
 		}
 	}
-	
+
 	// Check if it's in pending files
 	for _, pendingPath := range utm.pendingFiles {
 		if pendingPath == filePath {
@@ -607,7 +605,7 @@ func (utm *UnifiedTransferManager) GetFileStatus(filePath string) (*TransferStat
 			}, nil
 		}
 	}
-	
+
 	return nil, ErrTransferNotFound
 }
 
@@ -615,7 +613,7 @@ func (utm *UnifiedTransferManager) GetFileStatus(filePath string) (*TransferStat
 func (utm *UnifiedTransferManager) AddStatusListener(listener StatusListener) {
 	utm.eventsMu.Lock()
 	defer utm.eventsMu.Unlock()
-	
+
 	utm.listeners = append(utm.listeners, listener)
 }
 
@@ -631,7 +629,7 @@ func (utm *UnifiedTransferManager) updateSessionTotals() {
 func (utm *UnifiedTransferManager) notifyFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
 	utm.eventsMu.RLock()
 	defer utm.eventsMu.RUnlock()
-	
+
 	for _, listener := range utm.listeners {
 		// Run in goroutine to prevent blocking (already in goroutine, but being explicit)
 		listener.OnFileStatusChanged(filePath, oldStatus, newStatus)
@@ -641,7 +639,7 @@ func (utm *UnifiedTransferManager) notifyFileStatusChanged(filePath string, oldS
 func (utm *UnifiedTransferManager) notifySessionStatusChanged(oldStatus, newStatus *SessionTransferStatus) {
 	utm.eventsMu.RLock()
 	defer utm.eventsMu.RUnlock()
-	
+
 	for _, listener := range utm.listeners {
 		// Run in goroutine to prevent blocking (already in goroutine, but being explicit)
 		listener.OnSessionStatusChanged(oldStatus, newStatus)

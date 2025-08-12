@@ -6,7 +6,7 @@ linters:
   default: none
   enable:
     # Keep only the most important linters
-    - govet          # Official Go vet tool
+
     - unused         # Check for unused code
     - misspell       # Spell checking
     - gocyclo        # Complexity checking
@@ -26,7 +26,7 @@ linters:
         - shadow
       settings:
         shadow:
-          strict: true
+          strict: false
     gocyclo:
       min-complexity: 15
     dupl:

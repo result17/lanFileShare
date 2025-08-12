@@ -35,9 +35,9 @@ type TransferConfig struct {
 
 // Chunk size constants (moved from chunker.go)
 const (
-	DefaultChunkSize = 64 * 1024   // 64KB - proven optimal for most network conditions
-	MaxChunkSize     = 256 * 1024  // 256KB - maximum to prevent memory issues
-	MinChunkSize     = 4 * 1024    // 4KB - minimum for efficiency
+	DefaultChunkSize = 64 * 1024  // 64KB - proven optimal for most network conditions
+	MaxChunkSize     = 256 * 1024 // 256KB - maximum to prevent memory issues
+	MinChunkSize     = 4 * 1024   // 4KB - minimum for efficiency
 )
 
 // DefaultTransferConfig returns a configuration with sensible defaults
@@ -53,7 +53,7 @@ func DefaultTransferConfig() *TransferConfig {
 		MaxConcurrentChunks:    50,
 
 		// Performance settings
-		BufferSize:            8192,        // 8KB
+		BufferSize:            8192, // 8KB
 		RateCalculationWindow: 30 * time.Second,
 
 		// Retry policy

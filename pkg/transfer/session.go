@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 type TransferSession struct {
 	// ServiceID identifies the sender application instance
 	ServiceID string `json:"service_id"`

@@ -185,7 +185,7 @@ func TestFileStructureManager_GetAllFiles(t *testing.T) {
 
 	// Verify count matches
 	if len(files) != fsm.GetFileCount() {
-		t.Errorf("GetAllFiles returned %d files, but GetFileCount returned %d", 
+		t.Errorf("GetAllFiles returned %d files, but GetFileCount returned %d",
 			len(files), fsm.GetFileCount())
 	}
 
@@ -300,13 +300,13 @@ func TestFileStructureManager_Clear(t *testing.T) {
 
 // TestFileStructureManager_ConcurrentAccess tests thread safety
 func TestFileStructureManager_ConcurrentAccess(t *testing.T) {
-	
+
 	tempDir, cleanup := setupTestDir(t)
 	defer cleanup()
 
 	fsm, err := NewFileStructureManagerFromPath(tempDir)
 
-	if err != nil  {
+	if err != nil {
 		t.Fatalf("Failed to create FileStructureManager: %v", err)
 	}
 

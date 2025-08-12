@@ -16,7 +16,7 @@ func TestTransferState_String(t *testing.T) {
 		{TransferStatePaused, "paused"},
 		{TransferStateCompleted, "completed"},
 		{TransferStateFailed, "failed"},
-		{TransferStateCancelled, "cancelled"},
+		{TransferStateCancelled, "canceled"},
 		{TransferState(999), "unknown"},
 	}
 
@@ -80,7 +80,7 @@ func TestTransferState_CanTransitionTo(t *testing.T) {
 
 	for _, test := range tests {
 		if got := test.from.CanTransitionTo(test.to); got != test.expected {
-			t.Errorf("TransferState(%s).CanTransitionTo(%s) = %v, want %v", 
+			t.Errorf("TransferState(%s).CanTransitionTo(%s) = %v, want %v",
 				test.from, test.to, got, test.expected)
 		}
 	}
@@ -236,7 +236,7 @@ func TestStatusSessionState_String(t *testing.T) {
 		{StatusSessionStatePaused, "paused"},
 		{StatusSessionStateCompleted, "completed"},
 		{StatusSessionStateFailed, "failed"},
-		{StatusSessionStateCancelled, "cancelled"},
+		{StatusSessionStateCancelled, "canceled"},
 		{StatusSessionState(999), "unknown"},
 	}
 

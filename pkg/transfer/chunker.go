@@ -15,7 +15,7 @@ type Chunk struct {
 	Data       []byte
 	Hash       string
 	IsLast     bool
-	Size   int32
+	Size       int32
 }
 
 type Chunker struct {
@@ -34,7 +34,7 @@ func NewChunkerFromFileNode(node *fileInfo.FileNode, chunkSize int32) (*Chunker,
 	if node.IsDir {
 		return nil, fmt.Errorf("cannot chunk a directory")
 	}
-	
+
 	if chunkSize < MinChunkSize || chunkSize > MaxChunkSize {
 		return nil, fmt.Errorf("chunk size must be between %d and %d", MinChunkSize, MaxChunkSize)
 	}
@@ -75,7 +75,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 		Data:       c.buffer[:n],
 		Hash:       hashStr,
 		IsLast:     c.bytesRead >= c.totalByteSize,
-		Size:   int32(n),
+		Size:       int32(n),
 	}, nil
 }
 

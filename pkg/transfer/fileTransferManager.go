@@ -10,20 +10,20 @@ import (
 )
 
 const (
-    // MaxSupportedFiles defines the maximum number of files that can be managed
-    // This prevents potential integer overflow and memory issues
-    MaxSupportedFiles = 1000000
+	// MaxSupportedFiles defines the maximum number of files that can be managed
+	// This prevents potential integer overflow and memory issues
+	MaxSupportedFiles = 1000000
 )
 
 type FileTransferManager struct {
 	chunkers  map[string]*Chunker
 	structure *FileStructureManager
-	mu   sync.RWMutex
+	mu        sync.RWMutex
 }
 
 func NewFileTransferManager() *FileTransferManager {
 	return &FileTransferManager{
-		chunkers: make(map[string]*Chunker),
+		chunkers:  make(map[string]*Chunker),
 		structure: NewFileStructureManager(),
 	}
 }
@@ -32,16 +32,16 @@ func (ftm *FileTransferManager) AddFileNode(node *fileInfo.FileNode) error {
 	if node == nil {
 		return fmt.Errorf("node cannot be nil")
 	}
-	
+
 	// Check file limit with lock protection
 	ftm.mu.RLock()
 	currentCount := len(ftm.chunkers)
 	ftm.mu.RUnlock()
-	
+
 	if currentCount >= MaxSupportedFiles {
-        return fmt.Errorf("file limit exceeded: maximum %d files supported", MaxSupportedFiles)
-    }
-	
+		return fmt.Errorf("file limit exceeded: maximum %d files supported", MaxSupportedFiles)
+	}
+
 	if node.IsDir {
 		return ftm.processDirConcurrent(node)
 	}
@@ -85,9 +85,9 @@ func (ftm *FileTransferManager) processDirConcurrent(node *fileInfo.FileNode) er
 			defer semaphore.Release(1)
 
 			select {
-				case <- ctx.Done():
-					return
-				default:
+			case <-ctx.Done():
+				return
+			default:
 			}
 
 			if err := ftm.AddFileNode(child); err != nil {
@@ -100,7 +100,7 @@ func (ftm *FileTransferManager) processDirConcurrent(node *fileInfo.FileNode) er
 	}
 	wg.Wait()
 	close(errChan)
-	
+
 	for err := range errChan {
 		if err != nil {
 			return err
@@ -111,19 +111,19 @@ func (ftm *FileTransferManager) processDirConcurrent(node *fileInfo.FileNode) er
 }
 
 func (ftm *FileTransferManager) GetChunker(filePath string) (*Chunker, bool) {
-    ftm.mu.RLock()
-    chunker, exists := ftm.chunkers[filePath]
-    ftm.mu.RUnlock()
-    return chunker, exists
+	ftm.mu.RLock()
+	chunker, exists := ftm.chunkers[filePath]
+	ftm.mu.RUnlock()
+	return chunker, exists
 }
 
 func (ftm *FileTransferManager) Close() error {
-    ftm.mu.Lock()
-    defer ftm.mu.Unlock()
-    
-    for _, chunker := range ftm.chunkers {
-        chunker.Close()
-    }
-    ftm.chunkers = make(map[string]*Chunker)
-    return nil
+	ftm.mu.Lock()
+	defer ftm.mu.Unlock()
+
+	for _, chunker := range ftm.chunkers {
+		chunker.Close()
+	}
+	ftm.chunkers = make(map[string]*Chunker)
+	return nil
 }

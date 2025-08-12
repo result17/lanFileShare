@@ -12,13 +12,13 @@ import (
 type TransferStatusManager struct {
 	// sessionStatus holds the current session status
 	sessionStatus *SessionTransferStatus
-	
+
 	// config holds the configuration for transfer management
 	config *TransferConfig
-	
+
 	// mu provides thread-safe access to the session status
 	mu sync.RWMutex
-	
+
 	// Event system
 	listeners []StatusListener
 	eventsMu  sync.RWMutex
@@ -34,7 +34,7 @@ func NewTransferStatusManagerWithConfig(config *TransferConfig) *TransferStatusM
 	if config == nil {
 		config = DefaultTransferConfig()
 	}
-	
+
 	return &TransferStatusManager{
 		sessionStatus: nil, // Will be initialized when session is created
 		config:        config,
@@ -47,23 +47,23 @@ func (tsm *TransferStatusManager) InitializeSession(sessionID string, totalFiles
 	if sessionID == "" {
 		return fmt.Errorf("session ID cannot be empty")
 	}
-	
+
 	if totalFiles < 0 {
 		return fmt.Errorf("total files cannot be negative")
 	}
-	
+
 	if totalBytes < 0 {
 		return fmt.Errorf("total bytes cannot be negative")
 	}
-	
+
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	// Check if session already exists
 	if tsm.sessionStatus != nil {
 		return ErrSessionAlreadyExists
 	}
-	
+
 	// Create new session status
 	tsm.sessionStatus = &SessionTransferStatus{
 		SessionID:       sessionID,
@@ -79,7 +79,7 @@ func (tsm *TransferStatusManager) InitializeSession(sessionID string, totalFiles
 		LastUpdateTime:  time.Now(),
 		State:           StatusSessionStateActive,
 	}
-	
+
 	return nil
 }
 
@@ -87,18 +87,18 @@ func (tsm *TransferStatusManager) InitializeSession(sessionID string, totalFiles
 func (tsm *TransferStatusManager) GetSessionStatus() (*SessionTransferStatus, error) {
 	tsm.mu.RLock()
 	defer tsm.mu.RUnlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return nil, ErrSessionNotFound
 	}
-	
+
 	// Return a deep copy to prevent external modification
 	statusCopy := *tsm.sessionStatus
 	if tsm.sessionStatus.CurrentFile != nil {
 		currentFileCopy := *tsm.sessionStatus.CurrentFile
 		statusCopy.CurrentFile = &currentFileCopy
 	}
-	
+
 	return &statusCopy, nil
 }
 
@@ -107,25 +107,25 @@ func (tsm *TransferStatusManager) StartFileTransfer(filePath string, fileSize in
 	if filePath == "" {
 		return nil, fmt.Errorf("file path cannot be empty")
 	}
-	
+
 	if fileSize < 0 {
 		return nil, fmt.Errorf("file size cannot be negative")
 	}
-	
+
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return nil, ErrSessionNotFound
 	}
-	
+
 	// Check if there's already a current file transfer
 	if tsm.sessionStatus.CurrentFile != nil && tsm.sessionStatus.CurrentFile.State == TransferStateActive {
 		return nil, fmt.Errorf("session already has an active file transfer: %s", tsm.sessionStatus.CurrentFile.FilePath)
 	}
-	
+
 	oldSessionStatus := *tsm.sessionStatus
-	
+
 	// Create new transfer status for current file
 	currentFile := &TransferStatus{
 		FilePath:       filePath,
@@ -137,15 +137,15 @@ func (tsm *TransferStatusManager) StartFileTransfer(filePath string, fileSize in
 		LastUpdateTime: time.Now(),
 		MaxRetries:     tsm.config.DefaultRetryPolicy.MaxRetries,
 	}
-	
+
 	oldCurrentFile := tsm.sessionStatus.CurrentFile
 	tsm.sessionStatus.CurrentFile = currentFile
 	tsm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Notify listeners
 	tsm.notifyFileStatusChanged(filePath, oldCurrentFile, currentFile)
 	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
-	
+
 	return currentFile, nil
 }
 
@@ -154,34 +154,34 @@ func (tsm *TransferStatusManager) UpdateFileProgress(bytesSent int64) error {
 	if bytesSent < 0 {
 		return fmt.Errorf("bytes sent cannot be negative")
 	}
-	
+
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return ErrSessionNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
-	
+
 	oldSessionStatus := *tsm.sessionStatus
 	oldFileStatus := *tsm.sessionStatus.CurrentFile
-	
+
 	// Update current file progress
 	tsm.sessionStatus.CurrentFile.BytesSent = bytesSent
 	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	tsm.sessionStatus.CurrentFile.calculateMetrics()
-	
+
 	// Update overall session progress
 	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
 	tsm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Notify listeners
 	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
 	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
-	
+
 	return nil
 }
 
@@ -189,45 +189,45 @@ func (tsm *TransferStatusManager) UpdateFileProgress(bytesSent int64) error {
 func (tsm *TransferStatusManager) CompleteCurrentFile() error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return ErrSessionNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
-	
+
 	oldSessionStatus := *tsm.sessionStatus
 	oldFileStatus := *tsm.sessionStatus.CurrentFile
-	
+
 	// Mark current file as completed
 	tsm.sessionStatus.CurrentFile.State = TransferStateCompleted
 	now := time.Now()
 	tsm.sessionStatus.CurrentFile.CompletionTime = &now
-	
+
 	// Update session counters
 	tsm.sessionStatus.CompletedFiles++
 	tsm.sessionStatus.PendingFiles--
 	tsm.sessionStatus.BytesCompleted += tsm.sessionStatus.CurrentFile.TotalBytes
-	
+
 	completedFile := tsm.sessionStatus.CurrentFile
 	tsm.sessionStatus.CurrentFile = nil // No current file until next one starts
 	tsm.sessionStatus.LastUpdateTime = now
-	
+
 	// Update overall progress
 	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
-	
+
 	// Check if session is complete
 	if tsm.sessionStatus.IsSessionComplete() {
 		tsm.sessionStatus.CompletionTime = &now
 		tsm.sessionStatus.State = StatusSessionStateCompleted
 	}
-	
+
 	// Notify listeners
 	tsm.notifyFileStatusChanged(completedFile.FilePath, &oldFileStatus, completedFile)
 	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
-	
+
 	return nil
 }
 
@@ -235,44 +235,44 @@ func (tsm *TransferStatusManager) CompleteCurrentFile() error {
 func (tsm *TransferStatusManager) FailCurrentFile(err error) error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return ErrSessionNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
-	
+
 	oldSessionStatus := *tsm.sessionStatus
 	oldFileStatus := *tsm.sessionStatus.CurrentFile
-	
+
 	// Mark current file as failed
 	tsm.sessionStatus.CurrentFile.State = TransferStateFailed
 	tsm.sessionStatus.CurrentFile.LastError = err
-	
+
 	// Update session counters
 	tsm.sessionStatus.FailedFiles++
 	tsm.sessionStatus.PendingFiles--
-	
+
 	failedFile := tsm.sessionStatus.CurrentFile
 	tsm.sessionStatus.CurrentFile = nil // No current file until next one starts
 	tsm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Update overall progress
 	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
-	
+
 	// Check if session should be marked as failed (all files failed)
 	if tsm.sessionStatus.FailedFiles >= tsm.sessionStatus.TotalFiles {
 		now := time.Now()
 		tsm.sessionStatus.CompletionTime = &now
 		tsm.sessionStatus.State = StatusSessionStateFailed
 	}
-	
+
 	// Notify listeners
 	tsm.notifyFileStatusChanged(failedFile.FilePath, &oldFileStatus, failedFile)
 	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
-	
+
 	return nil
 }
 
@@ -280,30 +280,30 @@ func (tsm *TransferStatusManager) FailCurrentFile(err error) error {
 func (tsm *TransferStatusManager) PauseCurrentFile() error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return ErrSessionNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile.State != TransferStateActive {
 		return ErrInvalidStateTransition
 	}
-	
+
 	oldSessionStatus := *tsm.sessionStatus
 	oldFileStatus := *tsm.sessionStatus.CurrentFile
-	
+
 	tsm.sessionStatus.CurrentFile.State = TransferStatePaused
 	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	tsm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Notify listeners
 	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
 	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
-	
+
 	return nil
 }
 
@@ -311,30 +311,30 @@ func (tsm *TransferStatusManager) PauseCurrentFile() error {
 func (tsm *TransferStatusManager) ResumeCurrentFile() error {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return ErrSessionNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile == nil {
 		return ErrTransferNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile.State != TransferStatePaused {
 		return ErrInvalidStateTransition
 	}
-	
+
 	oldSessionStatus := *tsm.sessionStatus
 	oldFileStatus := *tsm.sessionStatus.CurrentFile
-	
+
 	tsm.sessionStatus.CurrentFile.State = TransferStateActive
 	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	tsm.sessionStatus.LastUpdateTime = time.Now()
-	
+
 	// Notify listeners
 	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
 	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
-	
+
 	return nil
 }
 
@@ -342,15 +342,15 @@ func (tsm *TransferStatusManager) ResumeCurrentFile() error {
 func (tsm *TransferStatusManager) GetCurrentFile() (*TransferStatus, error) {
 	tsm.mu.RLock()
 	defer tsm.mu.RUnlock()
-	
+
 	if tsm.sessionStatus == nil {
 		return nil, ErrSessionNotFound
 	}
-	
+
 	if tsm.sessionStatus.CurrentFile == nil {
 		return nil, ErrTransferNotFound
 	}
-	
+
 	// Return a copy to prevent external modification
 	statusCopy := *tsm.sessionStatus.CurrentFile
 	return &statusCopy, nil
@@ -360,7 +360,7 @@ func (tsm *TransferStatusManager) GetCurrentFile() (*TransferStatus, error) {
 func (tsm *TransferStatusManager) IsSessionActive() bool {
 	tsm.mu.RLock()
 	defer tsm.mu.RUnlock()
-	
+
 	return tsm.sessionStatus != nil && !tsm.sessionStatus.IsSessionComplete()
 }
 
@@ -368,7 +368,7 @@ func (tsm *TransferStatusManager) IsSessionActive() bool {
 func (tsm *TransferStatusManager) ResetSession() {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	tsm.sessionStatus = nil
 }
 
@@ -376,7 +376,7 @@ func (tsm *TransferStatusManager) ResetSession() {
 func (tsm *TransferStatusManager) AddStatusListener(listener StatusListener) {
 	tsm.eventsMu.Lock()
 	defer tsm.eventsMu.Unlock()
-	
+
 	tsm.listeners = append(tsm.listeners, listener)
 }
 
@@ -385,7 +385,7 @@ func (tsm *TransferStatusManager) AddStatusListener(listener StatusListener) {
 func (tsm *TransferStatusManager) Clear() {
 	tsm.mu.Lock()
 	defer tsm.mu.Unlock()
-	
+
 	tsm.sessionStatus = nil
 }
 
@@ -394,7 +394,7 @@ func (tsm *TransferStatusManager) Clear() {
 func (tsm *TransferStatusManager) notifyFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
 	tsm.eventsMu.RLock()
 	defer tsm.eventsMu.RUnlock()
-	
+
 	for _, listener := range tsm.listeners {
 		// Run in goroutine to prevent blocking
 		go func(l StatusListener) {
@@ -406,7 +406,7 @@ func (tsm *TransferStatusManager) notifyFileStatusChanged(filePath string, oldSt
 func (tsm *TransferStatusManager) notifySessionStatusChanged(oldStatus, newStatus *SessionTransferStatus) {
 	tsm.eventsMu.RLock()
 	defer tsm.eventsMu.RUnlock()
-	
+
 	for _, listener := range tsm.listeners {
 		// Run in goroutine to prevent blocking
 		go func(l StatusListener) {

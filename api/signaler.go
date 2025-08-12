@@ -73,14 +73,14 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := s.apiClient.HttpClient.Do(req)
-
+	resp, err = s.apiClient.HttpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to /ask endpoint: %w", err)
 	}
 
-	// Do not close the body here. Start a goroutine to process the streaming response.
-	go s.listenToSSEResponse(resp)
+	// Start a goroutine to process the streaming response.
+	// The response body will be closed in the goroutine via defer.
+	go s.listenToSSEResponse(resp) //nolint:bodyclose // Body is closed in goroutine
 
 	return nil
 }
@@ -173,7 +173,7 @@ func (s *APISignaler) handleCandidateEvent(data string) {
 	}
 }
 
-// WaitForAnswer blocks until the answer is received from the SSE stream or the context is cancelled.
+// WaitForAnswer blocks until the answer is received from the SSE stream or the context is canceled.
 func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescription, error) {
 	select {
 	case answer := <-s.answerChan:
@@ -185,7 +185,7 @@ func (s *APISignaler) WaitForAnswer(ctx context.Context) (*webrtc.SessionDescrip
 		// TODO: Handle receiver rejection options
 		return nil, err
 	case <-ctx.Done():
-		return nil, fmt.Errorf("signaler context cancelled: %w", ctx.Err())
+		return nil, fmt.Errorf("signaler context canceled: %w", ctx.Err())
 	}
 }
 
@@ -204,7 +204,7 @@ func (s *APISignaler) SendICECandidate(ctx context.Context, candidate webrtc.ICE
 	case err := <-sendCandErr:
 		return err
 	case <-ctx.Done():
-		return fmt.Errorf("context cancelled while sending ICE candidate: %w", ctx.Err())
+		return fmt.Errorf("context canceled while sending ICE candidate: %w", ctx.Err())
 	}
 }
 

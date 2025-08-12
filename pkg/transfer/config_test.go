@@ -177,7 +177,7 @@ func TestTransferConfig_GetChunkSizeForFile(t *testing.T) {
 		{
 			name:     "small file",
 			fileSize: int64(config.MinChunkSize / 2),
-			expected: int32(config.MinChunkSize / 2), // Should return actual file size
+			expected: config.MinChunkSize / 2, // Should return actual file size
 		},
 		{
 			name:     "normal file",
@@ -186,12 +186,12 @@ func TestTransferConfig_GetChunkSizeForFile(t *testing.T) {
 		},
 		{
 			name:     "large file",
-			fileSize: 200 * 1024 * 1024, // 200MB
+			fileSize: 200 * 1024 * 1024,    // 200MB
 			expected: config.ChunkSize * 2, // Should use larger chunks
 		},
 		{
 			name:     "very large file with max chunk limit",
-			fileSize: 1024 * 1024 * 1024, // 1GB
+			fileSize: 1024 * 1024 * 1024,   // 1GB
 			expected: config.ChunkSize * 2, // Should use 2x default, which is within max
 		},
 	}

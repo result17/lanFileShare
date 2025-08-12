@@ -21,10 +21,10 @@ type FileStructureSigner struct {
 
 // SignedFileStructure contains the file structure with digital signature
 type SignedFileStructure struct {
-	Files       []fileInfo.FileNode `json:"files"`
-	PublicKey   []byte              `json:"public_key"`
-	Signature   []byte              `json:"signature"`
-	
+	Files     []fileInfo.FileNode `json:"files"`
+	PublicKey []byte              `json:"public_key"`
+	Signature []byte              `json:"signature"`
+
 	// Enhanced structure information
 	Directories []fileInfo.FileNode `json:"directories,omitempty"`
 	RootNodes   []fileInfo.FileNode `json:"root_nodes,omitempty"`
@@ -33,12 +33,12 @@ type SignedFileStructure struct {
 
 // StructureMetadata contains additional information about the file structure
 type StructureMetadata struct {
-	TotalFiles    int   `json:"total_files"`
-	TotalDirs     int   `json:"total_dirs"`
-	TotalSize     int64 `json:"total_size"`
-	CreatedAt     int64 `json:"created_at"`
-	SignedAt      int64 `json:"signed_at"`
-	Version       string `json:"version"`
+	TotalFiles int    `json:"total_files"`
+	TotalDirs  int    `json:"total_dirs"`
+	TotalSize  int64  `json:"total_size"`
+	CreatedAt  int64  `json:"created_at"`
+	SignedAt   int64  `json:"signed_at"`
+	Version    string `json:"version"`
 }
 
 const (
@@ -94,7 +94,7 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 	if fsm == nil {
 		return nil, fmt.Errorf("FileStructureManager cannot be nil")
 	}
-	
+
 	// Convert pointer slices to value slices for consistent JSON serialization
 	var files []fileInfo.FileNode
 	for _, file := range fsm.GetAllFiles() {
@@ -102,14 +102,14 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 			files = append(files, *file)
 		}
 	}
-	
+
 	var dirs []fileInfo.FileNode
 	for _, dir := range fsm.GetAllDirs() {
 		if dir != nil {
 			dirs = append(dirs, *dir)
 		}
 	}
-	
+
 	var rootNodes []fileInfo.FileNode
 	for _, root := range fsm.RootNodes {
 		if root != nil {
@@ -143,24 +143,24 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 		},
 		Timestamp: time.Now().Unix(),
 	}
-	
+
 	// Serialize and sign
 	dataJSON, err := json.Marshal(signatureData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal signature data: %w", err)
 	}
-	
+
 	hash := sha256.Sum256(dataJSON)
 	signature, err := rsa.SignPKCS1v15(rand.Reader, s.keyPair.PrivateKey, crypto.SHA256, hash[:])
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign data: %w", err)
 	}
-	
+
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(s.keyPair.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
-	
+
 	// Create metadata
 	metadata := &StructureMetadata{
 		TotalFiles: fsm.GetFileCount(),
@@ -170,7 +170,7 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 		SignedAt:   time.Now().Unix(),
 		Version:    "1.0",
 	}
-	
+
 	return &SignedFileStructure{
 		Files:       files,
 		PublicKey:   publicKeyBytes,
@@ -187,7 +187,7 @@ func CreateSignedFileStructureFromManager(fsm *transfer.FileStructureManager) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
-	
+
 	return signer.SignFileStructureManager(fsm)
 }
 
@@ -269,7 +269,7 @@ func CreateSignedFileStructure(filePaths []string) (*SignedFileStructure, error)
 
 	// Create FileStructureManager from paths
 	fsm := transfer.NewFileStructureManager()
-	
+
 	for _, path := range filePaths {
 		err := fsm.AddPath(path)
 		if err != nil {

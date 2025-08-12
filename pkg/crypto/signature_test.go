@@ -77,7 +77,7 @@ func TestSignFileStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create node: %v", err)
 	}
-	
+
 	err = fsm.AddFileNode(&node)
 	if err != nil {
 		t.Fatalf("Failed to add path to FileStructureManager: %v", err)
@@ -565,7 +565,7 @@ func TestSignFileStructureWithLargeData(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test file %d: %v", i, err)
 		}
-		
+
 		err = fsm.AddPath(testFile)
 		if err != nil {
 			t.Fatalf("Failed to add test file %d: %v", i, err)

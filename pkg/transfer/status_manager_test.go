@@ -7,23 +7,23 @@ import (
 
 func TestNewTransferStatusManager(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	if manager == nil {
 		t.Fatal("NewTransferStatusManager returned nil")
 	}
-	
+
 	if manager.config == nil {
 		t.Error("config should be initialized")
 	}
-	
+
 	if manager.sessionStatus != nil {
 		t.Error("sessionStatus should be nil initially")
 	}
-	
+
 	if manager.listeners == nil {
 		t.Error("listeners should be initialized")
 	}
-	
+
 	// Test that default config is used
 	defaultConfig := DefaultTransferConfig()
 	if manager.config.ChunkSize != defaultConfig.ChunkSize {
@@ -42,30 +42,30 @@ func TestNewTransferStatusManagerWithConfig(t *testing.T) {
 		DefaultRetryPolicy:     DefaultRetryPolicy(),
 		EventBufferSize:        50,
 	}
-	
+
 	manager := NewTransferStatusManagerWithConfig(customConfig)
-	
+
 	if manager == nil {
 		t.Fatal("NewTransferStatusManagerWithConfig returned nil")
 	}
-	
+
 	if manager.config.ChunkSize != customConfig.ChunkSize {
 		t.Errorf("Expected ChunkSize %d, got %d", customConfig.ChunkSize, manager.config.ChunkSize)
 	}
-	
+
 	if manager.config.MaxConcurrentTransfers != customConfig.MaxConcurrentTransfers {
-		t.Errorf("Expected MaxConcurrentTransfers %d, got %d", 
+		t.Errorf("Expected MaxConcurrentTransfers %d, got %d",
 			customConfig.MaxConcurrentTransfers, manager.config.MaxConcurrentTransfers)
 	}
 }
 
 func TestNewTransferStatusManagerWithNilConfig(t *testing.T) {
 	manager := NewTransferStatusManagerWithConfig(nil)
-	
+
 	if manager == nil {
 		t.Fatal("NewTransferStatusManagerWithConfig with nil config returned nil")
 	}
-	
+
 	// Should use default config
 	defaultConfig := DefaultTransferConfig()
 	if manager.config.ChunkSize != defaultConfig.ChunkSize {
@@ -75,7 +75,7 @@ func TestNewTransferStatusManagerWithNilConfig(t *testing.T) {
 
 func TestTransferStatusManager_InitializeSession(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	tests := []struct {
 		name        string
 		sessionID   string
@@ -119,14 +119,14 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 			expectError: false,
 		},
 	}
-	
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Reset manager for each test
 			manager.Clear()
-			
+
 			err := manager.InitializeSession(test.sessionID, test.totalFiles, test.totalBytes)
-			
+
 			if test.expectError {
 				if err == nil {
 					t.Error("Expected error, but got nil")
@@ -135,7 +135,7 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 				}
-				
+
 				// Verify session was created
 				status, err := manager.GetSessionStatus()
 				if err != nil {
@@ -161,13 +161,13 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 
 func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initialize session first
 	err := manager.InitializeSession("test-session", 3, 3072)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	tests := []struct {
 		name        string
 		filePath    string
@@ -199,11 +199,11 @@ func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 			expectError: false,
 		},
 	}
-	
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			status, err := manager.StartFileTransfer(test.filePath, test.fileSize)
-			
+
 			if test.expectError {
 				if err == nil {
 					t.Error("Expected error, but got nil")
@@ -228,7 +228,7 @@ func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 						t.Errorf("Expected state %s, got %s", TransferStateActive, status.State)
 					}
 				}
-				
+
 				// Complete this transfer before starting next one
 				manager.CompleteCurrentFile()
 			}
@@ -238,7 +238,7 @@ func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 
 func TestTransferStatusManager_StartFileTransfer_NoSession(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Try to start file transfer without initializing session
 	_, err := manager.StartFileTransfer("/test/file.txt", 1024)
 	if err == nil {
@@ -251,19 +251,19 @@ func TestTransferStatusManager_StartFileTransfer_NoSession(t *testing.T) {
 
 func TestTransferStatusManager_StartFileTransfer_ActiveFile(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initialize session
 	err := manager.InitializeSession("test-session", 2, 2048)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Start first file transfer
 	_, err = manager.StartFileTransfer("/test/file1.txt", 1024)
 	if err != nil {
 		t.Fatalf("First StartFileTransfer failed: %v", err)
 	}
-	
+
 	// Try to start second file transfer while first is active
 	_, err = manager.StartFileTransfer("/test/file2.txt", 1024)
 	if err == nil {
@@ -273,7 +273,7 @@ func TestTransferStatusManager_StartFileTransfer_ActiveFile(t *testing.T) {
 
 func TestTransferStatusManager_GetSessionStatus(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Test getting session status when no session exists
 	_, err := manager.GetSessionStatus()
 	if err == nil {
@@ -282,23 +282,23 @@ func TestTransferStatusManager_GetSessionStatus(t *testing.T) {
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("Expected ErrSessionNotFound, got %v", err)
 	}
-	
+
 	// Initialize session
 	sessionID := "test-session"
 	totalFiles := 3
 	totalBytes := int64(3072)
-	
+
 	err = manager.InitializeSession(sessionID, totalFiles, totalBytes)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Get session status
 	status, err := manager.GetSessionStatus()
 	if err != nil {
 		t.Errorf("GetSessionStatus failed: %v", err)
 	}
-	
+
 	// Verify the status
 	if status.SessionID != sessionID {
 		t.Errorf("Expected SessionID %s, got %s", sessionID, status.SessionID)
@@ -319,13 +319,13 @@ func TestTransferStatusManager_GetSessionStatus(t *testing.T) {
 
 func TestTransferStatusManager_UpdateFileProgress(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initialize session
 	err := manager.InitializeSession("test-session", 1, 1024)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Start file transfer
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
@@ -333,35 +333,35 @@ func TestTransferStatusManager_UpdateFileProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartFileTransfer failed: %v", err)
 	}
-	
+
 	// Update progress
 	bytesSent := int64(512)
 	err = manager.UpdateFileProgress(bytesSent)
 	if err != nil {
 		t.Errorf("UpdateFileProgress failed: %v", err)
 	}
-	
+
 	// Verify progress was updated
 	currentFile, err := manager.GetCurrentFile()
 	if err != nil {
 		t.Fatalf("GetCurrentFile failed: %v", err)
 	}
-	
+
 	if currentFile.BytesSent != bytesSent {
 		t.Errorf("Expected BytesSent %d, got %d", bytesSent, currentFile.BytesSent)
 	}
-	
+
 	// Verify session progress was updated
 	sessionStatus, err := manager.GetSessionStatus()
 	if err != nil {
 		t.Fatalf("GetSessionStatus failed: %v", err)
 	}
-	
+
 	expectedProgress := float64(bytesSent) / float64(fileSize) * 100.0
 	if sessionStatus.OverallProgress != expectedProgress {
 		t.Errorf("Expected OverallProgress %.2f, got %.2f", expectedProgress, sessionStatus.OverallProgress)
 	}
-	
+
 	// Test invalid updates
 	tests := []struct {
 		name      string
@@ -371,7 +371,7 @@ func TestTransferStatusManager_UpdateFileProgress(t *testing.T) {
 		{"negative bytes", -1, true},
 		{"valid progress", fileSize, false},
 	}
-	
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			err := manager.UpdateFileProgress(test.bytesSent)
@@ -386,7 +386,7 @@ func TestTransferStatusManager_UpdateFileProgress(t *testing.T) {
 }
 func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Test completing when no session exists
 	err := manager.CompleteCurrentFile()
 	if err == nil {
@@ -395,13 +395,13 @@ func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("Expected ErrSessionNotFound, got %v", err)
 	}
-	
+
 	// Initialize session
 	err = manager.InitializeSession("test-session", 2, 2048)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Test completing when no current file
 	err = manager.CompleteCurrentFile()
 	if err == nil {
@@ -410,7 +410,7 @@ func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 	if !errors.Is(err, ErrTransferNotFound) {
 		t.Errorf("Expected ErrTransferNotFound, got %v", err)
 	}
-	
+
 	// Start file transfer
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
@@ -418,31 +418,31 @@ func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartFileTransfer failed: %v", err)
 	}
-	
+
 	// Complete the transfer
 	err = manager.CompleteCurrentFile()
 	if err != nil {
 		t.Errorf("CompleteCurrentFile failed: %v", err)
 	}
-	
+
 	// Verify session status was updated
 	sessionStatus, err := manager.GetSessionStatus()
 	if err != nil {
 		t.Fatalf("GetSessionStatus failed: %v", err)
 	}
-	
+
 	if sessionStatus.CompletedFiles != 1 {
 		t.Errorf("Expected CompletedFiles 1, got %d", sessionStatus.CompletedFiles)
 	}
-	
+
 	if sessionStatus.PendingFiles != 1 {
 		t.Errorf("Expected PendingFiles 1, got %d", sessionStatus.PendingFiles)
 	}
-	
+
 	if sessionStatus.BytesCompleted != fileSize {
 		t.Errorf("Expected BytesCompleted %d, got %d", fileSize, sessionStatus.BytesCompleted)
 	}
-	
+
 	if sessionStatus.CurrentFile != nil {
 		t.Error("CurrentFile should be nil after completion")
 	}
@@ -451,7 +451,7 @@ func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 func TestTransferStatusManager_FailCurrentFile(t *testing.T) {
 	manager := NewTransferStatusManager()
 	testError := errors.New("test error")
-	
+
 	// Test failing when no session exists
 	err := manager.FailCurrentFile(testError)
 	if err == nil {
@@ -460,13 +460,13 @@ func TestTransferStatusManager_FailCurrentFile(t *testing.T) {
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("Expected ErrSessionNotFound, got %v", err)
 	}
-	
+
 	// Initialize session
 	err = manager.InitializeSession("test-session", 2, 2048)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Test failing when no current file
 	err = manager.FailCurrentFile(testError)
 	if err == nil {
@@ -475,7 +475,7 @@ func TestTransferStatusManager_FailCurrentFile(t *testing.T) {
 	if !errors.Is(err, ErrTransferNotFound) {
 		t.Errorf("Expected ErrTransferNotFound, got %v", err)
 	}
-	
+
 	// Start file transfer
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
@@ -483,27 +483,27 @@ func TestTransferStatusManager_FailCurrentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartFileTransfer failed: %v", err)
 	}
-	
+
 	// Fail the transfer
 	err = manager.FailCurrentFile(testError)
 	if err != nil {
 		t.Errorf("FailCurrentFile failed: %v", err)
 	}
-	
+
 	// Verify session status was updated
 	sessionStatus, err := manager.GetSessionStatus()
 	if err != nil {
 		t.Fatalf("GetSessionStatus failed: %v", err)
 	}
-	
+
 	if sessionStatus.FailedFiles != 1 {
 		t.Errorf("Expected FailedFiles 1, got %d", sessionStatus.FailedFiles)
 	}
-	
+
 	if sessionStatus.PendingFiles != 1 {
 		t.Errorf("Expected PendingFiles 1, got %d", sessionStatus.PendingFiles)
 	}
-	
+
 	if sessionStatus.CurrentFile != nil {
 		t.Error("CurrentFile should be nil after failure")
 	}
@@ -511,13 +511,13 @@ func TestTransferStatusManager_FailCurrentFile(t *testing.T) {
 
 func TestTransferStatusManager_PauseResumeCurrentFile(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initialize session
 	err := manager.InitializeSession("test-session", 1, 1024)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Start file transfer
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
@@ -525,35 +525,35 @@ func TestTransferStatusManager_PauseResumeCurrentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartFileTransfer failed: %v", err)
 	}
-	
+
 	// Pause the transfer
 	err = manager.PauseCurrentFile()
 	if err != nil {
 		t.Errorf("PauseCurrentFile failed: %v", err)
 	}
-	
+
 	// Verify the transfer is paused
 	currentFile, err := manager.GetCurrentFile()
 	if err != nil {
 		t.Fatalf("GetCurrentFile failed: %v", err)
 	}
-	
+
 	if currentFile.State != TransferStatePaused {
 		t.Errorf("Expected state %s, got %s", TransferStatePaused, currentFile.State)
 	}
-	
+
 	// Resume the transfer
 	err = manager.ResumeCurrentFile()
 	if err != nil {
 		t.Errorf("ResumeCurrentFile failed: %v", err)
 	}
-	
+
 	// Verify the transfer is active again
 	currentFile, err = manager.GetCurrentFile()
 	if err != nil {
 		t.Fatalf("GetCurrentFile failed: %v", err)
 	}
-	
+
 	if currentFile.State != TransferStateActive {
 		t.Errorf("Expected state %s, got %s", TransferStateActive, currentFile.State)
 	}
@@ -561,7 +561,7 @@ func TestTransferStatusManager_PauseResumeCurrentFile(t *testing.T) {
 
 func TestTransferStatusManager_GetCurrentFile(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Test getting current file when no session exists
 	_, err := manager.GetCurrentFile()
 	if err == nil {
@@ -570,13 +570,13 @@ func TestTransferStatusManager_GetCurrentFile(t *testing.T) {
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("Expected ErrSessionNotFound, got %v", err)
 	}
-	
+
 	// Initialize session
 	err = manager.InitializeSession("test-session", 1, 1024)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Test getting current file when no file is active
 	_, err = manager.GetCurrentFile()
 	if err == nil {
@@ -585,7 +585,7 @@ func TestTransferStatusManager_GetCurrentFile(t *testing.T) {
 	if !errors.Is(err, ErrTransferNotFound) {
 		t.Errorf("Expected ErrTransferNotFound, got %v", err)
 	}
-	
+
 	// Start file transfer
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
@@ -593,13 +593,13 @@ func TestTransferStatusManager_GetCurrentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartFileTransfer failed: %v", err)
 	}
-	
+
 	// Get current file
 	currentFile, err := manager.GetCurrentFile()
 	if err != nil {
 		t.Errorf("GetCurrentFile failed: %v", err)
 	}
-	
+
 	// Verify the file matches
 	if currentFile.FilePath != originalStatus.FilePath {
 		t.Errorf("Expected FilePath %s, got %s", originalStatus.FilePath, currentFile.FilePath)
@@ -611,34 +611,34 @@ func TestTransferStatusManager_GetCurrentFile(t *testing.T) {
 
 func TestTransferStatusManager_IsSessionActive(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initially should be false
 	if manager.IsSessionActive() {
 		t.Error("Expected IsSessionActive to be false initially")
 	}
-	
+
 	// Initialize session
 	err := manager.InitializeSession("test-session", 1, 1024)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Should be true now
 	if !manager.IsSessionActive() {
 		t.Error("Expected IsSessionActive to be true after initialization")
 	}
-	
+
 	// Start and complete a file transfer
 	_, err = manager.StartFileTransfer("/test/file.txt", 1024)
 	if err != nil {
 		t.Fatalf("StartFileTransfer failed: %v", err)
 	}
-	
+
 	err = manager.CompleteCurrentFile()
 	if err != nil {
 		t.Fatalf("CompleteCurrentFile failed: %v", err)
 	}
-	
+
 	// Should be false now (session completed)
 	if manager.IsSessionActive() {
 		t.Error("Expected IsSessionActive to be false after session completion")
@@ -646,26 +646,26 @@ func TestTransferStatusManager_IsSessionActive(t *testing.T) {
 }
 func TestTransferStatusManager_ResetSession(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initialize session
 	err := manager.InitializeSession("test-session", 1, 1024)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Verify session exists
 	if !manager.IsSessionActive() {
 		t.Error("Expected session to be active")
 	}
-	
+
 	// Reset session
 	manager.ResetSession()
-	
+
 	// Verify session is cleared
 	if manager.IsSessionActive() {
 		t.Error("Expected session to be inactive after reset")
 	}
-	
+
 	_, err = manager.GetSessionStatus()
 	if err == nil {
 		t.Error("Expected error getting session status after reset")
@@ -677,26 +677,26 @@ func TestTransferStatusManager_ResetSession(t *testing.T) {
 
 func TestTransferStatusManager_Clear(t *testing.T) {
 	manager := NewTransferStatusManager()
-	
+
 	// Initialize session
 	err := manager.InitializeSession("test-session", 1, 1024)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}
-	
+
 	// Verify session exists
 	if !manager.IsSessionActive() {
 		t.Error("Expected session to be active")
 	}
-	
+
 	// Clear manager
 	manager.Clear()
-	
+
 	// Verify session is cleared
 	if manager.IsSessionActive() {
 		t.Error("Expected session to be inactive after clear")
 	}
-	
+
 	_, err = manager.GetSessionStatus()
 	if err == nil {
 		t.Error("Expected error getting session status after clear")

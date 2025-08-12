@@ -32,10 +32,10 @@ type App struct {
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
-	
+
 	// File structure management
-	fileStructure   *transfer.FileStructureManager
-	structureMu     sync.RWMutex // Protect file structure access
+	fileStructure *transfer.FileStructureManager
+	structureMu   sync.RWMutex // Protect file structure access
 }
 
 // NewApp creates a new sender application instance.
@@ -69,22 +69,22 @@ func (a *App) AppEvents() chan<- appevents.AppEvent {
 func (a *App) PrepareFiles(files []fileInfo.FileNode) error {
 	a.structureMu.Lock()
 	defer a.structureMu.Unlock()
-	
+
 	// Clear existing files
 	a.fileStructure.Clear()
-	
+
 	// Add new files
 	for _, file := range files {
 		if err := a.fileStructure.AddFileNode(&file); err != nil {
 			return fmt.Errorf("failed to add file %s: %w", file.Path, err)
 		}
 	}
-	
-	slog.Info("Files prepared for sending", 
+
+	slog.Info("Files prepared for sending",
 		"fileCount", a.fileStructure.GetFileCount(),
 		"dirCount", a.fileStructure.GetDirCount(),
 		"totalSize", a.fileStructure.GetTotalSize())
-	
+
 	return nil
 }
 
@@ -92,7 +92,7 @@ func (a *App) PrepareFiles(files []fileInfo.FileNode) error {
 func (a *App) GetFileStructure() *transfer.FileStructureManager {
 	a.structureMu.RLock()
 	defer a.structureMu.RUnlock()
-	
+
 	// Return the file structure manager (it's thread-safe internally)
 	return a.fileStructure
 }
@@ -157,7 +157,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		if err := a.PrepareFiles(files); err != nil {
 			return fmt.Errorf("failed to prepare files: %w", err)
 		}
-		
+
 		// Use the shorter of the two timeouts: main context or transfer timeout
 		transferCtx, cancel := context.WithTimeout(taskCtx, a.transferTimeout)
 		defer cancel()
