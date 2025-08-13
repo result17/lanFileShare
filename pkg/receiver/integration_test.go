@@ -11,6 +11,7 @@ import (
 )
 
 // TestFileReceiver_IntegrationTest tests the complete file reception workflow with integrity verification
+//nolint:gocyclo
 func TestFileReceiver_IntegrationTest(t *testing.T) {
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "integration_test")

@@ -14,6 +14,7 @@ import (
 )
 
 // TestFileReceiver_IntegrityVerification tests the integrity verification functionality
+//nolint:gocyclo
 func TestFileReceiver_IntegrityVerification(t *testing.T) {
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "file_receiver_test")
