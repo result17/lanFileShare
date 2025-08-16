@@ -3,33 +3,25 @@ package transfer
 import (
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewTransferStatusManager(t *testing.T) {
 	manager := NewTransferStatusManager()
 
-	if manager == nil {
-		t.Fatal("NewTransferStatusManager returned nil")
-	}
+	require.NotNil(t, manager, "NewTransferStatusManager returned nil")
 
-	if manager.config == nil {
-		t.Error("config should be initialized")
-	}
-
-	if manager.sessionStatus != nil {
-		t.Error("sessionStatus should be nil initially")
-	}
-
-	if manager.listeners == nil {
-		t.Error("listeners should be initialized")
-	}
+	require.NotNil(t, manager.config, "config should be initialized")
+	require.Nil(t, manager.sessionStatus, "sessionStatus should be nil initially")
+	require.NotNil(t, manager.listeners, "listeners should be initialized")
 
 	// Test that default config is used
 	defaultConfig := DefaultTransferConfig()
-	if manager.config.ChunkSize != defaultConfig.ChunkSize {
-		t.Errorf("Expected ChunkSize %d, got %d", defaultConfig.ChunkSize, manager.config.ChunkSize)
+	require.Equal(t, defaultConfig.ChunkSize, manager.config.ChunkSize, "Should use default ChunkSize")
 	}
-}
+
 
 func TestNewTransferStatusManagerWithConfig(t *testing.T) {
 	customConfig := &TransferConfig{
@@ -45,32 +37,20 @@ func TestNewTransferStatusManagerWithConfig(t *testing.T) {
 
 	manager := NewTransferStatusManagerWithConfig(customConfig)
 
-	if manager == nil {
-		t.Fatal("NewTransferStatusManagerWithConfig returned nil")
-	}
+	require.NotNil(t, manager, "NewTransferStatusManagerWithConfig returned nil")
 
-	if manager.config.ChunkSize != customConfig.ChunkSize {
-		t.Errorf("Expected ChunkSize %d, got %d", customConfig.ChunkSize, manager.config.ChunkSize)
-	}
-
-	if manager.config.MaxConcurrentTransfers != customConfig.MaxConcurrentTransfers {
-		t.Errorf("Expected MaxConcurrentTransfers %d, got %d",
-			customConfig.MaxConcurrentTransfers, manager.config.MaxConcurrentTransfers)
-	}
+	require.Equal(t, customConfig.ChunkSize, manager.config.ChunkSize, "Should use custom ChunkSize")
+	require.Equal(t, customConfig.MaxConcurrentTransfers, manager.config.MaxConcurrentTransfers, "Should use custom MaxConcurrentTransfers")
 }
 
 func TestNewTransferStatusManagerWithNilConfig(t *testing.T) {
 	manager := NewTransferStatusManagerWithConfig(nil)
 
-	if manager == nil {
-		t.Fatal("NewTransferStatusManagerWithConfig with nil config returned nil")
-	}
+	require.NotNil(t, manager, "NewTransferStatusManagerWithConfig with nil config returned nil")
 
 	// Should use default config
 	defaultConfig := DefaultTransferConfig()
-	if manager.config.ChunkSize != defaultConfig.ChunkSize {
-		t.Errorf("Expected default ChunkSize %d, got %d", defaultConfig.ChunkSize, manager.config.ChunkSize)
-	}
+	require.Equal(t, defaultConfig.ChunkSize, manager.config.ChunkSize, "Should use default ChunkSize when config is nil")
 }
 
 func TestTransferStatusManager_InitializeSession(t *testing.T) {
@@ -128,32 +108,18 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 			err := manager.InitializeSession(test.sessionID, test.totalFiles, test.totalBytes)
 
 			if test.expectError {
-				if err == nil {
-					t.Error("Expected error, but got nil")
-				}
+				require.Error(t, err, "Expected error, but got nil")
 			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
+				require.NoError(t, err, "Unexpected error")
 
 				// Verify session was created
 				status, err := manager.GetSessionStatus()
-				if err != nil {
-					t.Errorf("GetSessionStatus failed: %v", err)
-				} else {
-					if status.SessionID != test.sessionID {
-						t.Errorf("Expected SessionID %s, got %s", test.sessionID, status.SessionID)
-					}
-					if status.TotalFiles != test.totalFiles {
-						t.Errorf("Expected TotalFiles %d, got %d", test.totalFiles, status.TotalFiles)
-					}
-					if status.TotalBytes != test.totalBytes {
-						t.Errorf("Expected TotalBytes %d, got %d", test.totalBytes, status.TotalBytes)
-					}
-					if status.State != StatusSessionStateActive {
-						t.Errorf("Expected state %s, got %s", StatusSessionStateActive, status.State)
-					}
-				}
+				require.NoError(t, err, "GetSessionStatus should succeed")
+				
+				assert.Equal(t, test.sessionID, status.SessionID, "SessionID should match")
+				assert.Equal(t, test.totalFiles, status.TotalFiles, "TotalFiles should match")
+				assert.Equal(t, test.totalBytes, status.TotalBytes, "TotalBytes should match")
+				assert.Equal(t, StatusSessionStateActive, status.State, "State should be active")
 			}
 		})
 	}
@@ -164,9 +130,7 @@ func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 
 	// Initialize session first
 	err := manager.InitializeSession("test-session", 3, 3072)
-	if err != nil {
-		t.Fatalf("InitializeSession failed: %v", err)
-	}
+	require.NoError(t, err, "InitializeSession failed")
 
 	tests := []struct {
 		name        string
@@ -241,12 +205,8 @@ func TestTransferStatusManager_StartFileTransfer_NoSession(t *testing.T) {
 
 	// Try to start file transfer without initializing session
 	_, err := manager.StartFileTransfer("/test/file.txt", 1024)
-	if err == nil {
-		t.Error("Expected error when starting file transfer without session")
-	}
-	if !errors.Is(err, ErrSessionNotFound) {
-		t.Errorf("Expected ErrSessionNotFound, got %v", err)
-	}
+	require.Error(t, err, "Expected error when starting file transfer without session")
+	assert.ErrorIs(t, err, ErrSessionNotFound, "Should return ErrSessionNotFound")
 }
 
 func TestTransferStatusManager_StartFileTransfer_ActiveFile(t *testing.T) {
@@ -254,21 +214,15 @@ func TestTransferStatusManager_StartFileTransfer_ActiveFile(t *testing.T) {
 
 	// Initialize session
 	err := manager.InitializeSession("test-session", 2, 2048)
-	if err != nil {
-		t.Fatalf("InitializeSession failed: %v", err)
-	}
+	require.NoError(t, err, "InitializeSession failed")
 
 	// Start first file transfer
 	_, err = manager.StartFileTransfer("/test/file1.txt", 1024)
-	if err != nil {
-		t.Fatalf("First StartFileTransfer failed: %v", err)
-	}
+	require.NoError(t, err, "First StartFileTransfer failed")
 
 	// Try to start second file transfer while first is active
 	_, err = manager.StartFileTransfer("/test/file2.txt", 1024)
-	if err == nil {
-		t.Error("Expected error when starting second file transfer while first is active")
-	}
+	require.Error(t, err, "Expected error when starting second file transfer while first is active")
 }
 
 func TestTransferStatusManager_GetSessionStatus(t *testing.T) {
@@ -289,9 +243,7 @@ func TestTransferStatusManager_GetSessionStatus(t *testing.T) {
 	totalBytes := int64(3072)
 
 	err = manager.InitializeSession(sessionID, totalFiles, totalBytes)
-	if err != nil {
-		t.Fatalf("InitializeSession failed: %v", err)
-	}
+	require.NoError(t, err, "InitializeSession failed")
 
 	// Get session status
 	status, err := manager.GetSessionStatus()
@@ -330,32 +282,22 @@ func TestTransferStatusManager_UpdateFileProgress(t *testing.T) {
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
 	_, err = manager.StartFileTransfer(filePath, fileSize)
-	if err != nil {
-		t.Fatalf("StartFileTransfer failed: %v", err)
-	}
+	require.NoError(t, err, "StartFileTransfer failed")
 
 	// Update progress
 	bytesSent := int64(512)
 	err = manager.UpdateFileProgress(bytesSent)
-	if err != nil {
-		t.Errorf("UpdateFileProgress failed: %v", err)
-	}
+	require.NoError(t, err, "UpdateFileProgress failed")
 
 	// Verify progress was updated
 	currentFile, err := manager.GetCurrentFile()
-	if err != nil {
-		t.Fatalf("GetCurrentFile failed: %v", err)
-	}
+	require.NoError(t, err, "GetCurrentFile failed")
 
-	if currentFile.BytesSent != bytesSent {
-		t.Errorf("Expected BytesSent %d, got %d", bytesSent, currentFile.BytesSent)
-	}
+	require.Equal(t, bytesSent, currentFile.BytesSent, "Expected BytesSent to match")
 
 	// Verify session progress was updated
 	sessionStatus, err := manager.GetSessionStatus()
-	if err != nil {
-		t.Fatalf("GetSessionStatus failed: %v", err)
-	}
+	require.NoError(t, err, "GetSessionStatus failed")
 
 	expectedProgress := float64(bytesSent) / float64(fileSize) * 100.0
 	if sessionStatus.OverallProgress != expectedProgress {
@@ -415,33 +357,20 @@ func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 	filePath := "/test/file.txt"
 	fileSize := int64(1024)
 	_, err = manager.StartFileTransfer(filePath, fileSize)
-	if err != nil {
-		t.Fatalf("StartFileTransfer failed: %v", err)
-	}
+	require.NoError(t, err, "StartFileTransfer failed")
 
 	// Complete the transfer
 	err = manager.CompleteCurrentFile()
-	if err != nil {
-		t.Errorf("CompleteCurrentFile failed: %v", err)
-	}
+	require.NoError(t, err, "CompleteCurrentFile failed")
 
 	// Verify session status was updated
 	sessionStatus, err := manager.GetSessionStatus()
-	if err != nil {
-		t.Fatalf("GetSessionStatus failed: %v", err)
-	}
+	require.NoError(t, err, "GetSessionStatus failed")
 
-	if sessionStatus.CompletedFiles != 1 {
-		t.Errorf("Expected CompletedFiles 1, got %d", sessionStatus.CompletedFiles)
-	}
+	assert.Equal(t, 1, sessionStatus.CompletedFiles, "Expected CompletedFiles 1")
+	assert.Equal(t, 1, sessionStatus.PendingFiles, "Expected PendingFiles 1")
 
-	if sessionStatus.PendingFiles != 1 {
-		t.Errorf("Expected PendingFiles 1, got %d", sessionStatus.PendingFiles)
-	}
-
-	if sessionStatus.BytesCompleted != fileSize {
-		t.Errorf("Expected BytesCompleted %d, got %d", fileSize, sessionStatus.BytesCompleted)
-	}
+	assert.Equal(t, fileSize, sessionStatus.BytesCompleted, "BytesCompleted should match file size")
 
 	if sessionStatus.CurrentFile != nil {
 		t.Error("CurrentFile should be nil after completion")

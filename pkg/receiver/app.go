@@ -19,10 +19,9 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/app"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
+	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
-	"github.com/rescp17/lanFileSharer/pkg/transfer"
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 )
 
@@ -39,6 +38,7 @@ type App struct {
 	activeConn           webrtcPkg.ReceiverConnection
 	connMu               sync.Mutex
 	errChan              chan error
+	outputPath           string
 
 	// File reception management
 	fileReceiver *FileReceiver
@@ -46,13 +46,37 @@ type App struct {
 }
 
 // NewApp creates a new receiver application instance.
-func NewApp(port int) *App {
+func NewApp(port int, outputPath string) *App {
 	uiMessages := make(chan tea.Msg, 10)
 	stateManager := app.NewSingleRequestManager()
 	apiHandler := api.NewAPI(uiMessages, stateManager)
 
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
+
+	exists, isDir, err := util.CheckDirectory(outputPath)
+
+	var path string
+	if err != nil || !exists || !isDir {
+		if err != nil {
+			slog.Error("Failed to check output directory", "error", err)
+		} else if !exists {
+			slog.Error("Output directory does not exist", "path", outputPath)
+		} else if !isDir {
+			slog.Error("Output path exists but is not a directory", "path", outputPath)
+		}
+
+		// Fallback to current working directory
+		path, err = os.Getwd()
+		if err != nil {
+			slog.Error("Failed to get current working directory", "error", err)
+			return nil
+		}
+		slog.Info("Using current working directory as output path", "path", path)
+	} else {
+		path = outputPath
+		slog.Info("Using specified output directory", "path", path)
+	}
 
 	return &App{
 		guard:                concurrency.NewConcurrencyGuard(),
@@ -64,6 +88,7 @@ func NewApp(port int) *App {
 		stateManager:         stateManager,
 		inboundCandidateChan: make(chan webrtc.ICECandidateInit, 10),
 		errChan:              make(chan error, 1),
+		outputPath:           path,
 	}
 }
 
@@ -126,8 +151,10 @@ func (a *App) Run(ctx context.Context) error {
 				}()
 			case receiver.FileRequestRejected:
 				slog.Info("User rejected file transfer.")
-				err := a.stateManager.SetDecision(app.Rejected)
-				return fmt.Errorf("file request rejected: %w", err)
+				if err := a.stateManager.SetDecision(app.Rejected); err != nil {
+					slog.Error("Failed to set decision", "error", err)
+				}
+				continue
 			default:
 				slog.Warn("Received unhandled app event", "event", event)
 			}
@@ -326,52 +353,7 @@ func (a *App) setActiveConn(conn webrtcPkg.ReceiverConnection) {
 	}
 }
 
-// FileReceiver manages the reception and reconstruction of files
-type FileReceiver struct {
-	serializer   transfer.MessageSerializer
-	currentFiles map[string]*FileReception // filePath -> FileReception
-	outputDir    string
-	mu           sync.RWMutex
-	uiMessages   chan<- tea.Msg // Channel to send status updates to UI
-}
 
-// ReceptionStatus represents the current status of file reception
-type ReceptionStatus int
-
-const (
-	StatusPending ReceptionStatus = iota
-	StatusReceiving
-	StatusVerifying
-	StatusCompleted
-	StatusFailed
-	StatusCancelled
-)
-
-// FileReception tracks the state of receiving a single file
-type FileReception struct {
-	FilePath        string
-	FileName        string
-	TotalSize       int64
-	ReceivedSize    int64
-	ExpectedHash    string
-	File            *os.File
-	Chunks          map[uint32][]byte // sequenceNo -> data
-	LastSequence    uint32
-	IsComplete      bool
-	Status          ReceptionStatus
-	VerificationErr error
-	OutputPath      string // Full path to the output file
-}
-
-// NewFileReceiver creates a new file receiver
-func NewFileReceiver(outputDir string, uiMessages chan<- tea.Msg) *FileReceiver {
-	return &FileReceiver{
-		serializer:   transfer.NewJSONSerializer(),
-		currentFiles: make(map[string]*FileReception),
-		outputDir:    outputDir,
-		uiMessages:   uiMessages,
-	}
-}
 
 // handleFileChunk processes incoming file chunk messages
 func (a *App) handleFileChunk(data []byte) error {
@@ -380,187 +362,10 @@ func (a *App) handleFileChunk(data []byte) error {
 
 	// Initialize file receiver if not exists
 	if a.fileReceiver == nil {
-		// Use current directory as default output directory
-		outputDir, err := os.Getwd()
-		if err != nil {
-			outputDir = "."
-		}
-		a.fileReceiver = NewFileReceiver(outputDir, a.uiMessages)
+		a.fileReceiver = NewFileReceiver(a.outputPath, a.uiMessages)
 	}
 
 	return a.fileReceiver.ProcessChunk(data)
 }
 
-// ProcessChunk processes a single chunk message
-func (fr *FileReceiver) ProcessChunk(data []byte) error {
-	// Deserialize the chunk message
-	chunkMsg, err := fr.serializer.Unmarshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal chunk message: %w", err)
-	}
 
-	fr.mu.Lock()
-	defer fr.mu.Unlock()
-
-	// Get or create file reception
-	fileReception, exists := fr.currentFiles[chunkMsg.FileID]
-	if !exists {
-		// Create output file path
-		outputPath := fmt.Sprintf("%s/%s", fr.outputDir, chunkMsg.FileName)
-		
-		// Create new file reception
-		fileReception = &FileReception{
-			FilePath:     chunkMsg.FileID,
-			FileName:     chunkMsg.FileName,
-			TotalSize:    chunkMsg.TotalSize,
-			ExpectedHash: chunkMsg.ExpectedHash,
-			Chunks:       make(map[uint32][]byte),
-			Status:       StatusReceiving,
-			OutputPath:   outputPath,
-		}
-
-		// Create output file
-		file, err := os.Create(outputPath)
-		if err != nil {
-			fileReception.Status = StatusFailed
-			return fmt.Errorf("failed to create output file %s: %w", outputPath, err)
-		}
-		fileReception.File = file
-		fr.currentFiles[chunkMsg.FileID] = fileReception
-
-		slog.Info("Started receiving file", "fileName", chunkMsg.FileName, "totalSize", chunkMsg.TotalSize)
-		if fr.uiMessages != nil {
-			fr.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Receiving file: %s", chunkMsg.FileName)}
-		}
-	}
-
-	// Store the chunk
-	fileReception.Chunks[chunkMsg.SequenceNo] = chunkMsg.Data
-	fileReception.ReceivedSize += int64(len(chunkMsg.Data))
-
-	// Write sequential chunks to file
-	if err := fr.writeSequentialChunks(fileReception); err != nil {
-		return fmt.Errorf("failed to write chunks: %w", err)
-	}
-
-	// Check if file is complete
-	if fileReception.ReceivedSize >= fileReception.TotalSize {
-		if err := fr.completeFile(fileReception); err != nil {
-			return fmt.Errorf("failed to complete file: %w", err)
-		}
-		delete(fr.currentFiles, chunkMsg.FileID)
-		slog.Info("File reception completed", "fileName", fileReception.FileName)
-	}
-
-	return nil
-}
-
-// writeSequentialChunks writes chunks to file in sequence
-func (fr *FileReceiver) writeSequentialChunks(fileReception *FileReception) error {
-	for {
-		nextSeq := fileReception.LastSequence + 1
-		chunkData, exists := fileReception.Chunks[nextSeq]
-		if !exists {
-			break // No more sequential chunks available
-		}
-
-		// Write chunk to file
-		if _, err := fileReception.File.Write(chunkData); err != nil {
-			return fmt.Errorf("failed to write chunk %d: %w", nextSeq, err)
-		}
-
-		// Remove written chunk from memory
-		delete(fileReception.Chunks, nextSeq)
-		fileReception.LastSequence = nextSeq
-	}
-
-	return nil
-}
-
-// completeFile finalizes the file reception with integrity verification
-func (fr *FileReceiver) completeFile(fileReception *FileReception) error {
-	// Close the file first
-	if err := fileReception.File.Close(); err != nil {
-		fileReception.Status = StatusFailed
-		return fmt.Errorf("failed to close file: %w", err)
-	}
-
-	// Perform integrity verification if expected hash is provided
-	if fileReception.ExpectedHash != "" {
-		fileReception.Status = StatusVerifying
-		slog.Info("Starting file integrity verification", "fileName", fileReception.FileName, "expectedHash", fileReception.ExpectedHash)
-		
-		if fr.uiMessages != nil {
-			fr.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Verifying integrity of file: %s", fileReception.FileName)}
-		}
-
-		if err := fr.verifyFileIntegrity(fileReception); err != nil {
-			fileReception.Status = StatusFailed
-			fileReception.VerificationErr = err
-			
-			// Clean up corrupted file
-			if cleanupErr := fr.cleanupCorruptedFile(fileReception); cleanupErr != nil {
-				slog.Error("Failed to cleanup corrupted file", "fileName", fileReception.FileName, "error", cleanupErr)
-			}
-			
-			slog.Error("File integrity verification failed", "fileName", fileReception.FileName, "error", err)
-			if fr.uiMessages != nil {
-				fr.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("File verification failed: %s - %v", fileReception.FileName, err)}
-			}
-			
-			return fmt.Errorf("file integrity verification failed for %s: %w", fileReception.FileName, err)
-		}
-
-		slog.Info("File integrity verification successful", "fileName", fileReception.FileName)
-		if fr.uiMessages != nil {
-			fr.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("File verified successfully: %s", fileReception.FileName)}
-		}
-	}
-
-	// Mark as completed
-	fileReception.Status = StatusCompleted
-	fileReception.IsComplete = true
-	
-	if fr.uiMessages != nil {
-		fr.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("File reception completed: %s", fileReception.FileName)}
-	}
-	
-	return nil
-}
-
-// verifyFileIntegrity verifies the integrity of a received file using SHA256 hash
-func (fr *FileReceiver) verifyFileIntegrity(fileReception *FileReception) error {
-	// Create a FileNode for the received file to use existing VerifySHA256 method
-	fileNode := &fileInfo.FileNode{
-		Path: fileReception.OutputPath,
-	}
-	
-	// Verify the file hash using the existing VerifySHA256 method
-	isValid, err := fileNode.VerifySHA256(fileReception.ExpectedHash)
-	if err != nil {
-		return fmt.Errorf("failed to calculate file hash: %w", err)
-	}
-	
-	if !isValid {
-		return fmt.Errorf("file hash mismatch - file may be corrupted during transmission")
-	}
-	
-	return nil
-}
-
-// cleanupCorruptedFile removes a corrupted file and logs the cleanup
-func (fr *FileReceiver) cleanupCorruptedFile(fileReception *FileReception) error {
-	if fileReception.OutputPath == "" {
-		return nil // No file to cleanup
-	}
-	
-	slog.Info("Cleaning up corrupted file", "fileName", fileReception.FileName, "path", fileReception.OutputPath)
-	
-	if err := os.Remove(fileReception.OutputPath); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove corrupted file %s: %w", fileReception.OutputPath, err)
-		}
-	}
-	
-	return nil
-}

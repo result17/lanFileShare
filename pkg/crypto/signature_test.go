@@ -9,36 +9,22 @@ import (
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 	"github.com/rescp17/lanFileSharer/pkg/transfer"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewFileStructureSigner(t *testing.T) {
 	signer, err := NewFileStructureSigner()
-	if err != nil {
-		t.Fatalf("Failed to create new signer: %v", err)
-	}
+	require.NoError(t, err, "Failed to create new signer")
 
-	if signer.keyPair == nil {
-		t.Error("Key pair should not be nil")
-	}
-
-	if signer.keyPair.PrivateKey == nil {
-		t.Error("Private key should not be nil")
-	}
-
-	if signer.keyPair.PublicKey == nil {
-		t.Error("Public key should not be nil")
-	}
+	assert.NotNil(t, signer.keyPair, "Key pair should not be nil")
+	assert.NotNil(t, signer.keyPair.PrivateKey, "Private key should not be nil")
+	assert.NotNil(t, signer.keyPair.PublicKey, "Public key should not be nil")
 
 	// Test that we can get public key bytes
 	pubKeyBytes, err := signer.GetPublicKeyBytes()
-	if err != nil {
-		t.Errorf("Failed to get public key bytes: %v", err)
-	}
-
-	if len(pubKeyBytes) == 0 {
-		t.Error("Public key bytes should not be empty")
-	}
+	require.NoError(t, err, "Failed to get public key bytes")
+	assert.NotEmpty(t, pubKeyBytes, "Public key bytes should not be empty")
 }
 
 // TestSignFileStructure tests the SignFileStructure method with FileStructureManager
@@ -53,52 +39,34 @@ func TestSignFileStructure(t *testing.T) {
 
 	// Create directory structure
 	err := os.Mkdir(subDir, 0755)
-	if err != nil {
-		t.Fatalf("Failed to create subdirectory: %v", err)
-	}
+	require.NoError(t, err, "Failed to create subdirectory")
 
 	err = os.WriteFile(testFile1, []byte("test content 1"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file 1: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file 1")
 
 	err = os.WriteFile(testFile2, []byte("test content 2"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file 2: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file 2")
 
 	err = os.WriteFile(testFile3, []byte("test content 3"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file 3: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file 3")
 
 	// Create FileStructureManager
 	fsm := transfer.NewFileStructureManager()
 	node, err := fileInfo.CreateNode(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to create node: %v", err)
-	}
+	require.NoError(t, err, "Failed to create node")
 
 	err = fsm.AddFileNode(&node)
-	if err != nil {
-		t.Fatalf("Failed to add path to FileStructureManager: %v", err)
-	}
+	require.NoError(t, err, "Failed to add path to FileStructureManager")
 
 	// Create signer and sign the structure
 	signer, err := NewFileStructureSigner()
-	if err != nil {
-		t.Fatalf("Failed to create signer: %v", err)
-	}
+	require.NoError(t, err, "Failed to create signer")
 
 	signedStructure, err := signer.SignFileStructureManager(fsm)
-	if err != nil {
-		t.Fatalf("Failed to sign file structure: %v", err)
-	}
+	require.NoError(t, err, "Failed to sign file structure")
 
 	// Verify the signed structure
-	if signedStructure == nil {
-		t.Fatal("Signed structure should not be nil")
-	}
+	require.NotNil(t, signedStructure, "Signed structure should not be nil")
 
 	if len(signedStructure.PublicKey) == 0 {
 		t.Error("Public key should not be empty")
@@ -151,9 +119,7 @@ func TestSignFileStructure(t *testing.T) {
 // TestSignFileStructureWithNilManager tests error handling for nil FileStructureManager
 func TestSignFileStructureWithNilManager(t *testing.T) {
 	signer, err := NewFileStructureSigner()
-	if err != nil {
-		t.Fatalf("Failed to create signer: %v", err)
-	}
+	require.NoError(t, err, "Failed to create signer")
 
 	_, err = signer.SignFileStructureManager(nil)
 	if err == nil {
@@ -169,17 +135,13 @@ func TestSignFileStructureWithNilManager(t *testing.T) {
 // TestSignFileStructureWithEmptyManager tests signing an empty FileStructureManager
 func TestSignFileStructureWithEmptyManager(t *testing.T) {
 	signer, err := NewFileStructureSigner()
-	if err != nil {
-		t.Fatalf("Failed to create signer: %v", err)
-	}
+	require.NoError(t, err, "Failed to create signer")
 
 	// Create empty FileStructureManager
 	fsm := transfer.NewFileStructureManager()
 
 	signedStructure, err := signer.SignFileStructureManager(fsm)
-	if err != nil {
-		t.Fatalf("Failed to sign empty file structure: %v", err)
-	}
+	require.NoError(t, err, "Failed to sign empty file structure")
 
 	// Verify empty structure
 	if signedStructure.Metadata.TotalFiles != 0 {
@@ -274,39 +236,27 @@ func TestCreateSignedFileStructure(t *testing.T) {
 	testFile2 := filepath.Join(tempDir, "test2.txt")
 
 	err := os.WriteFile(testFile1, []byte("test content 1"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file 1: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file 1")
 
 	err = os.WriteFile(testFile2, []byte("test content 2"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file 2: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file 2")
 
 	filePaths := []string{testFile1, testFile2}
 
 	// Create signed structure from file paths
 	signedStructure, err := CreateSignedFileStructure(filePaths)
-	if err != nil {
-		t.Fatalf("Failed to create signed file structure: %v", err)
-	}
+	require.NoError(t, err, "Failed to create signed file structure")
 
 	// Verify the structure
 	err = VerifyFileStructure(signedStructure)
-	if err != nil {
-		t.Errorf("Failed to verify created signed structure: %v", err)
-	}
+	require.NoError(t, err, "Failed to verify created signed structure")
 
 	// Check that files are properly included
-	if len(signedStructure.Files) != 2 {
-		t.Errorf("Expected 2 files, got %d", len(signedStructure.Files))
-	}
+	require.Len(t, signedStructure.Files, 2, "Expected 2 files")
 
 	// Check that checksums are calculated
 	for i, file := range signedStructure.Files {
-		if file.Checksum == "" {
-			t.Errorf("File %d should have checksum calculated", i)
-		}
+		require.NotEmpty(t, file.Checksum, "File %d should have checksum calculated", i)
 	}
 }
 
@@ -519,7 +469,7 @@ func TestNewFileStructureSignerFromKeyPair(t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to verify signature from provided key pair: %v", err)
 	}
-	require.NotNil(t, fmt.Errorf("Failed to verify signature from provided key pair: %v", err))
+	require.NoError(t, err, "Failed to verify signature from provided key pair")
 }
 
 func TestGetPublicAndPrivateKey(t *testing.T) {

@@ -117,6 +117,8 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 		}
 	}
 
+	now := time.Now().Unix()
+
 	// Create comprehensive signature data
 	signatureData := struct {
 		Files     []fileInfo.FileNode `json:"files"`
@@ -141,7 +143,7 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 			DirCount:  fsm.GetDirCount(),
 			TotalSize: fsm.GetTotalSize(),
 		},
-		Timestamp: time.Now().Unix(),
+		Timestamp: now,
 	}
 
 	// Serialize and sign
@@ -166,8 +168,8 @@ func (s *FileStructureSigner) SignFileStructureManager(fsm *transfer.FileStructu
 		TotalFiles: fsm.GetFileCount(),
 		TotalDirs:  fsm.GetDirCount(),
 		TotalSize:  fsm.GetTotalSize(),
-		CreatedAt:  time.Now().Unix(),
-		SignedAt:   time.Now().Unix(),
+		CreatedAt:  now,
+		SignedAt:   now,
 		Version:    "1.0",
 	}
 

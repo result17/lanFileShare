@@ -33,9 +33,8 @@ type App struct {
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
 
-	// File structure management
-	fileStructure *transfer.FileStructureManager
-	structureMu   sync.RWMutex // Protect file structure access
+	// Note: Removed fileStructure field for stateless design
+	// Each transfer will create its own FileStructureManager
 }
 
 // NewApp creates a new sender application instance.
@@ -51,7 +50,6 @@ func NewApp(adapter discovery.Adapter) *App {
 		appEvents:       make(chan appevents.AppEvent),
 		webrtcAPI:       webrtcAPI,
 		transferTimeout: 2 * time.Minute,
-		fileStructure:   transfer.NewFileStructureManager(),
 	}
 }
 
@@ -65,37 +63,29 @@ func (a *App) AppEvents() chan<- appevents.AppEvent {
 	return a.appEvents
 }
 
-// PrepareFiles adds files to the file structure manager for sending
-func (a *App) PrepareFiles(files []fileInfo.FileNode) error {
-	a.structureMu.Lock()
-	defer a.structureMu.Unlock()
+// prepareFilesForTransfer creates a new FileStructureManager for a specific transfer
+// This function is stateless and creates a fresh manager for each transfer
+func (a *App) prepareFilesForTransfer(files []fileInfo.FileNode) (*transfer.FileStructureManager, error) {
+	// Create a new FileStructureManager for this transfer
+	fileStructure := transfer.NewFileStructureManager()
 
-	// Clear existing files
-	a.fileStructure.Clear()
-
-	// Add new files
+	// Add files to the new manager
 	for _, file := range files {
-		if err := a.fileStructure.AddFileNode(&file); err != nil {
-			return fmt.Errorf("failed to add file %s: %w", file.Path, err)
+		if err := fileStructure.AddFileNode(&file); err != nil {
+			return nil, fmt.Errorf("failed to add file %s: %w", file.Path, err)
 		}
 	}
 
 	slog.Info("Files prepared for sending",
-		"fileCount", a.fileStructure.GetFileCount(),
-		"dirCount", a.fileStructure.GetDirCount(),
-		"totalSize", a.fileStructure.GetTotalSize())
+		"fileCount", fileStructure.GetFileCount(),
+		"dirCount", fileStructure.GetDirCount(),
+		"totalSize", fileStructure.GetTotalSize())
 
-	return nil
+	return fileStructure, nil
 }
 
-// GetFileStructure returns a copy of the current file structure manager
-func (a *App) GetFileStructure() *transfer.FileStructureManager {
-	a.structureMu.RLock()
-	defer a.structureMu.RUnlock()
-
-	// Return the file structure manager (it's thread-safe internally)
-	return a.fileStructure
-}
+// Note: GetFileStructure method removed as part of stateless design
+// Each transfer now creates its own FileStructureManager
 
 // Run starts the application's main event loop.
 func (a *App) Run(ctx context.Context) error {
@@ -112,7 +102,11 @@ func (a *App) Run(ctx context.Context) error {
 				// Wait for any active transfers to complete gracefully
 				a.transferWG.Wait()
 				return nil
-			case event := <-a.appEvents:
+			case event, ok := <-a.appEvents:
+				if !ok {
+					slog.Info("App event channel closed")
+					return nil
+				}
 				switch e := event.(type) {
 				case sender.SendFilesMsg:
 					// Show files to users and start the transfer process
@@ -153,10 +147,12 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 // StartSendProcess is the main entry point for starting a file transfer.
 func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
 	task := func(taskCtx context.Context) error {
-		// Prepare files in the structure manager
-		if err := a.PrepareFiles(files); err != nil {
+		// Create a new FileStructureManager for this transfer (stateless)
+		fileStructure, err := a.prepareFilesForTransfer(files)
+		if err != nil {
 			return fmt.Errorf("failed to prepare files: %w", err)
 		}
+		// fileStructure will be garbage collected after this function returns
 
 		// Use the shorter of the two timeouts: main context or transfer timeout
 		transferCtx, cancel := context.WithTimeout(taskCtx, a.transferTimeout)
@@ -180,15 +176,15 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		}()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
-		if err := webrtcConn.Establish(transferCtx, a.fileStructure); err != nil {
+		if err := webrtcConn.Establish(transferCtx, fileStructure); err != nil {
 			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
 
-		// TODO: Add actual file transfer logic over the WebRTC connection
+		transferFiles := fileStructure.GetAllFileEntities()
 
-		if err := webrtcConn.SendFiles(transferCtx, files, a.serviceID); err != nil {
+		if err := webrtcConn.SendFiles(transferCtx, transferFiles, a.serviceID); err != nil {
 			return fmt.Errorf("failed to send files: %w", err)
 		}
 

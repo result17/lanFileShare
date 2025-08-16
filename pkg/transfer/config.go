@@ -144,6 +144,8 @@ func (tc *TransferConfig) GetChunkSizeForFile(fileSize int64) int32 {
 		if largerChunk <= tc.MaxChunkSize {
 			return largerChunk
 		}
+		// If calculated chunk size exceeds maximum, use the maximum
+		return tc.MaxChunkSize
 	}
 
 	// Use default chunk size for most files

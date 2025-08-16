@@ -355,6 +355,7 @@ func (c *SenderConn) transferFileChunks(ctx context.Context, dataChannel *webrtc
 				FileID:       fileNode.Path,                           // Use path as file ID
 				FileName:     fileNode.Name,
 				SequenceNo:   chunk.SequenceNo,
+				Offset:       chunk.Offset,                            // Add offset to support out-of-order writes
 				Data:         chunk.Data,
 				ChunkHash:    chunk.Hash,
 				TotalSize:    fileNode.Size,

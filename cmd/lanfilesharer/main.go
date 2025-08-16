@@ -14,6 +14,18 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/ui"
 )
 
+func runWithUIMode(mode ui.Mode, cmd *cobra.Command) {
+	port, _ := cmd.Flags().GetInt("port")
+	outputDir, _ := cmd.Flags().GetString("output")
+
+	model := ui.InitialModel(mode, port, outputDir)
+	p := tea.NewProgram(model)
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Alas, there's been an error: %v", err)
+		os.Exit(1)
+	}
+}
+
 func main() {
 	f, _ := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	defer func() {
@@ -23,25 +35,20 @@ func main() {
 	}()
 	log.SetOutput(f)
 
-	var port int
 	cmd := &cobra.Command{
 		Use:   "lanFileSharer",
 		Short: "A file sharing application for local networks",
 	}
 
-	cmd.PersistentFlags().IntVar(&port, "port", 8080, "Port to listen on")
+	cmd.PersistentFlags().IntP("port", "p", 8080, "Port to listen on")
+	
+	cmd.PersistentFlags().StringP("output", "o", ".", "Output directory for received files")
 
 	receiveCmd := &cobra.Command{
 		Use:   "receive",
 		Short: "Start the receiver mode",
 		Run: func(cmd *cobra.Command, args []string) {
-			mode := ui.Receiver
-			model := ui.InitialModel(mode, port)
-			p := tea.NewProgram(model)
-			if _, err := p.Run(); err != nil {
-				fmt.Printf("Alas, there's been an error: %v", err)
-				os.Exit(1)
-			}
+			runWithUIMode(ui.Receiver, cmd)
 		},
 	}
 
@@ -49,13 +56,7 @@ func main() {
 		Use:   "send",
 		Short: "Start the sender mode",
 		Run: func(cmd *cobra.Command, args []string) {
-			mode := ui.Sender
-			model := ui.InitialModel(mode, port)
-			p := tea.NewProgram(model)
-			if _, err := p.Run(); err != nil {
-				fmt.Printf("Alas, there's been an error: %v", err)
-				os.Exit(1)
-			}
+			runWithUIMode(ui.Sender, cmd)
 		},
 	}
 

@@ -78,6 +78,10 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 		return fmt.Errorf("failed to connect to /ask endpoint: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to connect to /ask endpoint: %s", resp.Status)
+	}
+
 	// Start a goroutine to process the streaming response.
 	// The response body will be closed in the goroutine via defer.
 	go s.listenToSSEResponse(resp)

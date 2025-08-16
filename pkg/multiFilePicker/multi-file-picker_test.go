@@ -1,13 +1,14 @@
 package multiFilePicker
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupTestDir creates a temporary directory structure for testing.
@@ -15,28 +16,24 @@ import (
 func setupTestDir(t *testing.T) (string, func()) {
 	t.Helper()
 	tempDir, err := os.MkdirTemp(".", "test-picker-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp dir")
 
 	// Create some files and directories with predictable names for sorting
-	if err := os.WriteFile(filepath.Join(tempDir, "file_a.txt"), []byte("a"), 0666); err != nil {
-		t.Fatalf("Failed to create file_a.txt: %v", err)
-	}
-	if err := os.Mkdir(filepath.Join(tempDir, "subdir_b"), 0777); err != nil {
-		t.Fatalf("Failed to create subdir_b: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, "subdir_b", "file_c.txt"), []byte("c"), 0666); err != nil {
-		t.Fatalf("Failed to create subdir_b/file_c.txt: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, "file_d.txt"), []byte("d"), 0666); err != nil {
-		t.Fatalf("Failed to create file_d.txt: %v", err)
-	}
+	err = os.WriteFile(filepath.Join(tempDir, "file_a.txt"), []byte("a"), 0666)
+	require.NoError(t, err, "Failed to create file_a.txt")
+	
+	err = os.Mkdir(filepath.Join(tempDir, "subdir_b"), 0777)
+	require.NoError(t, err, "Failed to create subdir_b")
+	
+	err = os.WriteFile(filepath.Join(tempDir, "subdir_b", "file_c.txt"), []byte("c"), 0666)
+	require.NoError(t, err, "Failed to create subdir_b/file_c.txt")
+	
+	err = os.WriteFile(filepath.Join(tempDir, "file_d.txt"), []byte("d"), 0666)
+	require.NoError(t, err, "Failed to create file_d.txt")
 
 	cleanup := func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			t.Errorf("Failed to clean up temp dir: %v", err)
-		}
+		err := os.RemoveAll(tempDir)
+		assert.NoError(t, err, "Failed to clean up temp dir")
 	}
 
 	return tempDir, cleanup
@@ -48,33 +45,22 @@ func TestInitialModel(t *testing.T) {
 
 	m := InitialModel()
 
-	if err := m.SetPath(tempDir); err != nil {
-		t.Errorf("failed to set path: %v", err)
-	}
+	err := m.SetPath(tempDir)
+	require.NoError(t, err, "failed to set path")
 
 	absPath, err := filepath.Abs(tempDir)
+	require.NoError(t, err, "invalid temp dir %s", tempDir)
 
-	if err != nil {
-		t.Errorf("invalid temp dir %s", tempDir)
-	}
-
-	if m.path != absPath {
-		t.Errorf("expected path %q, got %q", absPath, m.path)
-	}
+	assert.Equal(t, absPath, m.path, "path should match absolute path")
 
 	// Expecting 3 items: file_a.txt, file_d.txt, subdir_b
-	if len(m.items) != 3 {
-		t.Errorf("expected 3 items, got %d", len(m.items))
-	}
-
-	if len(m.selected) != 0 {
-		t.Errorf("expected selected map to be empty, but it has %d items", len(m.selected))
-	}
+	assert.Len(t, m.items, 3, "should have 3 items")
+	assert.Empty(t, m.selected, "selected map should be empty initially")
 }
 
 func TestUpdateMovement(t *testing.T) {
 	m := Model{
-		items: make([]fs.DirEntry, 3), // 3 dummy items
+		items: make([]displayItem, 3), // 3 dummy items
 		keys:  DefaultKeyMap,
 	}
 
@@ -85,44 +71,32 @@ func TestUpdateMovement(t *testing.T) {
 	// Test moving down
 	newModel, _ := m.Update(keyDown)
 	m = newModel.(Model)
-	if m.cursor != 1 {
-		t.Errorf("expected cursor to be at 1 after moving down, got %d", m.cursor)
-	}
+	assert.Equal(t, 1, m.cursor, "cursor should be at 1 after moving down")
 
 	// Test moving down again
 	newModel, _ = m.Update(keyDown)
 	m = newModel.(Model)
-	if m.cursor != 2 {
-		t.Errorf("expected cursor to be at 2 after moving down, got %d", m.cursor)
-	}
+	assert.Equal(t, 2, m.cursor, "cursor should be at 2 after moving down")
 
 	// Test moving down at the bottom
 	newModel, _ = m.Update(keyDown)
 	m = newModel.(Model)
-	if m.cursor != 2 {
-		t.Errorf("expected cursor to stay at 2 at the bottom, got %d", m.cursor)
-	}
+	assert.Equal(t, 2, m.cursor, "cursor should stay at 2 at the bottom")
 
 	// Test moving up
 	newModel, _ = m.Update(keyUp)
 	m = newModel.(Model)
-	if m.cursor != 1 {
-		t.Errorf("expected cursor to be at 1 after moving up, got %d", m.cursor)
-	}
+	assert.Equal(t, 1, m.cursor, "cursor should be at 1 after moving up")
 
 	// Test moving up again
 	newModel, _ = m.Update(keyUp)
 	m = newModel.(Model)
-	if m.cursor != 0 {
-		t.Errorf("expected cursor to be at 0 after moving up, got %d", m.cursor)
-	}
+	assert.Equal(t, 0, m.cursor, "cursor should be at 0 after moving up")
 
 	// Test moving up at the top
 	newModel, _ = m.Update(keyUp)
 	m = newModel.(Model)
-	if m.cursor != 0 {
-		t.Errorf("expected cursor to stay at 0 at the top, got %d", m.cursor)
-	}
+	assert.Equal(t, 0, m.cursor, "cursor should stay at 0 at the top")
 }
 
 func TestUpdateSelection(t *testing.T) {
@@ -131,27 +105,29 @@ func TestUpdateSelection(t *testing.T) {
 
 	m := InitialModel()
 
-	if err := m.SetPath(tempDir); err != nil {
-		t.Fatalf("Failed to set path: %v", err)
-	}
+	err := m.SetPath(tempDir)
+	require.NoError(t, err, "Failed to set path")
 
 	spaceKey := tea.KeyMsg{Type: tea.KeySpace}
-	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
 
-	// Select item at cursor 0 ('file_a.txt')
+	// Initially no items should be selected
+	assert.Empty(t, m.selected, "initially no items should be selected")
+
+	// Select item at cursor 0 (should be 'subdir_b' since directories come first)
 	newModel, _ := m.Update(spaceKey)
 	m = newModel.(Model)
-	newModel, _ = m.Update(enterKey)
-	m = newModel.(Model)
-	absPath, err := filepath.Abs(tempDir)
 
-	if err != nil {
-		t.Errorf("invalid temp dir %s: %v", tempDir, err)
-	}
-	item0Path := filepath.Join(absPath, m.items[0].Name())
-	if _, ok := m.selected[item0Path]; !ok {
-		t.Errorf("expected item 0 (%s) to be selected, but it's not. selected is %v, selected size is %d", item0Path, m.selected, len(m.selected))
-	}
+	// Verify the item is selected
+	item0Path := m.items[0].Path
+	assert.Contains(t, m.selected, item0Path, "item 0 should be selected")
+	assert.Len(t, m.selected, 1, "should have exactly 1 item selected")
+
+	// Select the same item again (should deselect it)
+	newModel, _ = m.Update(spaceKey)
+	m = newModel.(Model)
+
+	assert.NotContains(t, m.selected, item0Path, "item 0 should be deselected")
+	assert.Empty(t, m.selected, "should have no items selected after deselecting")
 }
 
 func TestConfirmSelection(t *testing.T) {
@@ -160,52 +136,59 @@ func TestConfirmSelection(t *testing.T) {
 
 	m := InitialModel()
 
-	if err := m.SetPath(tempDir); err != nil {
-		t.Fatalf("Failed to set path: %v", err)
-	}
+	err := m.SetPath(tempDir)
+	require.NoError(t, err, "Failed to set path")
 
 	absPath, err := filepath.Abs(tempDir)
+	require.NoError(t, err, "invalid temp dir %s", tempDir)
 
-	if err != nil {
-		t.Errorf("invalid temp dir %s: %v", tempDir, err)
-	}
+	// Sorted items are: subdir_b (directory first), file_a.txt, file_d.txt
 
-	// Sorted items are: file_a.txt, file_d.txt, subdir_b
-
-	// 1. Select 'file_a.txt' (cursor is at 0)
+	// 1. Select 'subdir_b' (cursor is at 0 since directories come first)
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = newModel.(Model)
 
-	// 2. Move cursor to 'subdir_b' (index 2)
+	// 2. Move cursor to 'file_a.txt' (index 1)
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = newModel.(Model)
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = newModel.(Model)
-	if m.cursor != 2 {
-		t.Fatalf("cursor should be at index 2, but is at %d", m.cursor)
-	}
+	assert.Equal(t, 1, m.cursor, "cursor should be at index 1")
 
-	// 3. Select 'subdir_b'
+	// 3. Select 'file_a.txt'
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = newModel.(Model)
 
-	// 4. Confirm selection
-	finalModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Verify we have 2 items selected
+	assert.Len(t, m.selected, 2, "should have 2 items selected")
 
+	// 4. Confirm selection - this should return a command that sends SelectedFileNodeMsg
+	finalModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = finalModel.(Model)
 
-	expected := []string{
-		filepath.Join(absPath, "file_a.txt"),
-		filepath.Join(absPath, "subdir_b", "file_c.txt"),
-	}
+	// Execute the command to get the message
+	if cmd != nil {
+		msg := cmd()
+		if selectedMsg, ok := msg.(SelectedFileNodeMsg); ok {
+			assert.Len(t, selectedMsg.Files, 2, "should have 2 files in the message")
+			
+			// Check that the selected files are correct
+			selectedPaths := make([]string, len(selectedMsg.Files))
+			for i, file := range selectedMsg.Files {
+				selectedPaths[i] = file.Path
+			}
+			sort.Strings(selectedPaths)
 
-	// Sort both slices for consistent comparison
-	sort.Strings(expected)
+			expectedPaths := []string{
+				filepath.Join(absPath, "subdir_b"),
+				filepath.Join(absPath, "file_a.txt"),
+			}
+			sort.Strings(expectedPaths)
 
-	for i, info := range m.files {
-		if info.Path != expected[i] {
-			t.Errorf("expected path to be %v, got %v", expected[i], info.Path)
+			assert.Equal(t, expectedPaths, selectedPaths, "selected file paths should match expected")
+		} else {
+			t.Errorf("expected SelectedFileNodeMsg, got %T", msg)
 		}
+	} else {
+		t.Error("expected command to be returned, got nil")
 	}
 }
 

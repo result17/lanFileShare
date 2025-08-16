@@ -3,30 +3,31 @@ package receiver
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/transfer"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestFileReceiver_IntegrationTest tests the complete file reception workflow with integrity verification
 //nolint:gocyclo
 func TestFileReceiver_IntegrationTest(t *testing.T) {
-	// Create temporary directory for test files
-	tempDir, err := os.MkdirTemp("", "integration_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Create UI messages channel for testing
-	uiMessages := make(chan tea.Msg, 20)
-
-	// Create file receiver
-	fileReceiver := NewFileReceiver(tempDir, uiMessages)
-
 	t.Run("multi_chunk_file_with_verification", func(t *testing.T) {
+		// Create temporary directory for this test
+		tempDir, err := os.MkdirTemp("", "multi_chunk_test")
+		require.NoError(t, err, "Failed to create temp directory")
+		defer os.RemoveAll(tempDir)
+
+		// Create UI messages channel for this test
+		uiMessages := make(chan tea.Msg, 20)
+
+		// Create file receiver for this test
+		fileReceiver := NewFileReceiver(tempDir, uiMessages)
 		// Create test data that will be split into multiple chunks
 		testData := make([]byte, 1024) // 1KB of data
 		for i := range testData {
@@ -53,6 +54,7 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 				FileID:       fileID,
 				FileName:     fileName,
 				SequenceNo:   sequenceNo,
+				Offset:       int64(i), // Set correct offset
 				Data:         chunkData,
 				TotalSize:    int64(len(testData)),
 				ExpectedHash: expectedHash,
@@ -61,38 +63,22 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 			// Serialize and process chunk
 			serializer := transfer.NewJSONSerializer()
 			data, err := serializer.Marshal(chunkMsg)
-			if err != nil {
-				t.Fatalf("Failed to marshal chunk message %d: %v", sequenceNo, err)
-			}
+			require.NoError(t, err, "Failed to marshal chunk message %d", sequenceNo)
 
 			err = fileReceiver.ProcessChunk(data)
-			if err != nil {
-				t.Fatalf("Failed to process chunk %d: %v", sequenceNo, err)
-			}
+			require.NoError(t, err, "Failed to process chunk %d", sequenceNo)
 		}
 
 		// Verify file was created and has correct content
 		outputPath := filepath.Join(tempDir, fileName)
-		if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-			t.Fatalf("Output file was not created: %s", outputPath)
-		}
+		assert.FileExists(t, outputPath, "Output file should be created")
 
 		// Read and verify file content
 		content, err := os.ReadFile(outputPath)
-		if err != nil {
-			t.Fatalf("Failed to read output file: %v", err)
-		}
+		require.NoError(t, err, "Failed to read output file")
 
-		if len(content) != len(testData) {
-			t.Errorf("File size mismatch. Expected: %d, Got: %d", len(testData), len(content))
-		}
-
-		for i, b := range content {
-			if b != testData[i] {
-				t.Errorf("File content mismatch at byte %d. Expected: %d, Got: %d", i, testData[i], b)
-				break
-			}
-		}
+		assert.Equal(t, len(testData), len(content), "File size should match")
+		assert.Equal(t, testData, content, "File content should match exactly")
 
 		// Verify UI messages were sent
 		messageCount := 0
@@ -106,25 +92,30 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 		for i := 0; i < len(expectedMessages); i++ {
 			select {
 			case msg := <-uiMessages:
-				if statusMsg, ok := msg.(receiver.StatusUpdateMsg); ok {
-					if statusMsg.Message != expectedMessages[i] {
-						t.Errorf("Expected UI message %d: %s, Got: %s", i, expectedMessages[i], statusMsg.Message)
-					}
-					messageCount++
-				} else {
-					t.Errorf("Expected StatusUpdateMsg, got: %T", msg)
-				}
-			default:
-				t.Errorf("Expected UI message %d: %s", i, expectedMessages[i])
+				statusMsg, ok := msg.(receiver.StatusUpdateMsg)
+				require.True(t, ok, "Expected StatusUpdateMsg, got: %T", msg)
+				assert.Equal(t, expectedMessages[i], statusMsg.Message, "UI message %d should match expected", i)
+				messageCount++
+			case <-time.After(2 * time.Second):
+				t.Fatalf("Timeout waiting for UI message %q", expectedMessages[i])
 			}
 		}
 
-		if messageCount != len(expectedMessages) {
-			t.Errorf("Expected %d UI messages, got %d", len(expectedMessages), messageCount)
-		}
+		assert.Equal(t, len(expectedMessages), messageCount, "Should receive all expected UI messages")
 	})
 
 	t.Run("out_of_order_chunks_with_verification", func(t *testing.T) {
+		// Create temporary directory for this test
+		tempDir, err := os.MkdirTemp("", "out_of_order_test")
+		require.NoError(t, err, "Failed to create temp directory")
+		defer os.RemoveAll(tempDir)
+
+		// Create UI messages channel for this test
+		uiMessages := make(chan tea.Msg, 20)
+
+		// Create file receiver for this test
+		fileReceiver := NewFileReceiver(tempDir, uiMessages)
+
 		// Create test data
 		testData := []byte("This is a test for out-of-order chunk processing with integrity verification.")
 		expectedHash := calculateTestHash(testData)
@@ -138,12 +129,13 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 
 		// Process chunks out of order: 3, 1, 2
 		chunks := []struct {
-			seq  uint32
-			data []byte
+			seq    uint32
+			offset int64
+			data   []byte
 		}{
-			{3, chunk3},
-			{1, chunk1},
-			{2, chunk2},
+			{3, 50, chunk3}, // chunk3 starts at offset 50
+			{1, 0, chunk1},  // chunk1 starts at offset 0
+			{2, 25, chunk2}, // chunk2 starts at offset 25
 		}
 
 		for _, chunk := range chunks {
@@ -152,6 +144,7 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 				FileID:       fileID,
 				FileName:     fileName,
 				SequenceNo:   chunk.seq,
+				Offset:       chunk.offset,
 				Data:         chunk.data,
 				TotalSize:    int64(len(testData)),
 				ExpectedHash: expectedHash,
@@ -160,29 +153,32 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 			// Serialize and process chunk
 			serializer := transfer.NewJSONSerializer()
 			data, err := serializer.Marshal(chunkMsg)
-			if err != nil {
-				t.Fatalf("Failed to marshal chunk message %d: %v", chunk.seq, err)
-			}
+			require.NoError(t, err, "Failed to marshal chunk message %d", chunk.seq)
 
 			err = fileReceiver.ProcessChunk(data)
-			if err != nil {
-				t.Fatalf("Failed to process chunk %d: %v", chunk.seq, err)
-			}
+			require.NoError(t, err, "Failed to process chunk %d", chunk.seq)
 		}
 
 		// Verify file was created and has correct content
 		outputPath := filepath.Join(tempDir, fileName)
 		content, err := os.ReadFile(outputPath)
-		if err != nil {
-			t.Fatalf("Failed to read output file: %v", err)
-		}
+		require.NoError(t, err, "Failed to read output file")
 
-		if string(content) != string(testData) {
-			t.Errorf("File content mismatch. Expected: %s, Got: %s", string(testData), string(content))
-		}
+		assert.Equal(t, string(testData), string(content), "File content should match expected data")
 	})
 
 	t.Run("concurrent_file_reception_with_verification", func(t *testing.T) {
+		// Create temporary directory for this test
+		tempDir, err := os.MkdirTemp("", "concurrent_test")
+		require.NoError(t, err, "Failed to create temp directory")
+		defer os.RemoveAll(tempDir)
+
+		// Create UI messages channel for this test
+		uiMessages := make(chan tea.Msg, 50) // Larger buffer for multiple files
+
+		// Create file receiver for this test
+		fileReceiver := NewFileReceiver(tempDir, uiMessages)
+
 		// Test receiving multiple files concurrently
 		files := []struct {
 			id       string
@@ -193,46 +189,48 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 			{"file2", "concurrent2.txt", []byte("Content of second concurrent file")},
 			{"file3", "concurrent3.txt", []byte("Content of third concurrent file")},
 		}
+		serializer := transfer.NewJSONSerializer()
+		var wg sync.WaitGroup
 
 		// Process all files
 		for _, file := range files {
-			expectedHash := calculateTestHash(file.content)
-			
-			chunkMsg := &transfer.ChunkMessage{
-				Type:         transfer.ChunkData,
-				FileID:       file.id,
-				FileName:     file.name,
-				SequenceNo:   1,
-				Data:         file.content,
-				TotalSize:    int64(len(file.content)),
-				ExpectedHash: expectedHash,
-			}
+			wg.Add(1)
+			go func(f struct {
+				id       string
+				name     string
+				content  []byte
+			}) {
+				defer wg.Done()
+				expectedHash := calculateTestHash(f.content)
 
-			// Serialize and process chunk
-			serializer := transfer.NewJSONSerializer()
-			data, err := serializer.Marshal(chunkMsg)
-			if err != nil {
-				t.Fatalf("Failed to marshal chunk message for %s: %v", file.name, err)
-			}
+				chunkMsg := &transfer.ChunkMessage{
+					Type:         transfer.ChunkData,
+					FileID:       f.id,
+					FileName:     f.name,
+					SequenceNo:   1,
+					Offset:       0, // Single chunk file starts at offset 0
+					Data:         f.content,
+					TotalSize:    int64(len(f.content)),
+					ExpectedHash: expectedHash,
+				}
 
-			err = fileReceiver.ProcessChunk(data)
-			if err != nil {
-				t.Fatalf("Failed to process chunk for %s: %v", file.name, err)
-			}
+				// Serialize and process chunk
+				data, err := serializer.Marshal(chunkMsg)
+				require.NoError(t, err, "Failed to marshal chunk message for %s", f.name)
+
+				err = fileReceiver.ProcessChunk(data)
+				require.NoError(t, err, "Failed to process chunk for %s", f.name)
+			}(file)
 		}
-
+		wg.Wait()
 		// Verify all files were created with correct content
 		for _, file := range files {
 			outputPath := filepath.Join(tempDir, file.name)
 			content, err := os.ReadFile(outputPath)
-			if err != nil {
-				t.Fatalf("Failed to read output file %s: %v", file.name, err)
-			}
+			require.NoError(t, err, "Failed to read output file %s", file.name)
 
-			if string(content) != string(file.content) {
-				t.Errorf("File content mismatch for %s. Expected: %s, Got: %s", 
-					file.name, string(file.content), string(content))
-			}
+			assert.Equal(t, string(file.content), string(content), 
+				"File content should match for %s", file.name)
 		}
 	})
 }
@@ -241,9 +239,7 @@ func TestFileReceiver_IntegrationTest(t *testing.T) {
 func TestFileReceiver_ErrorRecovery(t *testing.T) {
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "error_recovery_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tempDir)
 
 	// Create UI messages channel for testing
@@ -264,6 +260,7 @@ func TestFileReceiver_ErrorRecovery(t *testing.T) {
 			FileID:       "recovery_1",
 			FileName:     fileName,
 			SequenceNo:   1,
+			Offset:       0,
 			Data:         testData,
 			TotalSize:    int64(len(testData)),
 			ExpectedHash: incorrectHash,
@@ -271,48 +268,32 @@ func TestFileReceiver_ErrorRecovery(t *testing.T) {
 
 		serializer := transfer.NewJSONSerializer()
 		data, err := serializer.Marshal(chunkMsg)
-		if err != nil {
-			t.Fatalf("Failed to marshal chunk message: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal chunk message")
 
 		err = fileReceiver.ProcessChunk(data)
-		if err == nil {
-			t.Fatal("Expected error for incorrect hash, but got none")
-		}
+		require.Error(t, err, "Expected error for incorrect hash")
 
 		// Verify file was cleaned up
 		outputPath := filepath.Join(tempDir, fileName)
-		if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
-			t.Error("Corrupted file should have been cleaned up")
-		}
+		assert.NoFileExists(t, outputPath, "Corrupted file should have been cleaned up")
 
 		// Second attempt with correct hash (should succeed)
 		chunkMsg.FileID = "recovery_2"
 		chunkMsg.ExpectedHash = correctHash
 
 		data, err = serializer.Marshal(chunkMsg)
-		if err != nil {
-			t.Fatalf("Failed to marshal chunk message: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal chunk message")
 
 		err = fileReceiver.ProcessChunk(data)
-		if err != nil {
-			t.Fatalf("Second attempt should succeed, but got error: %v", err)
-		}
+		require.NoError(t, err, "Second attempt should succeed")
 
 		// Verify file was created successfully
-		if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-			t.Error("File should have been created successfully on second attempt")
-		}
+		assert.FileExists(t, outputPath, "File should have been created successfully on second attempt")
 
 		// Verify content
 		content, err := os.ReadFile(outputPath)
-		if err != nil {
-			t.Fatalf("Failed to read output file: %v", err)
-		}
+		require.NoError(t, err, "Failed to read output file")
 
-		if string(content) != string(testData) {
-			t.Errorf("File content mismatch. Expected: %s, Got: %s", string(testData), string(content))
-		}
+		assert.Equal(t, string(testData), string(content), "File content should match expected data")
 	})
 }

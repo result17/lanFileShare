@@ -2,41 +2,27 @@ package transfer
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultTransferConfig(t *testing.T) {
 	config := DefaultTransferConfig()
 
-	if config == nil {
-		t.Fatal("DefaultTransferConfig() returned nil")
-	}
+	require.NotNil(t, config, "DefaultTransferConfig() returned nil")
 
 	// Test that the config is valid
-	if err := config.Validate(); err != nil {
-		t.Errorf("Default config should be valid, but got error: %v", err)
-	}
+	err := config.Validate()
+	require.NoError(t, err, "Default config should be valid")
 
 	// Test chunk size settings
-	if config.ChunkSize != DefaultChunkSize {
-		t.Errorf("Expected ChunkSize to be %d, got %d", DefaultChunkSize, config.ChunkSize)
-	}
-
-	if config.MinChunkSize != MinChunkSize {
-		t.Errorf("Expected MinChunkSize to be %d, got %d", MinChunkSize, config.MinChunkSize)
-	}
-
-	if config.MaxChunkSize != MaxChunkSize {
-		t.Errorf("Expected MaxChunkSize to be %d, got %d", MaxChunkSize, config.MaxChunkSize)
-	}
+	require.Equal(t, int32(DefaultChunkSize), config.ChunkSize, "Expected ChunkSize to match DefaultChunkSize")
+	require.Equal(t, int32(MinChunkSize), config.MinChunkSize, "Expected MinChunkSize to match MinChunkSize")
+	require.Equal(t, int32(MaxChunkSize), config.MaxChunkSize, "Expected MaxChunkSize to match MaxChunkSize")
 
 	// Test other settings
-	if config.MaxConcurrentTransfers <= 0 {
-		t.Error("MaxConcurrentTransfers should be positive")
-	}
-
-	if config.DefaultRetryPolicy == nil {
-		t.Error("DefaultRetryPolicy should not be nil")
-	}
+	require.Positive(t, config.MaxConcurrentTransfers, "MaxConcurrentTransfers should be positive")
+	require.NotNil(t, config.DefaultRetryPolicy, "DefaultRetryPolicy should not be nil")
 }
 
 func TestTransferConfig_Validate(t *testing.T) {
@@ -170,6 +156,11 @@ func TestTransferConfig_GetChunkSizeForFile(t *testing.T) {
 		expected int32
 	}{
 		{
+			name:     "zero byte file",
+			fileSize: 0,
+			expected: 0, // Should return 0 for empty files
+		},
+		{
 			name:     "very small file",
 			fileSize: 1024,
 			expected: 1024,
@@ -178,6 +169,16 @@ func TestTransferConfig_GetChunkSizeForFile(t *testing.T) {
 			name:     "small file",
 			fileSize: int64(config.MinChunkSize / 2),
 			expected: config.MinChunkSize / 2, // Should return actual file size
+		},
+		{
+			name:     "file smaller than MinChunkSize",
+			fileSize: int64(config.MinChunkSize - 1),
+			expected: config.MinChunkSize - 1, // Should return actual file size
+		},
+		{
+			name:     "file equal to MinChunkSize",
+			fileSize: int64(config.MinChunkSize),
+			expected: config.MinChunkSize,
 		},
 		{
 			name:     "normal file",
@@ -194,6 +195,11 @@ func TestTransferConfig_GetChunkSizeForFile(t *testing.T) {
 			fileSize: 1024 * 1024 * 1024,   // 1GB
 			expected: config.ChunkSize * 2, // Should use 2x default, which is within max
 		},
+		{
+			name:     "extremely large file (default config doesn't exceed max)",
+			fileSize: 10 * 1024 * 1024 * 1024, // 10GB
+			expected: config.ChunkSize * 2,    // 128KB, which is still within MaxChunkSize (256KB)
+		},
 	}
 
 	for _, test := range tests {
@@ -201,6 +207,39 @@ func TestTransferConfig_GetChunkSizeForFile(t *testing.T) {
 			result := config.GetChunkSizeForFile(test.fileSize)
 			if result != test.expected {
 				t.Errorf("GetChunkSizeForFile(%d) = %d, want %d", test.fileSize, result, test.expected)
+			}
+		})
+	}
+}
+
+func TestTransferConfig_GetChunkSizeForFile_MaxChunkSizeLimit(t *testing.T) {
+	// Create a custom config where ChunkSize * 2 would exceed MaxChunkSize
+	config := &TransferConfig{
+		ChunkSize:    200 * 1024, // 200KB
+		MaxChunkSize: 300 * 1024, // 300KB
+		MinChunkSize: 4 * 1024,   // 4KB
+	}
+
+	tests := []struct {
+		name     string
+		fileSize int64
+		expected int32
+	}{
+		{
+			name:     "large file within scaling limit",
+			fileSize: 200 * 1024 * 1024, // 200MB
+			expected: config.ChunkSize * 2, // 400KB, but should be capped at MaxChunkSize
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := config.GetChunkSizeForFile(test.fileSize)
+			// Since ChunkSize * 2 = 400KB > MaxChunkSize (300KB), should return MaxChunkSize
+			expectedResult := config.MaxChunkSize
+			if result != expectedResult {
+				t.Errorf("GetChunkSizeForFile(%d) = %d, want %d (should be capped at MaxChunkSize)", 
+					test.fileSize, result, expectedResult)
 			}
 		})
 	}

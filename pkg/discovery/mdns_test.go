@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestServer_StartStop(t *testing.T) {
@@ -45,12 +46,12 @@ func TestServer_StartStop(t *testing.T) {
 		if err := <-errCh; err != nil {
 			// Context canceled is expected when we cancel the context
 			if err != context.Canceled && err.Error() != "context canceled" {
-				t.Fatalf("Failed to announce service: %v", err)
+				require.NoError(t, err, "Failed to announce service")
 			}
 			t.Logf("Context cancellation is expected: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatalf("Service announcement did not complete in time")
+		require.Fail(t, "Service announcement did not complete in time")
 	}
 }
 
@@ -85,9 +86,7 @@ func TestMDNSAdapter_Discover(t *testing.T) {
 	result := <-outCh
 	err := result.Error
 	discoveredService := result.Services
-	if err != nil {
-		t.Fatalf("Failed to discover service: %v", err)
-	}
+	require.NoError(t, err, "Failed to discover service")
 	assert.Equalf(t, serviceInfo.Name, discoveredService[0].Name,
 		"Expected service instance %s, got %s", serviceInfo.Name, discoveredService[0].Name)
 

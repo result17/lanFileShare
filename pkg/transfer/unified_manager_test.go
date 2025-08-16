@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnifiedTransferManager_Basic(t *testing.T) {
@@ -16,28 +17,19 @@ func TestUnifiedTransferManager_Basic(t *testing.T) {
 	defer manager.Close()
 
 	// Test basic initialization
-	if manager == nil {
-		t.Fatal("NewUnifiedTransferManager returned nil")
-	}
+	require.NotNil(t, manager, "NewUnifiedTransferManager returned nil")
 
-	if manager.session == nil {
-		t.Error("Session should be initialized")
-	}
-
-	if manager.config == nil {
-		t.Error("Config should be initialized")
-	}
+	require.NotNil(t, manager.session, "Session should be initialized")
+	require.NotNil(t, manager.config, "Config should be initialized")
 
 	// Test empty state
 	files := manager.GetAllFiles()
-	if len(files) != 0 {
-		t.Errorf("Expected 0 files, got %d", len(files))
-	}
+	require.Empty(t, files, "Expected 0 files")
 
 	pending, completed, failed := manager.GetQueueStatus()
-	if pending != 0 || completed != 0 || failed != 0 {
-		t.Errorf("Expected empty queue, got pending=%d, completed=%d, failed=%d", pending, completed, failed)
-	}
+	require.Zero(t, pending, "Expected pending to be 0")
+	require.Zero(t, completed, "Expected completed to be 0")
+	require.Zero(t, failed, "Expected failed to be 0")
 }
 
 func TestUnifiedTransferManager_FileManagement(t *testing.T) {
@@ -49,14 +41,10 @@ func TestUnifiedTransferManager_FileManagement(t *testing.T) {
 	testFile := filepath.Join(tempDir, "test.txt")
 	content := "test content for transfer"
 	err := os.WriteFile(testFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	node, err := fileInfo.CreateNode(testFile)
-	if err != nil {
-		t.Fatalf("Failed to create file node: %v", err)
-	}
+	require.NoError(t, err, "Failed to create file node")
 
 	// Add file to manager
 	err = manager.AddFile(&node)
@@ -95,14 +83,10 @@ func TestUnifiedTransferManager_PauseResume(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	node, err := fileInfo.CreateNode(testFile)
-	if err != nil {
-		t.Fatalf("Failed to create file node: %v", err)
-	}
+	require.NoError(t, err, "Failed to create file node")
 
 	// Add and start transfer
 	manager.AddFile(&node)
@@ -142,14 +126,10 @@ func TestUnifiedTransferManager_MultipleFiles(t *testing.T) {
 	for _, fileName := range files {
 		filePath := filepath.Join(tempDir, fileName)
 		err := os.WriteFile(filePath, []byte("content of "+fileName), 0644)
-		if err != nil {
-			t.Fatalf("Failed to create test file %s: %v", fileName, err)
-		}
+		require.NoError(t, err, "Failed to create test file %s", fileName)
 
 		node, err := fileInfo.CreateNode(filePath)
-		if err != nil {
-			t.Fatalf("Failed to create file node for %s: %v", fileName, err)
-		}
+		require.NoError(t, err, "Failed to create file node for %s", fileName)
 
 		err = manager.AddFile(&node)
 		if err != nil {
@@ -277,21 +257,15 @@ func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	node, err := fileInfo.CreateNode(testFile)
-	if err != nil {
-		t.Fatalf("Failed to create file node: %v", err)
-	}
+	require.NoError(t, err, "Failed to create file node")
 
 	// Add file and start transfer
 	manager.AddFile(&node)
 	err = manager.StartTransfer(testFile)
-	if err != nil {
-		t.Errorf("StartTransfer failed: %v", err)
-	}
+	require.NoError(t, err, "StartTransfer failed")
 
 	// Give time for async events
 	time.Sleep(10 * time.Millisecond)
@@ -329,30 +303,19 @@ func TestUnifiedTransferManager_GetChunker(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create test file")
 
 	node, err := fileInfo.CreateNode(testFile)
-	if err != nil {
-		t.Fatalf("Failed to create file node: %v", err)
-	}
+	require.NoError(t, err, "Failed to create file node")
 
 	manager.AddFile(&node)
 
 	// Test GetChunker (compatibility method)
 	chunker, exists := manager.GetChunker(testFile)
-	if !exists {
-		t.Error("Chunker should exist for added file")
-	}
-
-	if chunker == nil {
-		t.Error("Chunker should not be nil")
-	}
+	require.True(t, exists, "Chunker should exist for added file")
+	require.NotNil(t, chunker, "Chunker should not be nil")
 
 	// Test non-existent file
 	_, exists = manager.GetChunker("/non/existent/file")
-	if exists {
-		t.Error("Chunker should not exist for non-existent file")
-	}
+	require.False(t, exists, "Chunker should not exist for non-existent file")
 }

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"errors"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 type Chunk struct {
 	SequenceNo uint32
+	Offset     int64    // File offset
 	Data       []byte
 	Hash       string
 	IsLast     bool
@@ -28,11 +30,13 @@ type Chunker struct {
 	buffer        []byte
 }
 
+var ErrIsDir = errors.New("cannot chunk a directory")
+
 // Chunk size constants are now defined in config.go to avoid duplication
 
 func NewChunkerFromFileNode(node *fileInfo.FileNode, chunkSize int32) (*Chunker, error) {
 	if node.IsDir {
-		return nil, fmt.Errorf("cannot chunk a directory")
+		return nil, ErrIsDir
 	}
 
 	if chunkSize < MinChunkSize || chunkSize > MaxChunkSize {
@@ -60,23 +64,36 @@ func (c *Chunker) Next() (*Chunk, error) {
 	}
 
 	n, err := c.file.Read(c.buffer)
-	if err != nil {
-		return nil, err
+
+	if n > 0 {
+		c.bytesRead += int64(n)
+		c.currentSeq++
+
+		hash := sha256.Sum256(c.buffer[:n])
+		hashStr := hex.EncodeToString(hash[:])
+
+		// Calculate the offset for the current chunk
+		offset := c.bytesRead - int64(n)
+		
+		// Create a copy of the data to avoid buffer reuse issues
+		data := make([]byte, n)
+		copy(data, c.buffer[:n])
+		
+		return &Chunk{
+			SequenceNo: c.currentSeq,
+			Offset:     offset,
+			Data:       data,
+			Hash:       hashStr,
+			IsLast:     c.bytesRead >= c.totalByteSize,
+			Size:       int32(n),
+		}, nil
+		}
+
+	if err == io.EOF {
+		return nil, io.EOF
 	}
-
-	c.bytesRead += int64(n)
-	c.currentSeq++
-
-	hash := sha256.Sum256(c.buffer[:n])
-	hashStr := hex.EncodeToString(hash[:])
-
-	return &Chunk{
-		SequenceNo: c.currentSeq,
-		Data:       c.buffer[:n],
-		Hash:       hashStr,
-		IsLast:     c.bytesRead >= c.totalByteSize,
-		Size:       int32(n),
-	}, nil
+	
+	return nil, err
 }
 
 func (c *Chunker) Close() error {

@@ -4,6 +4,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTransferState_String(t *testing.T) {
@@ -21,9 +24,7 @@ func TestTransferState_String(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := test.state.String(); got != test.expected {
-			t.Errorf("TransferState(%d).String() = %q, want %q", test.state, got, test.expected)
-		}
+		assert.Equal(t, test.expected, test.state.String(), "TransferState(%d).String() mismatch", test.state)
 	}
 }
 
@@ -41,9 +42,7 @@ func TestTransferState_IsTerminal(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := test.state.IsTerminal(); got != test.expected {
-			t.Errorf("TransferState(%s).IsTerminal() = %v, want %v", test.state, got, test.expected)
-		}
+		assert.Equal(t, test.expected, test.state.IsTerminal(), "TransferState(%s).IsTerminal() mismatch", test.state)
 	}
 }
 
@@ -79,10 +78,8 @@ func TestTransferState_CanTransitionTo(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := test.from.CanTransitionTo(test.to); got != test.expected {
-			t.Errorf("TransferState(%s).CanTransitionTo(%s) = %v, want %v",
-				test.from, test.to, got, test.expected)
-		}
+		assert.Equal(t, test.expected, test.from.CanTransitionTo(test.to), 
+			"TransferState(%s).CanTransitionTo(%s) mismatch", test.from, test.to)
 	}
 }
 
@@ -106,9 +103,7 @@ func TestTransferStatus_GetProgressPercentage(t *testing.T) {
 				BytesSent:  test.bytesSent,
 				TotalBytes: test.totalBytes,
 			}
-			if got := status.GetProgressPercentage(); got != test.expected {
-				t.Errorf("GetProgressPercentage() = %f, want %f", got, test.expected)
-			}
+			assert.Equal(t, test.expected, status.GetProgressPercentage(), "GetProgressPercentage() mismatch")
 		})
 	}
 }
@@ -132,9 +127,7 @@ func TestTransferStatus_GetRemainingBytes(t *testing.T) {
 				BytesSent:  test.bytesSent,
 				TotalBytes: test.totalBytes,
 			}
-			if got := status.GetRemainingBytes(); got != test.expected {
-				t.Errorf("GetRemainingBytes() = %d, want %d", got, test.expected)
-			}
+			assert.Equal(t, test.expected, status.GetRemainingBytes(), "GetRemainingBytes() mismatch")
 		})
 	}
 }
@@ -160,9 +153,7 @@ func TestTransferStatus_IsComplete(t *testing.T) {
 				TotalBytes: test.totalBytes,
 				State:      test.state,
 			}
-			if got := status.IsComplete(); got != test.expected {
-				t.Errorf("IsComplete() = %v, want %v", got, test.expected)
-			}
+			assert.Equal(t, test.expected, status.IsComplete(), "IsComplete() mismatch")
 		})
 	}
 }
@@ -180,25 +171,15 @@ func TestTransferStatus_UpdateProgress(t *testing.T) {
 	status.UpdateProgress(500, 5)
 
 	// Check that values were updated
-	if status.BytesSent != 500 {
-		t.Errorf("BytesSent = %d, want 500", status.BytesSent)
-	}
-	if status.ChunksSent != 5 {
-		t.Errorf("ChunksSent = %d, want 5", status.ChunksSent)
-	}
-	if status.LastUpdateTime.Before(startTime) {
-		t.Error("LastUpdateTime should be updated to current time")
-	}
+	assert.Equal(t, int64(500), status.BytesSent, "BytesSent should be updated")
+	assert.Equal(t, 5, status.ChunksSent, "ChunksSent should be updated")
+	assert.True(t, status.LastUpdateTime.After(startTime), "LastUpdateTime should be updated to current time")
 
 	// Check that transfer rate was calculated
-	if status.TransferRate <= 0 {
-		t.Error("TransferRate should be calculated and positive")
-	}
+	assert.Greater(t, status.TransferRate, float64(0), "TransferRate should be calculated and positive")
 
 	// Check that ETA was calculated
-	if status.ETA <= 0 {
-		t.Error("ETA should be calculated and positive")
-	}
+	assert.Greater(t, status.ETA, time.Duration(0), "ETA should be calculated and positive")
 }
 
 func TestOverallProgress_GetCompletionPercentage(t *testing.T) {
@@ -220,9 +201,7 @@ func TestOverallProgress_GetCompletionPercentage(t *testing.T) {
 				BytesSent:  test.bytesSent,
 				TotalBytes: test.totalBytes,
 			}
-			if got := progress.GetCompletionPercentage(); got != test.expected {
-				t.Errorf("GetCompletionPercentage() = %f, want %f", got, test.expected)
-			}
+			assert.Equal(t, test.expected, progress.GetCompletionPercentage(), "GetCompletionPercentage() mismatch")
 		})
 	}
 }
@@ -241,9 +220,7 @@ func TestStatusSessionState_String(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := test.state.String(); got != test.expected {
-			t.Errorf("StatusSessionState(%d).String() = %q, want %q", test.state, got, test.expected)
-		}
+		assert.Equal(t, test.expected, test.state.String(), "StatusSessionState(%d).String() mismatch", test.state)
 	}
 }
 
@@ -267,9 +244,8 @@ func TestRetryPolicy_GetRetryDelay(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := policy.GetRetryDelay(test.retryCount); got != test.expected {
-			t.Errorf("GetRetryDelay(%d) = %v, want %v", test.retryCount, got, test.expected)
-		}
+		assert.Equal(t, test.expected, policy.GetRetryDelay(test.retryCount), 
+			"GetRetryDelay(%d) mismatch", test.retryCount)
 	}
 }
 
@@ -296,9 +272,8 @@ func TestRetryPolicy_IsRetryable(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := policy.IsRetryable(test.err); got != test.expected {
-				t.Errorf("IsRetryable(%v) = %v, want %v", test.err, got, test.expected)
-			}
+			assert.Equal(t, test.expected, policy.IsRetryable(test.err), 
+				"IsRetryable(%v) mismatch", test.err)
 		})
 	}
 }
@@ -306,29 +281,12 @@ func TestRetryPolicy_IsRetryable(t *testing.T) {
 func TestDefaultRetryPolicy(t *testing.T) {
 	policy := DefaultRetryPolicy()
 
-	if policy == nil {
-		t.Fatal("DefaultRetryPolicy() returned nil")
-	}
-
-	if policy.MaxRetries <= 0 {
-		t.Error("MaxRetries should be positive")
-	}
-
-	if policy.InitialDelay <= 0 {
-		t.Error("InitialDelay should be positive")
-	}
-
-	if policy.BackoffFactor <= 1.0 {
-		t.Error("BackoffFactor should be greater than 1.0")
-	}
-
-	if policy.MaxDelay <= policy.InitialDelay {
-		t.Error("MaxDelay should be greater than InitialDelay")
-	}
-
-	if len(policy.RetryableErrors) == 0 {
-		t.Error("RetryableErrors should not be empty")
-	}
+	require.NotNil(t, policy, "DefaultRetryPolicy() returned nil")
+	assert.Greater(t, policy.MaxRetries, 0, "MaxRetries should be positive")
+	assert.Greater(t, policy.InitialDelay, time.Duration(0), "InitialDelay should be positive")
+	assert.Greater(t, policy.BackoffFactor, 1.0, "BackoffFactor should be greater than 1.0")
+	assert.Greater(t, policy.MaxDelay, policy.InitialDelay, "MaxDelay should be greater than InitialDelay")
+	assert.NotEmpty(t, policy.RetryableErrors, "RetryableErrors should not be empty")
 }
 
 func TestErrorConstants(t *testing.T) {
@@ -345,12 +303,8 @@ func TestErrorConstants(t *testing.T) {
 	}
 
 	for i, err := range errors {
-		if err == nil {
-			t.Errorf("Error constant at index %d is nil", i)
-		}
-		if err.Error() == "" {
-			t.Errorf("Error constant at index %d has empty message", i)
-		}
+		assert.NotNil(t, err, "Error constant at index %d is nil", i)
+		assert.NotEmpty(t, err.Error(), "Error constant at index %d has empty message", i)
 	}
 }
 
@@ -371,8 +325,7 @@ func TestContains(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := contains(test.s, test.substr); got != test.expected {
-			t.Errorf("contains(%q, %q) = %v, want %v", test.s, test.substr, got, test.expected)
-		}
+		assert.Equal(t, test.expected, contains(test.s, test.substr), 
+			"contains(%q, %q) mismatch", test.s, test.substr)
 	}
 }

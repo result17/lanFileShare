@@ -144,7 +144,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	if sc, ok := senderConn.(*SenderConn); ok {
 		sc.SetSignaler(signaler)
 	} else {
-		t.Fatal("Failed to cast senderConn to *SenderConn")
+		require.Fail(t, "Failed to cast senderConn to *SenderConn")
 	}
 
 	// The Sender's OnICECandidate will call the required SendICECandidate method
@@ -233,9 +233,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		t.Log("SUCCESS: Message received successfully.")
 		close(done)
 	case err := <-errChan:
-		t.Fatalf("A goroutine reported an error: %v", err)
+		require.Fail(t, "A goroutine reported an error", err)
 	case <-ctx.Done():
-		t.Fatal("Test timed out waiting for message")
+		require.Fail(t, "Test timed out waiting for message")
 	}
 
 	wg.Wait()

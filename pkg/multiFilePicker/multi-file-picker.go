@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +39,7 @@ type KeyMap struct {
 	ToggleSelect key.Binding
 	ToggleInput  key.Binding
 	Confirm      key.Binding
+	BackUp       key.Binding
 	Quit         key.Binding
 }
 
@@ -48,15 +50,25 @@ var DefaultKeyMap = KeyMap{
 	Right:        key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "page down")),
 	ToggleSelect: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
 	ToggleInput:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
-	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
+	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm/navigate")),
 	Quit:         key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc/ctrl+c", "quit/back")),
+}
+
+type displayItem struct {
+	Name string
+	Path string
+	IsDir bool
+	ModTime string
+	Size string
+	Type string
+	fs.DirEntry
 }
 
 // --- Model ---
 type Model struct {
 	path     string
 	lastPath string // For relative path resolution
-	items    []fs.DirEntry
+	items    []displayItem
 	selected map[string]struct{}
 	cursor   int
 	keys     KeyMap
@@ -86,14 +98,94 @@ func InitialModel() Model {
 	}
 
 	return Model{
-		path:     "",              // Initially empty
-		lastPath: wd,              // Start with the working directory
-		items:    []fs.DirEntry{}, // Initially empty
+		path:     "",               // Initially empty
+		lastPath: wd,               // Start with the working directory
+		items:    []displayItem{}, // Initially empty
 		selected: make(map[string]struct{}),
 		keys:     DefaultKeyMap,
 		mode:     modeInput, // Start in input mode
 		input:    ti,
 	}
+}
+
+func (m *Model) loadDirectory(path string) ([]displayItem, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(m.lastPath, path)
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		m.inputErr = fmt.Errorf("invalid path: %w", err)
+		slog.Error("invalid path", "error", err)
+		return nil, err
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		inputErr := fmt.Errorf("path does not exist: %s, %v", absPath, err)
+		m.inputErr = inputErr
+		slog.Error("path does not exist", "path", absPath, "error", err)
+		return nil, inputErr
+	}
+	if !info.IsDir() {
+		inputErr := fmt.Errorf("path is not a directory: %s", absPath)
+		m.inputErr = inputErr
+		slog.Error("path is not a directory", "path", absPath)
+		return nil, inputErr
+	}
+
+	// Path is a valid directory, load its contents
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		m.inputErr = fmt.Errorf("could not read directory: %w", err)
+		return nil, err
+	}
+
+	newItems := make([]displayItem, len(entries))
+	for i, entry := range entries {
+		info, err := entry.Info()
+		modTime := ""
+		size := ""
+		typeStr := ""
+
+		if err == nil {
+			modTime = info.ModTime().Format("2006-01-02 15:04:05")
+			if info.IsDir() {
+				size = "<DIR>"
+			} else {
+				size = util.FormatSize(info.Size())
+			}
+		}
+
+		// Get MIME type for files
+		if !entry.IsDir() {
+			entryPath := filepath.Join(absPath, entry.Name())
+			mime, err := mimetype.DetectFile(entryPath)
+			if err == nil {
+				typeStr = mime.String()
+			}
+		}
+
+		newItems[i] = displayItem{
+			Name:     entry.Name(),
+			Path:     filepath.Join(absPath, entry.Name()),
+			IsDir:    entry.IsDir(),
+			ModTime:  modTime,
+			Size:     size,
+			Type:     typeStr,
+			DirEntry: entry,
+		}
+	}
+
+	// Sort items: directories first, then files, both alphabetically
+	sort.Slice(newItems, func(i, j int) bool {
+		if newItems[i].IsDir != newItems[j].IsDir {
+			return newItems[i].IsDir // Directories first
+		}
+		return newItems[i].Name < newItems[j].Name
+	})
+
+	return newItems, nil
 }
 
 // --- Bubble Tea Methods ---
@@ -185,7 +277,11 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Scroll the view down by one page
 		m.offset += visibleItems
 		if m.offset > len(m.items)-visibleItems {
-			m.offset = len(m.items) - visibleItems
+			newOffset := len(m.items) - visibleItems
+			if newOffset < 0 {
+				newOffset = 0
+			}
+			m.offset = newOffset
 		}
 		// Ensure the cursor is within the visible viewport
 		if m.cursor >= m.offset+visibleItems {
@@ -210,20 +306,41 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, m.keys.ToggleSelect):
-		item := m.items[m.cursor]
-		path := filepath.Join(m.path, item.Name())
-		if _, ok := m.selected[path]; ok {
-			delete(m.selected, path)
-		} else {
-			m.selected[path] = struct{}{}
+		if m.cursor < len(m.items) {
+			item := m.items[m.cursor]
+			if _, ok := m.selected[item.Path]; ok {
+				delete(m.selected, item.Path)
+			} else {
+				m.selected[item.Path] = struct{}{}
+			}
 		}
 
 	case key.Matches(msg, m.keys.Confirm):
+		// If we have selected files, return them
 		if len(m.selected) > 0 {
 			files := getSelectedFileNodes(m.selected)
-			// Fallback to sending a message if no callback is provided.
 			return m, func() tea.Msg {
 				return SelectedFileNodeMsg{Files: files}
+			}
+		}
+		
+		// If no files selected but cursor is on a directory, navigate into it
+		if m.cursor < len(m.items) {
+			item := m.items[m.cursor]
+			if item.IsDir {
+				items, err := m.loadDirectory(item.Path)
+				if err != nil {
+					// Error is already set in m.inputErr by loadDirectory
+					return m, nil
+				}
+				
+				m.path = item.Path
+				m.lastPath = item.Path
+				m.items = items
+				m.cursor = 0
+				m.offset = 0
+				m.inputErr = nil
+				return m, nil
 			}
 		}
 	}
@@ -235,42 +352,29 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if key.Matches(msg, m.keys.Confirm) {
 		path := m.input.Value()
-		// Resolve path relative to the last path
+		
+		// Load directory - all path validation is handled in loadDirectory
+		items, err := m.loadDirectory(path)
+		if err != nil {
+			// Error is already set in m.inputErr by loadDirectory
+			return m, nil
+		}
+
+		// Get absolute path for display
+		absPath := path
 		if !filepath.IsAbs(path) {
-			path = filepath.Join(m.lastPath, path)
+			absPath = filepath.Join(m.lastPath, path)
 		}
-
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			m.inputErr = fmt.Errorf("invalid path: %w", err)
-			return m, nil
-		}
-
-		info, err := os.Stat(absPath)
-		if err != nil {
-			m.inputErr = fmt.Errorf("path does not exist: %s", absPath)
-			return m, nil
-		}
-		if !info.IsDir() {
-			m.inputErr = fmt.Errorf("path is not a directory: %s", absPath)
-			return m, nil
-		}
-
-		// Path is a valid directory, load its contents
-		items, err := os.ReadDir(absPath)
-		if err != nil {
-			m.inputErr = fmt.Errorf("could not read directory: %w", err)
-			return m, nil
-		}
+		absPath, _ = filepath.Abs(absPath) // We know this works since loadDirectory succeeded
 
 		m.path = absPath
-		m.lastPath = absPath // Update last path
+		m.lastPath = absPath
 		m.items = items
 		m.mode = modeBrowse
 		m.input.Reset()
 		m.inputErr = nil
-		m.cursor = 0 // Reset cursor
-		m.offset = 0 // Reset scroll offset
+		m.cursor = 0
+		m.offset = 0
 		return m, nil
 	}
 
@@ -331,7 +435,7 @@ func (m Model) View() string {
 	if start < len(m.items) {
 		slice = m.items[start:end]
 	} else if len(m.items) == 0 {
-		slice = []fs.DirEntry{}
+		slice = []displayItem{}
 	}
 
 	for i, item := range slice {
@@ -342,42 +446,24 @@ func (m Model) View() string {
 			s.WriteString("  ")
 		}
 
-		path := filepath.Join(m.path, item.Name())
-		if _, ok := m.selected[path]; ok {
+		if _, ok := m.selected[item.Path]; ok {
 			s.WriteString(style.SelectedStyle.String())
 		} else {
 			s.WriteString(style.DeselectedStyle.String())
 		}
 
-		info, err := item.Info()
-		modTime := ""
-		size := ""
-
-		if err == nil {
-			modTime = info.ModTime().Format("2006-01-02 15:04:05")
-			if info.IsDir() {
-				size = "<DIR>"
-			} else {
-				size = util.FormatSize(info.Size())
-			}
-		}
-		nameStr := item.Name()
-		if item.IsDir() {
+		nameStr := item.Name
+		if item.IsDir {
 			nameStr += "/"
-		}
-		typeStr := ""
-		mime, err := mimetype.DetectFile(path)
-		if err == nil {
-			typeStr = mime.String()
 		}
 
 		// Pad right first, then add style
 		nameCell := util.PadRight(nameStr, nameWidth)
-		typeCell := util.PadRight(typeStr, typeWidth)
-		timeCell := util.PadRight(modTime, timeWidth)
-		sizeCell := util.PadRight(size, sizeWidth)
+		typeCell := util.PadRight(item.Type, typeWidth)
+		timeCell := util.PadRight(item.ModTime, timeWidth)
+		sizeCell := util.PadRight(item.Size, sizeWidth)
 
-		if item.IsDir() {
+		if item.IsDir {
 			nameCell = style.DirStyle.Render(nameCell)
 		}
 		// For regular files, don't add nameCol.Render, just output the padded nameCell
@@ -416,25 +502,16 @@ func getSelectedFileNodes(selection map[string]struct{}) []fileInfo.FileNode {
 }
 
 func (m *Model) SetPath(path string) error {
+	items, err := m.loadDirectory(path)
+	if err != nil {
+		return err
+	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return fmt.Errorf("path does not exist: %s", absPath)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory: %s", absPath)
-	}
-	items, err := os.ReadDir(absPath)
-	if err != nil {
-		return fmt.Errorf("could not read directory: %w", err)
-	}
 
-	sort.Slice(m.items, func(i, j int) bool {
-		return m.items[i].Name() < m.items[j].Name()
-	})
 	m.path = absPath
 	m.lastPath = absPath // Also update the last path
 	m.items = items

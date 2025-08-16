@@ -2,7 +2,6 @@ package transfer
 
 import (
 	"fmt"
-	"log/slog"
 	"sync"
 
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
@@ -23,16 +22,16 @@ func NewFileStructureManager() *FileStructureManager {
 	}
 }
 
-func NewFileStructureManagerWithRootNodes(rootNodes []*fileInfo.FileNode) *FileStructureManager {
+func NewFileStructureManagerWithRootNodes(rootNodes []*fileInfo.FileNode) (*FileStructureManager, error) {
 	fsm := NewFileStructureManager()
 	fsm.RootNodes = rootNodes
 	for _, node := range rootNodes {
 		err := fsm.addFileNodeUnsafe(node)
 		if err != nil {
-			slog.Error("failed to add root node", "path", node.Path, "error", err)
+			return nil, err
 		}
 	}
-	return fsm
+	return fsm, nil
 }
 
 // NewFileStructureManagerFromPath creates a FileStructureManager from a single path
@@ -44,8 +43,11 @@ func NewFileStructureManagerFromPath(path string) (*FileStructureManager, error)
 		return nil, fmt.Errorf("failed to create node from path %s: %w", path, err)
 	}
 
-	fsm.AddFileNode(&node)
-	fsm.RootNodes = append(fsm.RootNodes, &node)
+	// AddFileNode now handles both internal maps and RootNodes
+	err = fsm.AddFileNode(&node)
+	if err != nil {
+		return nil, err
+	}
 
 	return fsm, nil
 }
@@ -59,14 +61,30 @@ func (fsm *FileStructureManager) AddPath(path string) error {
 		return fmt.Errorf("failed to create node from path %s: %w", path, err)
 	}
 
-	return fsm.addFileNodeUnsafe(&node)
+	// Add to internal maps
+	err = fsm.addFileNodeUnsafe(&node)
+	if err != nil {
+		return err
+	}
+
+	// Add to RootNodes to maintain consistency
+	fsm.RootNodes = append(fsm.RootNodes, &node)
+	return nil
 }
 
 func (fsm *FileStructureManager) AddFileNode(node *fileInfo.FileNode) error {
 	fsm.mu.Lock()
 	defer fsm.mu.Unlock()
 
-	return fsm.addFileNodeUnsafe(node)
+	// Add to internal maps
+	err := fsm.addFileNodeUnsafe(node)
+	if err != nil {
+		return err
+	}
+
+	// Add to RootNodes to maintain consistency
+	fsm.RootNodes = append(fsm.RootNodes, node)
+	return nil
 }
 
 func (fsm *FileStructureManager) addFileNodeUnsafe(node *fileInfo.FileNode) error {
@@ -74,13 +92,26 @@ func (fsm *FileStructureManager) addFileNodeUnsafe(node *fileInfo.FileNode) erro
 		return fmt.Errorf("node cannot be nil")
 	}
 
-	if node.IsDir {
-		fsm.dirMap[node.Path] = node
-		for _, child := range node.Children {
-			fsm.addFileNodeUnsafe(&child)
+	queue := []*fileInfo.FileNode{node}
+
+	for len(queue) > 0 {
+		currentNode := queue[0]
+		queue = queue[1:]
+
+		if currentNode.IsDir {
+			if _, exists := fsm.dirMap[currentNode.Path]; exists {
+				continue
+			}
+			fsm.dirMap[currentNode.Path] = currentNode
+			for i := range currentNode.Children {
+				queue = append(queue, &currentNode.Children[i])
+			}
+		} else {
+			if _, exists := fsm.fileMap[currentNode.Path]; exists {
+				continue
+			}
+			fsm.fileMap[currentNode.Path] = currentNode
 		}
-	} else {
-		fsm.fileMap[node.Path] = node
 	}
 	return nil
 }
@@ -122,6 +153,20 @@ func (fsm *FileStructureManager) GetAllFiles() []*fileInfo.FileNode {
 	files := make([]*fileInfo.FileNode, 0, len(fsm.fileMap))
 	for _, node := range fsm.fileMap {
 		files = append(files, node)
+	}
+	return files
+}
+
+func (fsm *FileStructureManager) GetAllFileEntities() []fileInfo.FileNode {
+	fsm.mu.RLock()
+	defer fsm.mu.RUnlock()
+
+	// Convert []*fileInfo.FileNode to []fileInfo.FileNode
+	files := make([]fileInfo.FileNode, 0, len(fsm.fileMap))
+	for _, ptr := range fsm.fileMap {
+		if ptr != nil {
+			files = append(files, *ptr)
+		}
 	}
 	return files
 }

@@ -19,6 +19,7 @@ type ChunkMessage struct {
 	FileID       string
 	FileName     string
 	SequenceNo   uint32
+	Offset       int64    // File offset, supports out-of-order writes
 	Data         []byte
 	ChunkHash    string
 	TotalSize    int64

@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/pkg/transfer"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestFileReceiver_IntegrityVerification tests the integrity verification functionality
@@ -18,9 +20,7 @@ import (
 func TestFileReceiver_IntegrityVerification(t *testing.T) {
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "file_receiver_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tempDir)
 
 	// Create UI messages channel for testing
@@ -42,6 +42,7 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 			FileID:       fileID,
 			FileName:     fileName,
 			SequenceNo:   1,
+			Offset:       0, // First chunk starts at offset 0
 			Data:         testData,
 			TotalSize:    int64(len(testData)),
 			ExpectedHash: expectedHash,
@@ -50,42 +51,29 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 		// Serialize and process chunk
 		serializer := transfer.NewJSONSerializer()
 		data, err := serializer.Marshal(chunkMsg)
-		if err != nil {
-			t.Fatalf("Failed to marshal chunk message: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal chunk message")
 
 		err = fileReceiver.ProcessChunk(data)
-		if err != nil {
-			t.Fatalf("Failed to process chunk: %v", err)
-		}
+		require.NoError(t, err, "Failed to process chunk")
 
 		// Verify file was created and has correct content
 		outputPath := filepath.Join(tempDir, fileName)
-		if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-			t.Fatalf("Output file was not created: %s", outputPath)
-		}
+		assert.FileExists(t, outputPath, "Output file should be created")
 
 		// Read and verify file content
 		content, err := os.ReadFile(outputPath)
-		if err != nil {
-			t.Fatalf("Failed to read output file: %v", err)
-		}
+		require.NoError(t, err, "Failed to read output file")
 
-		if string(content) != string(testData) {
-			t.Errorf("File content mismatch. Expected: %s, Got: %s", string(testData), string(content))
-		}
+		assert.Equal(t, string(testData), string(content), "File content should match expected data")
 
 		// Check UI messages
 		select {
 		case msg := <-uiMessages:
-			if statusMsg, ok := msg.(receiver.StatusUpdateMsg); ok {
-				expectedMsg := fmt.Sprintf("Receiving file: %s", fileName)
-				if statusMsg.Message != expectedMsg {
-					t.Errorf("Expected UI message: %s, Got: %s", expectedMsg, statusMsg.Message)
-				}
-			} else {
-				t.Errorf("Expected StatusUpdateMsg, got: %T", msg)
-			}
+			statusMsg, ok := msg.(receiver.StatusUpdateMsg)
+			require.True(t, ok, "Expected StatusUpdateMsg, got: %T", msg)
+			
+			expectedMsg := fmt.Sprintf("Receiving file: %s", fileName)
+			assert.Equal(t, expectedMsg, statusMsg.Message, "UI message should match expected")
 		default:
 			t.Error("Expected UI message for file reception start")
 		}
@@ -104,6 +92,7 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 			FileID:       fileID,
 			FileName:     fileName,
 			SequenceNo:   1,
+			Offset:       0,
 			Data:         testData,
 			TotalSize:    int64(len(testData)),
 			ExpectedHash: incorrectHash,
@@ -112,26 +101,17 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 		// Serialize and process chunk
 		serializer := transfer.NewJSONSerializer()
 		data, err := serializer.Marshal(chunkMsg)
-		if err != nil {
-			t.Fatalf("Failed to marshal chunk message: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal chunk message")
 
 		err = fileReceiver.ProcessChunk(data)
-		if err == nil {
-			t.Fatal("Expected error for corrupted file, but got none")
-		}
+		require.Error(t, err, "Expected error for corrupted file")
 
 		// Verify error message contains verification failure
-		expectedErrMsg := "file integrity verification failed"
-		if !containsString(err.Error(), expectedErrMsg) {
-			t.Errorf("Expected error to contain '%s', got: %s", expectedErrMsg, err.Error())
-		}
+		assert.Contains(t, err.Error(), "file integrity verification failed", "Error should indicate verification failure")
 
 		// Verify corrupted file was cleaned up
 		outputPath := filepath.Join(tempDir, fileName)
-		if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
-			t.Error("Corrupted file should have been cleaned up")
-		}
+		assert.NoFileExists(t, outputPath, "Corrupted file should have been cleaned up")
 	})
 
 	t.Run("verification_with_empty_hash", func(t *testing.T) {
@@ -146,6 +126,7 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 			FileID:     fileID,
 			FileName:   fileName,
 			SequenceNo: 1,
+			Offset:     0,
 			Data:       testData,
 			TotalSize:  int64(len(testData)),
 			// ExpectedHash is empty - should skip verification
@@ -154,20 +135,14 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 		// Serialize and process chunk
 		serializer := transfer.NewJSONSerializer()
 		data, err := serializer.Marshal(chunkMsg)
-		if err != nil {
-			t.Fatalf("Failed to marshal chunk message: %v", err)
-		}
+		require.NoError(t, err, "Failed to marshal chunk message")
 
 		err = fileReceiver.ProcessChunk(data)
-		if err != nil {
-			t.Fatalf("Failed to process chunk without hash: %v", err)
-		}
+		require.NoError(t, err, "Failed to process chunk without hash")
 
 		// Verify file was created (verification should be skipped)
 		outputPath := filepath.Join(tempDir, fileName)
-		if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-			t.Fatalf("Output file was not created: %s", outputPath)
-		}
+		assert.FileExists(t, outputPath, "Output file should be created even without hash")
 	})
 }
 
@@ -175,9 +150,7 @@ func TestFileReceiver_IntegrityVerification(t *testing.T) {
 func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "integrity_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tempDir)
 
 	// Create file receiver
@@ -188,9 +161,7 @@ func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 		testData := []byte("Test file content for hash verification")
 		testFile := filepath.Join(tempDir, "valid_test.txt")
 		err := os.WriteFile(testFile, testData, 0644)
-		if err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
-		}
+		require.NoError(t, err, "Failed to create test file")
 
 		// Calculate expected hash
 		expectedHash := calculateTestHash(testData)
@@ -204,9 +175,7 @@ func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 
 		// Test verification
 		err = fileReceiver.verifyFileIntegrity(fileReception)
-		if err != nil {
-			t.Errorf("Verification should succeed, but got error: %v", err)
-		}
+		assert.NoError(t, err, "Verification should succeed with correct hash")
 	})
 
 	t.Run("invalid_hash_verification", func(t *testing.T) {
@@ -214,9 +183,7 @@ func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 		testData := []byte("Different test file content")
 		testFile := filepath.Join(tempDir, "invalid_test.txt")
 		err := os.WriteFile(testFile, testData, 0644)
-		if err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
-		}
+		require.NoError(t, err, "Failed to create test file")
 
 		// Use incorrect hash
 		incorrectHash := "incorrect_hash_value"
@@ -230,14 +197,8 @@ func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 
 		// Test verification
 		err = fileReceiver.verifyFileIntegrity(fileReception)
-		if err == nil {
-			t.Error("Verification should fail with incorrect hash")
-		}
-
-		expectedErrMsg := "file hash mismatch"
-		if !containsString(err.Error(), expectedErrMsg) {
-			t.Errorf("Expected error to contain '%s', got: %s", expectedErrMsg, err.Error())
-		}
+		require.Error(t, err, "Verification should fail with incorrect hash")
+		assert.Contains(t, err.Error(), "file hash mismatch", "Error should indicate hash mismatch")
 	})
 
 	t.Run("nonexistent_file_verification", func(t *testing.T) {
@@ -250,14 +211,8 @@ func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 
 		// Test verification
 		err = fileReceiver.verifyFileIntegrity(fileReception)
-		if err == nil {
-			t.Error("Verification should fail for nonexistent file")
-		}
-
-		expectedErrMsg := "failed to calculate file hash"
-		if !containsString(err.Error(), expectedErrMsg) {
-			t.Errorf("Expected error to contain '%s', got: %s", expectedErrMsg, err.Error())
-		}
+		require.Error(t, err, "Verification should fail for nonexistent file")
+		assert.Contains(t, err.Error(), "failed to calculate file hash", "Error should indicate hash calculation failure")
 	})
 }
 
@@ -265,9 +220,7 @@ func TestFileReceiver_VerifyFileIntegrity(t *testing.T) {
 func TestFileReceiver_CleanupCorruptedFile(t *testing.T) {
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "cleanup_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tempDir)
 
 	// Create file receiver
@@ -277,14 +230,10 @@ func TestFileReceiver_CleanupCorruptedFile(t *testing.T) {
 		// Create test file
 		testFile := filepath.Join(tempDir, "cleanup_test.txt")
 		err := os.WriteFile(testFile, []byte("test content"), 0644)
-		if err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
-		}
+		require.NoError(t, err, "Failed to create test file")
 
 		// Verify file exists
-		if _, err := os.Stat(testFile); os.IsNotExist(err) {
-			t.Fatal("Test file should exist before cleanup")
-		}
+		assert.FileExists(t, testFile, "Test file should exist before cleanup")
 
 		// Create file reception
 		fileReception := &FileReception{
@@ -294,14 +243,10 @@ func TestFileReceiver_CleanupCorruptedFile(t *testing.T) {
 
 		// Test cleanup
 		err = fileReceiver.cleanupCorruptedFile(fileReception)
-		if err != nil {
-			t.Errorf("Cleanup should succeed, but got error: %v", err)
-		}
+		assert.NoError(t, err, "Cleanup should succeed")
 
 		// Verify file was removed
-		if _, err := os.Stat(testFile); !os.IsNotExist(err) {
-			t.Error("File should have been removed after cleanup")
-		}
+		assert.NoFileExists(t, testFile, "File should have been removed after cleanup")
 	})
 
 	t.Run("cleanup_nonexistent_file", func(t *testing.T) {
@@ -313,9 +258,7 @@ func TestFileReceiver_CleanupCorruptedFile(t *testing.T) {
 
 		// Test cleanup (should not error)
 		err = fileReceiver.cleanupCorruptedFile(fileReception)
-		if err != nil {
-			t.Errorf("Cleanup of nonexistent file should not error, but got: %v", err)
-		}
+		assert.NoError(t, err, "Cleanup of nonexistent file should not error")
 	})
 
 	t.Run("cleanup_empty_path", func(t *testing.T) {
@@ -327,9 +270,7 @@ func TestFileReceiver_CleanupCorruptedFile(t *testing.T) {
 
 		// Test cleanup (should not error)
 		err = fileReceiver.cleanupCorruptedFile(fileReception)
-		if err != nil {
-			t.Errorf("Cleanup with empty path should not error, but got: %v", err)
-		}
+		assert.NoError(t, err, "Cleanup with empty path should not error")
 	})
 }
 
@@ -337,22 +278,4 @@ func TestFileReceiver_CleanupCorruptedFile(t *testing.T) {
 func calculateTestHash(data []byte) string {
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
-}
-
-// Helper function to check if a string contains a substring
-func containsString(str, substr string) bool {
-	return len(str) >= len(substr) && (str == substr || 
-		(len(str) > len(substr) && 
-			(str[:len(substr)] == substr || 
-			 str[len(str)-len(substr):] == substr || 
-			 containsSubstring(str, substr))))
-}
-
-func containsSubstring(str, substr string) bool {
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -1,0 +1,19 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "charmbracelet",
+    "textinput",
+    "bubbletea",
+    "lipgloss",
+    "vasile",
+    "rescp",
+    "gocyclo",
+    "nolint"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/go.sum"
+  ]
+}

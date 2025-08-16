@@ -14,6 +14,8 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/pkg/crypto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockAddICECandidate is a mock function for testing ICE candidate handling
@@ -32,14 +34,12 @@ func createTestSignedFiles(t *testing.T) *crypto.SignedFileStructure {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+
+	require.Nil(t, err, "Failed to create test file")
 
 	signedFiles, err := crypto.CreateSignedFileStructure([]string{testFile})
-	if err != nil {
-		t.Fatalf("Failed to create signed file structure: %v", err)
-	}
+
+	require.Nil(t, err, "Failed to create signed file structure")
 
 	return signedFiles
 }
@@ -58,55 +58,27 @@ func TestNewAPISignaler(t *testing.T) {
 
 	signaler := NewAPISignaler(client, receiverURL, mockAddICECandidate)
 
-	if signaler == nil {
-		t.Fatal("NewAPISignaler returned nil")
-	}
+	require.NotNil(t, signaler, "NewAPISignaler returned nil")
 
-	if signaler.apiClient != client {
-		t.Error("APISignaler should store the provided client")
-	}
-
-	if signaler.receiverURL != receiverURL {
-		t.Error("APISignaler should store the provided receiver URL")
-	}
-
-	if signaler.addIceCandidateFunc == nil {
-		t.Error("APISignaler should store the provided ICE candidate function")
-	}
-
-	if signaler.answerChan == nil {
-		t.Error("APISignaler should initialize answer channel")
-	}
-
-	if signaler.errChan == nil {
-		t.Error("APISignaler should initialize error channel")
-	}
+	assert.Equal(t, client, signaler.apiClient, "APISignaler should store the provided client")
+	assert.Equal(t, receiverURL, signaler.receiverURL, "APISignaler should store the provided receiver URL")
+	assert.NotNil(t, signaler.addIceCandidateFunc, "APISignaler should store the provided ICE candidate function")
+	assert.NotNil(t, signaler.answerChan, "APISignaler should initialize answer channel")
+	assert.NotNil(t, signaler.errChan, "APISignaler should initialize error channel")
 }
 
 func TestAPISignaler_SendOffer_Success(t *testing.T) {
 	// Create test server that responds with SSE stream
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ask" {
-			t.Errorf("Expected path /ask, got %s", r.URL.Path)
-		}
-
-		if r.Method != "POST" {
-			t.Errorf("Expected POST method, got %s", r.Method)
-		}
-
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("Expected Content-Type application/json, got %s", r.Header.Get("Content-Type"))
-		}
-
-		if r.Header.Get("Accept") != "text/event-stream" {
-			t.Errorf("Expected Accept text/event-stream, got %s", r.Header.Get("Accept"))
-		}
+		assert.Equal(t, "/ask", r.URL.Path, "Expected path /ask")
+		assert.Equal(t, "POST", r.Method, "Expected POST method")
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"), "Expected Content-Type application/json")
+		assert.Equal(t, "text/event-stream", r.Header.Get("Accept"), "Expected Accept text/event-stream")
 
 		// Verify request body
 		var payload AskPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("Failed to decode request body: %v", err)
-		}
+		err := json.NewDecoder(r.Body).Decode(&payload)
+		assert.NoError(t, err, "Failed to decode request body")
 
 		// Send SSE response with answer
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -126,12 +98,7 @@ func TestAPISignaler_SendOffer_Success(t *testing.T) {
 	signedFiles := createTestSignedFiles(t)
 
 	err := signaler.SendOffer(ctx, offer, signedFiles)
-	if err != nil {
-		t.Errorf("SendOffer failed: %v", err)
-	}
-
-	// Give some time for the goroutine to process the response
-	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, err, "SendOffer failed")
 }
 
 func TestAPISignaler_SendOffer_InvalidURL(t *testing.T) {
@@ -143,13 +110,8 @@ func TestAPISignaler_SendOffer_InvalidURL(t *testing.T) {
 	signedFiles := createTestSignedFiles(t)
 
 	err := signaler.SendOffer(ctx, offer, signedFiles)
-	if err == nil {
-		t.Error("SendOffer should fail with invalid URL")
-	}
-
-	if !strings.Contains(err.Error(), "failed to create ask url") {
-		t.Errorf("Expected URL creation error, got: %v", err)
-	}
+	assert.Error(t, err, "SendOffer should fail with invalid URL")
+	assert.Contains(t, err.Error(), "failed to create ask url", "Expected URL creation error")
 }
 
 func TestAPISignaler_WaitForAnswer_Success(t *testing.T) {
@@ -173,27 +135,14 @@ func TestAPISignaler_WaitForAnswer_Success(t *testing.T) {
 
 	// Send offer to start the SSE stream
 	err := signaler.SendOffer(ctx, offer, signedFiles)
-	if err != nil {
-		t.Fatalf("SendOffer failed: %v", err)
-	}
+	require.NoError(t, err, "SendOffer failed")
 
 	// Wait for answer
 	answer, err := signaler.WaitForAnswer(ctx)
-	if err != nil {
-		t.Errorf("WaitForAnswer failed: %v", err)
-	}
-
-	if answer == nil {
-		t.Error("Answer should not be nil")
-	}
-
-	if answer.Type != webrtc.SDPTypeAnswer {
-		t.Errorf("Expected answer type, got %v", answer.Type)
-	}
-
-	if answer.SDP != "test-answer-sdp" {
-		t.Errorf("Expected test-answer-sdp, got %s", answer.SDP)
-	}
+	assert.NoError(t, err, "WaitForAnswer failed")
+	assert.NotNil(t, answer, "Answer should not be nil")
+	assert.Equal(t, webrtc.SDPTypeAnswer, answer.Type, "Expected answer type")
+	assert.Equal(t, "test-answer-sdp", answer.SDP, "Expected test-answer-sdp")
 }
 
 func TestAPISignaler_WaitForAnswer_Rejection(t *testing.T) {
@@ -217,23 +166,13 @@ func TestAPISignaler_WaitForAnswer_Rejection(t *testing.T) {
 
 	// Send offer to start the SSE stream
 	err := signaler.SendOffer(ctx, offer, signedFiles)
-	if err != nil {
-		t.Fatalf("SendOffer failed: %v", err)
-	}
+	require.NoError(t, err, "SendOffer failed")
 
 	// Wait for answer (should get rejection error)
 	answer, err := signaler.WaitForAnswer(ctx)
-	if err == nil {
-		t.Error("WaitForAnswer should fail with rejection")
-	}
-
-	if err != ErrTransferRejected {
-		t.Errorf("Expected ErrTransferRejected, got: %v", err)
-	}
-
-	if answer != nil {
-		t.Error("Answer should be nil on rejection")
-	}
+	assert.Error(t, err, "WaitForAnswer should fail with rejection")
+	assert.Equal(t, ErrTransferRejected, err, "Expected ErrTransferRejected")
+	assert.Nil(t, answer, "Answer should be nil on rejection")
 }
 
 func TestAPISignaler_WaitForAnswer_Timeout(t *testing.T) {
@@ -245,26 +184,16 @@ func TestAPISignaler_WaitForAnswer_Timeout(t *testing.T) {
 
 	// Wait for answer with timeout
 	answer, err := signaler.WaitForAnswer(ctx)
-	if err == nil {
-		t.Error("WaitForAnswer should fail with timeout")
-	}
-
-	if !strings.Contains(err.Error(), "context canceled") {
-		t.Errorf("Expected context cancellation error, got: %v", err)
-	}
-
-	if answer != nil {
-		t.Error("Answer should be nil on timeout")
-	}
+	assert.Error(t, err, "WaitForAnswer should fail with timeout")
+	assert.Contains(t, err.Error(), "context canceled", "Expected context cancellation error")
+	assert.Nil(t, answer, "Answer should be nil on timeout")
 }
 
 func TestAPISignaler_HandleCandidateEvent_Success(t *testing.T) {
 	candidateReceived := false
 	mockAddICE := func(candidate webrtc.ICECandidateInit) error {
 		candidateReceived = true
-		if candidate.Candidate != "test-candidate" {
-			t.Errorf("Expected test-candidate, got %s", candidate.Candidate)
-		}
+		assert.Equal(t, "test-candidate", candidate.Candidate, "Expected test-candidate")
 		return nil
 	}
 
@@ -275,9 +204,7 @@ func TestAPISignaler_HandleCandidateEvent_Success(t *testing.T) {
 	candidateData := `{"candidate":{"candidate":"test-candidate","sdpMid":"0","sdpMLineIndex":0}}`
 	signaler.handleCandidateEvent(candidateData)
 
-	if !candidateReceived {
-		t.Error("ICE candidate should have been processed")
-	}
+	assert.True(t, candidateReceived, "ICE candidate should have been processed")
 }
 
 func TestAPISignaler_HandleCandidateEvent_InvalidJSON(t *testing.T) {
@@ -304,19 +231,13 @@ func TestAPISignaler_HandleCandidateEvent_AddCandidateError(t *testing.T) {
 func TestAPISignaler_SendICECandidate_Success(t *testing.T) {
 	// Create test server that accepts ICE candidates
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/candidate" {
-			t.Errorf("Expected path /candidate, got %s", r.URL.Path)
-		}
-
-		if r.Method != "POST" {
-			t.Errorf("Expected POST method, got %s", r.Method)
-		}
+		assert.Equal(t, "/candidate", r.URL.Path, "Expected path /candidate")
+		assert.Equal(t, "POST", r.Method, "Expected POST method")
 
 		// Verify request body
 		var candidate webrtc.ICECandidateInit
-		if err := json.NewDecoder(r.Body).Decode(&candidate); err != nil {
-			t.Errorf("Failed to decode candidate: %v", err)
-		}
+		err := json.NewDecoder(r.Body).Decode(&candidate)
+		assert.NoError(t, err, "Failed to decode candidate")
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -333,9 +254,7 @@ func TestAPISignaler_SendICECandidate_Success(t *testing.T) {
 	}
 
 	err := signaler.SendICECandidate(ctx, candidate)
-	if err != nil {
-		t.Errorf("SendICECandidate failed: %v", err)
-	}
+	assert.NoError(t, err, "SendICECandidate failed")
 }
 
 func TestAPISignaler_SendICECandidate_Timeout(t *testing.T) {
@@ -350,15 +269,12 @@ func TestAPISignaler_SendICECandidate_Timeout(t *testing.T) {
 	}
 
 	err := signaler.SendICECandidate(ctx, candidate)
-	if err == nil {
-		t.Error("SendICECandidate should fail with timeout")
-	}
+	assert.Error(t, err, "SendICECandidate should fail with timeout")
 
 	// The error could be either context cancellation or connection refused
 	// Both are valid failure scenarios for this test
-	if !strings.Contains(err.Error(), "context canceled") && !strings.Contains(err.Error(), "refused") {
-		t.Errorf("Expected context cancellation or connection refused error, got: %v", err)
-	}
+	assert.True(t, strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "refused"),
+		"Expected context cancellation or connection refused error, got: %v", err)
 }
 
 // Helper functions for creating pointers
