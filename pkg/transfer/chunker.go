@@ -15,7 +15,7 @@ type Chunk struct {
 	Data       []byte
 	Hash       string
 	IsLast     bool
-	Size   int32
+	Size       int32
 }
 
 type Chunker struct {
@@ -28,17 +28,13 @@ type Chunker struct {
 	buffer        []byte
 }
 
-const (
-	DefaultChunkSize = 64 * 1024
-	MaxChunkSize     = 256 * 1024
-	MinChunkSize     = 4 * 1024
-)
+// Chunk size constants are now defined in config.go to avoid duplication
 
 func NewChunkerFromFileNode(node *fileInfo.FileNode, chunkSize int32) (*Chunker, error) {
 	if node.IsDir {
 		return nil, fmt.Errorf("cannot chunk a directory")
 	}
-	
+
 	if chunkSize < MinChunkSize || chunkSize > MaxChunkSize {
 		return nil, fmt.Errorf("chunk size must be between %d and %d", MinChunkSize, MaxChunkSize)
 	}
@@ -79,7 +75,7 @@ func (c *Chunker) Next() (*Chunk, error) {
 		Data:       c.buffer[:n],
 		Hash:       hashStr,
 		IsLast:     c.bytesRead >= c.totalByteSize,
-		Size:   int32(n),
+		Size:       int32(n),
 	}, nil
 }
 

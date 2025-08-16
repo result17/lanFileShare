@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 )
 
 // Example demonstrates how to use the digital signature infrastructure
@@ -77,8 +77,8 @@ func ExampleFileStructureSigner() {
 	fmt.Printf("Generated public key of %d bytes\n", len(publicKeyBytes))
 
 	// Create empty file structure for demonstration
-	emptyFiles := []fileInfo.FileNode{}
-	signedStructure, err := signer.SignFileStructure(emptyFiles)
+	fsm := transfer.NewFileStructureManager()
+	signedStructure, err := signer.SignFileStructureManager(fsm)
 	if err != nil {
 		fmt.Printf("Error signing structure: %v\n", err)
 		return

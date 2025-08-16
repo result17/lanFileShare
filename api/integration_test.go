@@ -1,33 +1,27 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rescp17/lanFileSharer/pkg/crypto"
-	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 // TestAskPayloadWithSignedFiles tests that AskPayload works with SignedFileStructure
 func TestAskPayloadWithSignedFiles(t *testing.T) {
-	// Create test files
-	testFiles := []fileInfo.FileNode{
-		{
-			Name:     "test.txt",
-			IsDir:    false,
-			Size:     100,
-			Checksum: "abc123",
-		},
+	// Create temporary test file
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.txt")
+	err := os.WriteFile(testFile, []byte("test content"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Create signed file structure
-	signer, err := crypto.NewFileStructureSigner()
+	// Create signed file structure using CreateSignedFileStructure
+	signedFiles, err := crypto.CreateSignedFileStructure([]string{testFile})
 	if err != nil {
-		t.Fatalf("Failed to create signer: %v", err)
-	}
-
-	signedFiles, err := signer.SignFileStructure(testFiles)
-	if err != nil {
-		t.Fatalf("Failed to sign file structure: %v", err)
+		t.Fatalf("Failed to create signed file structure: %v", err)
 	}
 
 	// Create AskPayload with signed files

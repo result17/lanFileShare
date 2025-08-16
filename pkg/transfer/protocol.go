@@ -3,11 +3,14 @@ package transfer
 type MessageType string
 
 const (
-	ChunkData        MessageType = "chunk_data"
-	FileComplete     MessageType = "file_complete"
-	TransferCancel   MessageType = "transfer_cancel"
-	TransferComplete MessageType = "transfer_complete"
-	ProgressUpdate   MessageType = "progress_update"
+	TransferStructure MessageType = "transfer_structure"
+	ChunkData         MessageType = "chunk_data"
+	FileBegin         MessageType = "file_begin"
+	FileComplete      MessageType = "file_complete"
+	TransferBegin     MessageType = "transfer_begin"
+	TransferCancel    MessageType = "transfer_cancel"
+	TransferComplete  MessageType = "transfer_complete"
+	ProgressUpdate    MessageType = "progress_update"
 )
 
 type ChunkMessage struct {
