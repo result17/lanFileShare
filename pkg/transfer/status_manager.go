@@ -142,9 +142,12 @@ func (tsm *TransferStatusManager) StartFileTransfer(filePath string, fileSize in
 	tsm.sessionStatus.CurrentFile = currentFile
 	tsm.sessionStatus.LastUpdateTime = time.Now()
 
-	// Notify listeners
+	// Create copy for session status notification to avoid race conditions
+	newSessionStatus := *tsm.sessionStatus
+
+	// Notify listeners with copies to prevent data races
 	tsm.notifyFileStatusChanged(filePath, oldCurrentFile, currentFile)
-	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 
 	return currentFile, nil
 }
@@ -178,9 +181,13 @@ func (tsm *TransferStatusManager) UpdateFileProgress(bytesSent int64) error {
 	tsm.sessionStatus.OverallProgress = tsm.sessionStatus.GetSessionProgressPercentage()
 	tsm.sessionStatus.LastUpdateTime = time.Now()
 
-	// Notify listeners
-	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
-	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	// Create copies for notification to avoid race conditions
+	newFileStatus := *tsm.sessionStatus.CurrentFile
+	newSessionStatus := *tsm.sessionStatus
+
+	// Notify listeners with copies to prevent data races
+	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, &newFileStatus)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 
 	return nil
 }
@@ -224,9 +231,12 @@ func (tsm *TransferStatusManager) CompleteCurrentFile() error {
 		tsm.sessionStatus.State = StatusSessionStateCompleted
 	}
 
-	// Notify listeners
+	// Create copy for session status notification to avoid race conditions
+	newSessionStatus := *tsm.sessionStatus
+
+	// Notify listeners with copies to prevent data races
 	tsm.notifyFileStatusChanged(completedFile.FilePath, &oldFileStatus, completedFile)
-	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 
 	return nil
 }
@@ -269,9 +279,12 @@ func (tsm *TransferStatusManager) FailCurrentFile(err error) error {
 		tsm.sessionStatus.State = StatusSessionStateFailed
 	}
 
-	// Notify listeners
+	// Create copy for session status notification to avoid race conditions
+	newSessionStatus := *tsm.sessionStatus
+
+	// Notify listeners with copies to prevent data races
 	tsm.notifyFileStatusChanged(failedFile.FilePath, &oldFileStatus, failedFile)
-	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 
 	return nil
 }
@@ -300,9 +313,13 @@ func (tsm *TransferStatusManager) PauseCurrentFile() error {
 	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	tsm.sessionStatus.LastUpdateTime = time.Now()
 
-	// Notify listeners
-	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
-	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	// Create copies for notification to avoid race conditions
+	newFileStatus := *tsm.sessionStatus.CurrentFile
+	newSessionStatus := *tsm.sessionStatus
+
+	// Notify listeners with copies to prevent data races
+	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, &newFileStatus)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 
 	return nil
 }
@@ -331,9 +348,13 @@ func (tsm *TransferStatusManager) ResumeCurrentFile() error {
 	tsm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
 	tsm.sessionStatus.LastUpdateTime = time.Now()
 
-	// Notify listeners
-	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, tsm.sessionStatus.CurrentFile)
-	tsm.notifySessionStatusChanged(&oldSessionStatus, tsm.sessionStatus)
+	// Create copies for notification to avoid race conditions
+	newFileStatus := *tsm.sessionStatus.CurrentFile
+	newSessionStatus := *tsm.sessionStatus
+
+	// Notify listeners with copies to prevent data races
+	tsm.notifyFileStatusChanged(tsm.sessionStatus.CurrentFile.FilePath, &oldFileStatus, &newFileStatus)
+	tsm.notifySessionStatusChanged(&oldSessionStatus, &newSessionStatus)
 
 	return nil
 }
@@ -380,15 +401,6 @@ func (tsm *TransferStatusManager) AddStatusListener(listener StatusListener) {
 	tsm.listeners = append(tsm.listeners, listener)
 }
 
-// Clear removes the current session from the manager
-// This is primarily useful for testing and cleanup
-func (tsm *TransferStatusManager) Clear() {
-	tsm.mu.Lock()
-	defer tsm.mu.Unlock()
-
-	tsm.sessionStatus = nil
-}
-
 // Helper methods
 
 func (tsm *TransferStatusManager) notifyFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
@@ -413,4 +425,17 @@ func (tsm *TransferStatusManager) notifySessionStatusChanged(oldStatus, newStatu
 			l.OnSessionStatusChanged(oldStatus, newStatus)
 		}(listener)
 	}
+}
+
+func (tsm *TransferStatusManager) RemoveStatusListener(listenerID string) {
+    tsm.eventsMu.Lock()
+    defer tsm.eventsMu.Unlock()
+
+    newListeners := make([]StatusListener, 0, len(tsm.listeners))
+    for _, l := range tsm.listeners {
+        if l.ID() != listenerID {
+            newListeners = append(newListeners, l)
+        }
+    }
+    tsm.listeners = newListeners
 }

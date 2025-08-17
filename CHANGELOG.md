@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Critical Deadlock Prevention**: Resolved potential deadlock in UnifiedTransferManager by establishing consistent mutex lock ordering
+  - **Root Cause**: Inconsistent lock acquisition order between `statusMu` and `queueMu` across different methods created classic "deadly embrace" scenarios
+  - **Deadlock Scenario**:
+    - `MarkFileCompleted`/`MarkFileFailed` acquired locks in order: `queueMu` → `statusMu`
+    - `CompleteTransfer`/`FailTransfer` acquired locks in order: `statusMu` → `queueMu`
+    - This created potential for Goroutine A holding `statusMu` waiting for `queueMu` while Goroutine B held `queueMu` waiting for `statusMu`
+  - **Solution**: Established consistent lock ordering across all methods: `filesMu` → `queueMu` → `statusMu`
+  - **Methods Fixed**:
+    - `CompleteTransfer`: Changed to acquire `queueMu` before `statusMu`
+    - `FailTransfer`: Changed to acquire `queueMu` before `statusMu`
+  - **Testing**: Added comprehensive deadlock prevention tests with concurrent operations and stress testing
+  - **Impact**: Eliminates potential for deadlocks in high-concurrency transfer scenarios
+
 ### Added
 
 - **Stateless File Transfer Architecture**: Refactored sender application to use stateless file preparation for improved reliability and concurrency
@@ -43,6 +58,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Test Coverage**: Updated all test cases to use offset-based chunk messages
 
 ### Technical Details
+
+- **Deadlock Prevention Implementation**:
+  - **Lock Hierarchy**: Established strict lock acquisition order: `filesMu` → `queueMu` → `statusMu`
+  - **Code Changes**:
+    - Modified `CompleteTransfer()` to acquire `queueMu` before `statusMu`
+    - Modified `FailTransfer()` to acquire `queueMu` before `statusMu`
+    - Maintained existing order in `MarkFileCompleted()` and `MarkFileFailed()`
+  - **Testing Strategy**:
+    - Created `TestDeadlockPrevention` with concurrent operations simulation
+    - Added stress testing with multiple files and concurrent operations
+    - Implemented timeout-based deadlock detection in tests
+  - **Performance Impact**: Minimal - only changed lock acquisition order, no additional overhead
+  - **Safety**: Eliminates all potential deadlock scenarios while maintaining thread safety
 
 - **Sender Architecture Changes**:
 

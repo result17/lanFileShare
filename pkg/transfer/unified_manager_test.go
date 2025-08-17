@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 	"github.com/stretchr/testify/require"
 )
@@ -174,9 +175,22 @@ func TestUnifiedTransferManager_MultipleFiles(t *testing.T) {
 
 // Test status listener
 type testStatusListener struct {
+	id            string     // Unique identifier for this listener
 	fileEvents    []string   // Records file status change events as strings
 	sessionEvents []string   // Records session status change events as strings
 	mu            sync.Mutex // Protect concurrent access to slices
+}
+
+// newTestStatusListener creates a new test status listener with a unique UUID
+func newTestStatusListener() *testStatusListener {
+	return &testStatusListener{
+		id: uuid.New().String(),
+	}
+}
+
+// ID returns the unique identifier for this listener
+func (tsl *testStatusListener) ID() string {
+	return tsl.id
 }
 
 func (tsl *testStatusListener) OnFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
@@ -250,7 +264,7 @@ func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 	manager := NewUnifiedTransferManager("test-service")
 	defer manager.Close()
 
-	listener := &testStatusListener{}
+	listener := newTestStatusListener()
 	manager.AddStatusListener(listener)
 
 	// Create test file

@@ -20,8 +20,7 @@ func TestNewTransferStatusManager(t *testing.T) {
 	// Test that default config is used
 	defaultConfig := DefaultTransferConfig()
 	require.Equal(t, defaultConfig.ChunkSize, manager.config.ChunkSize, "Should use default ChunkSize")
-	}
-
+}
 
 func TestNewTransferStatusManagerWithConfig(t *testing.T) {
 	customConfig := &TransferConfig{
@@ -54,8 +53,6 @@ func TestNewTransferStatusManagerWithNilConfig(t *testing.T) {
 }
 
 func TestTransferStatusManager_InitializeSession(t *testing.T) {
-	manager := NewTransferStatusManager()
-
 	tests := []struct {
 		name        string
 		sessionID   string
@@ -102,8 +99,8 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// Reset manager for each test
-			manager.Clear()
+			// Create a fresh manager instance for each sub-test to ensure complete isolation
+			manager := NewTransferStatusManager()
 
 			err := manager.InitializeSession(test.sessionID, test.totalFiles, test.totalBytes)
 
@@ -115,7 +112,7 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 				// Verify session was created
 				status, err := manager.GetSessionStatus()
 				require.NoError(t, err, "GetSessionStatus should succeed")
-				
+
 				assert.Equal(t, test.sessionID, status.SessionID, "SessionID should match")
 				assert.Equal(t, test.totalFiles, status.TotalFiles, "TotalFiles should match")
 				assert.Equal(t, test.totalBytes, status.TotalBytes, "TotalBytes should match")
@@ -126,12 +123,6 @@ func TestTransferStatusManager_InitializeSession(t *testing.T) {
 }
 
 func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
-	manager := NewTransferStatusManager()
-
-	// Initialize session first
-	err := manager.InitializeSession("test-session", 3, 3072)
-	require.NoError(t, err, "InitializeSession failed")
-
 	tests := []struct {
 		name        string
 		filePath    string
@@ -166,6 +157,13 @@ func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// Create a fresh manager instance for each sub-test to ensure isolation
+			manager := NewTransferStatusManager()
+
+			// Initialize session for this specific test
+			err := manager.InitializeSession("test-session", 3, 3072)
+			require.NoError(t, err, "InitializeSession failed")
+
 			status, err := manager.StartFileTransfer(test.filePath, test.fileSize)
 
 			if test.expectError {
@@ -192,9 +190,6 @@ func TestTransferStatusManager_StartFileTransfer(t *testing.T) {
 						t.Errorf("Expected state %s, got %s", TransferStateActive, status.State)
 					}
 				}
-
-				// Complete this transfer before starting next one
-				manager.CompleteCurrentFile()
 			}
 		})
 	}
@@ -269,63 +264,234 @@ func TestTransferStatusManager_GetSessionStatus(t *testing.T) {
 	}
 }
 
+// TestTransferStatusManager_UpdateFileProgress tests file progress updates with various scenarios
 func TestTransferStatusManager_UpdateFileProgress(t *testing.T) {
-	manager := NewTransferStatusManager()
-
-	// Initialize session
-	err := manager.InitializeSession("test-session", 1, 1024)
-	if err != nil {
-		t.Fatalf("InitializeSession failed: %v", err)
-	}
-
-	// Start file transfer
-	filePath := "/test/file.txt"
-	fileSize := int64(1024)
-	_, err = manager.StartFileTransfer(filePath, fileSize)
-	require.NoError(t, err, "StartFileTransfer failed")
-
-	// Update progress
-	bytesSent := int64(512)
-	err = manager.UpdateFileProgress(bytesSent)
-	require.NoError(t, err, "UpdateFileProgress failed")
-
-	// Verify progress was updated
-	currentFile, err := manager.GetCurrentFile()
-	require.NoError(t, err, "GetCurrentFile failed")
-
-	require.Equal(t, bytesSent, currentFile.BytesSent, "Expected BytesSent to match")
-
-	// Verify session progress was updated
-	sessionStatus, err := manager.GetSessionStatus()
-	require.NoError(t, err, "GetSessionStatus failed")
-
-	expectedProgress := float64(bytesSent) / float64(fileSize) * 100.0
-	if sessionStatus.OverallProgress != expectedProgress {
-		t.Errorf("Expected OverallProgress %.2f, got %.2f", expectedProgress, sessionStatus.OverallProgress)
-	}
-
-	// Test invalid updates
 	tests := []struct {
-		name      string
-		bytesSent int64
-		expectErr bool
+		name                 string
+		fileSize             int64
+		progressUpdates      []int64 // Sequence of progress updates to apply
+		expectError          []bool  // Whether each update should cause an error
+		expectedFinalBytes   int64   // Expected final bytes sent
+		expectedFinalPercent float64 // Expected final progress percentage
+		description          string  // Description of what this test verifies
 	}{
-		{"negative bytes", -1, true},
-		{"valid progress", fileSize, false},
+		{
+			name:                 "valid_incremental_progress",
+			fileSize:             1000,
+			progressUpdates:      []int64{100, 300, 500, 800},
+			expectError:          []bool{false, false, false, false},
+			expectedFinalBytes:   800,
+			expectedFinalPercent: 80.0,
+			description:          "Normal incremental progress updates",
+		},
+		{
+			name:                 "progress_to_completion",
+			fileSize:             1024,
+			progressUpdates:      []int64{512, 1024},
+			expectError:          []bool{false, false},
+			expectedFinalBytes:   1024,
+			expectedFinalPercent: 100.0,
+			description:          "Progress updates leading to completion",
+		},
+		{
+			name:                 "zero_progress_update",
+			fileSize:             500,
+			progressUpdates:      []int64{0},
+			expectError:          []bool{false},
+			expectedFinalBytes:   0,
+			expectedFinalPercent: 0.0,
+			description:          "Zero progress update should be valid",
+		},
+		{
+			name:                 "negative_progress_rejected",
+			fileSize:             1000,
+			progressUpdates:      []int64{100, -50},
+			expectError:          []bool{false, true},
+			expectedFinalBytes:   100, // Should remain at previous valid value
+			expectedFinalPercent: 10.0,
+			description:          "Negative progress should be rejected",
+		},
+		{
+			name:                 "progress_exceeding_file_size_allowed",
+			fileSize:             1000,
+			progressUpdates:      []int64{500, 1500},
+			expectError:          []bool{false, false}, // Current implementation allows this
+			expectedFinalBytes:   1500,                 // Implementation allows exceeding file size
+			expectedFinalPercent: 150.0,
+			description:          "Progress exceeding file size is currently allowed",
+		},
+		{
+			name:                 "non_monotonic_progress_allowed",
+			fileSize:             1000,
+			progressUpdates:      []int64{800, 300},
+			expectError:          []bool{false, false}, // Current implementation allows this
+			expectedFinalBytes:   300,                  // Implementation allows non-monotonic updates
+			expectedFinalPercent: 30.0,
+			description:          "Non-monotonic progress is currently allowed",
+		},
+		{
+			name:                 "single_large_update",
+			fileSize:             2048,
+			progressUpdates:      []int64{2048},
+			expectError:          []bool{false},
+			expectedFinalBytes:   2048,
+			expectedFinalPercent: 100.0,
+			description:          "Single update to complete file",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := manager.UpdateFileProgress(test.bytesSent)
-			if test.expectErr && err == nil {
-				t.Error("Expected error, but got nil")
+			// Create isolated manager for this test case
+			manager := NewTransferStatusManager()
+
+			// Initialize session
+			err := manager.InitializeSession("test-session", 1, test.fileSize)
+			require.NoError(t, err, "InitializeSession should succeed")
+
+			// Start file transfer
+			filePath := "/test/file.txt"
+			_, err = manager.StartFileTransfer(filePath, test.fileSize)
+			require.NoError(t, err, "StartFileTransfer should succeed")
+
+			// Apply progress updates sequentially
+			for i, progressBytes := range test.progressUpdates {
+				err = manager.UpdateFileProgress(progressBytes)
+
+				if test.expectError[i] {
+					assert.Error(t, err, "Progress update %d should fail: %s", i+1, test.description)
+				} else {
+					assert.NoError(t, err, "Progress update %d should succeed: %s", i+1, test.description)
+				}
 			}
-			if !test.expectErr && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
+
+			// Verify final state
+			currentFile, err := manager.GetCurrentFile()
+			require.NoError(t, err, "GetCurrentFile should succeed")
+
+			assert.Equal(t, test.expectedFinalBytes, currentFile.BytesSent,
+				"Final bytes sent should match expected: %s", test.description)
+			assert.Equal(t, test.expectedFinalPercent, currentFile.GetProgressPercentage(),
+				"Final progress percentage should match expected: %s", test.description)
+
+			// Verify session progress is consistent
+			sessionStatus, err := manager.GetSessionStatus()
+			require.NoError(t, err, "GetSessionStatus should succeed")
+
+			expectedSessionProgress := float64(test.expectedFinalBytes) / float64(test.fileSize) * 100.0
+			assert.Equal(t, expectedSessionProgress, sessionStatus.OverallProgress,
+				"Session overall progress should match file progress: %s", test.description)
 		})
 	}
 }
+
+// TestTransferStatusManager_UpdateFileProgress_ErrorCases tests specific error scenarios
+func TestTransferStatusManager_UpdateFileProgress_ErrorCases(t *testing.T) {
+	t.Run("no_session_initialized", func(t *testing.T) {
+		manager := NewTransferStatusManager()
+
+		err := manager.UpdateFileProgress(100)
+		assert.Error(t, err, "Should fail when no session is initialized")
+		assert.ErrorIs(t, err, ErrSessionNotFound, "Should return ErrSessionNotFound")
+	})
+
+	t.Run("no_active_file", func(t *testing.T) {
+		manager := NewTransferStatusManager()
+
+		// Initialize session but don't start any file transfer
+		err := manager.InitializeSession("test-session", 1, 1000)
+		require.NoError(t, err)
+
+		err = manager.UpdateFileProgress(100)
+		assert.Error(t, err, "Should fail when no file transfer is active")
+	})
+
+	t.Run("file_already_completed", func(t *testing.T) {
+		manager := NewTransferStatusManager()
+
+		// Initialize session and start file transfer
+		err := manager.InitializeSession("test-session", 1, 1000)
+		require.NoError(t, err)
+
+		_, err = manager.StartFileTransfer("/test.txt", 1000)
+		require.NoError(t, err)
+
+		// Complete the file
+		err = manager.UpdateFileProgress(1000)
+		require.NoError(t, err)
+
+		err = manager.CompleteCurrentFile()
+		require.NoError(t, err)
+
+		// Try to update progress on completed file
+		err = manager.UpdateFileProgress(500)
+		assert.Error(t, err, "Should fail when trying to update completed file")
+	})
+}
+
+// TestTransferStatusManager_UpdateFileProgress_SequentialUpdates tests realistic progress sequences
+func TestTransferStatusManager_UpdateFileProgress_SequentialUpdates(t *testing.T) {
+	t.Run("realistic_download_simulation", func(t *testing.T) {
+		manager := NewTransferStatusManager()
+
+		// Simulate downloading a 10MB file in chunks
+		fileSize := int64(10 * 1024 * 1024) // 10MB
+		chunkSize := int64(1024 * 1024)     // 1MB chunks
+
+		err := manager.InitializeSession("download-session", 1, fileSize)
+		require.NoError(t, err)
+
+		_, err = manager.StartFileTransfer("/large-file.bin", fileSize)
+		require.NoError(t, err)
+
+		// Simulate progressive download
+		var totalSent int64
+		for i := 0; i < 10; i++ {
+			totalSent += chunkSize
+			err = manager.UpdateFileProgress(totalSent)
+			require.NoError(t, err, "Chunk %d should update successfully", i+1)
+
+			// Verify progress
+			currentFile, err := manager.GetCurrentFile()
+			require.NoError(t, err)
+			assert.Equal(t, totalSent, currentFile.BytesSent)
+
+			expectedPercent := float64(totalSent) / float64(fileSize) * 100.0
+			assert.Equal(t, expectedPercent, currentFile.GetProgressPercentage())
+		}
+
+		// Verify final state
+		assert.Equal(t, fileSize, totalSent)
+
+		currentFile, err := manager.GetCurrentFile()
+		require.NoError(t, err)
+		assert.Equal(t, 100.0, currentFile.GetProgressPercentage())
+	})
+
+	t.Run("non_monotonic_updates_allowed", func(t *testing.T) {
+		manager := NewTransferStatusManager()
+
+		err := manager.InitializeSession("test-session", 1, 1000)
+		require.NoError(t, err)
+
+		_, err = manager.StartFileTransfer("/test.txt", 1000)
+		require.NoError(t, err)
+
+		// Update to 500 bytes
+		err = manager.UpdateFileProgress(500)
+		require.NoError(t, err)
+
+		// Update to a lower value (current implementation allows this)
+		err = manager.UpdateFileProgress(300)
+		assert.NoError(t, err, "Current implementation allows non-monotonic progress update")
+
+		// Verify progress was updated to 300
+		currentFile, err := manager.GetCurrentFile()
+		require.NoError(t, err)
+		assert.Equal(t, int64(300), currentFile.BytesSent)
+	})
+}
+
 func TestTransferStatusManager_CompleteCurrentFile(t *testing.T) {
 	manager := NewTransferStatusManager()
 
@@ -538,7 +704,7 @@ func TestTransferStatusManager_GetCurrentFile(t *testing.T) {
 	}
 }
 
-func TestTransferStatusManager_IsSessionActive(t *testing.T) {
+func TestTransferStatusManager_SessionCompletionLifecycle(t *testing.T) {
 	manager := NewTransferStatusManager()
 
 	// Initially should be false
@@ -619,7 +785,7 @@ func TestTransferStatusManager_Clear(t *testing.T) {
 	}
 
 	// Clear manager
-	manager.Clear()
+	manager.ResetSession()
 
 	// Verify session is cleared
 	if manager.IsSessionActive() {

@@ -15,9 +15,10 @@ type TransferSession struct {
 }
 
 func NewTransferSession(serviceID string) *TransferSession {
+	now := time.Now()
 	return &TransferSession{
 		ServiceID:       serviceID,
-		SessionID:       fmt.Sprintf("session-%d", time.Now().Unix()),
-		SessionCreateAt: time.Now().Unix(),
+		SessionID:       fmt.Sprintf("session-%d", now.UnixNano()),
+		SessionCreateAt: now.Unix(),
 	}
 }

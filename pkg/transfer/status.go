@@ -3,6 +3,7 @@ package transfer
 import (
 	"errors"
 	"time"
+	"strings"
 )
 
 // This file defines data structures for transfer STATUS MANAGEMENT.
@@ -279,9 +280,9 @@ func (rp *RetryPolicy) IsRetryable(err error) bool {
 		return false
 	}
 
-	errMsg := err.Error()
+	errMsg := strings.ToLower(err.Error())
 	for _, pattern := range rp.RetryableErrors {
-		if contains(errMsg, pattern) {
+		if strings.Contains(errMsg, strings.ToLower(pattern)) {
 			return true
 		}
 	}
@@ -389,28 +390,4 @@ func (sts *SessionTransferStatus) IsSessionComplete() bool {
 // HasActiveTransfer returns true if there's currently a file being transferred
 func (sts *SessionTransferStatus) HasActiveTransfer() bool {
 	return sts.CurrentFile != nil && sts.CurrentFile.State == TransferStateActive
-}
-
-// Helper function to check if a string contains a substring (case-insensitive)
-func contains(s, substr string) bool {
-	// Simple case-insensitive substring check
-	// In a real implementation, you might want to use strings.Contains with strings.ToLower
-	return len(s) >= len(substr) &&
-		(s == substr || (len(s) > len(substr) &&
-			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-				containsAt(s, substr, 1))))
-}
-
-// Helper function for substring search
-func containsAt(s, substr string, start int) bool {
-	if start >= len(s) {
-		return false
-	}
-	if start+len(substr) > len(s) {
-		return containsAt(s, substr, start+1)
-	}
-	if s[start:start+len(substr)] == substr {
-		return true
-	}
-	return containsAt(s, substr, start+1)
 }

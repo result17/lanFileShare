@@ -40,6 +40,7 @@ type UnifiedTransferManager struct {
 
 // StatusListener interface for transfer status events
 type StatusListener interface {
+	ID() string
 	// OnFileStatusChanged is called when an individual file's status changes
 	OnFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus)
 
@@ -381,9 +382,13 @@ func (utm *UnifiedTransferManager) UpdateProgress(filePath string, bytesSent int
 }
 
 // CompleteTransfer marks the current file transfer as completed
+// Uses consistent lock ordering: queueMu -> statusMu to prevent deadlock
 func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
+	// Lock in consistent order: queueMu first, then statusMu
+	utm.queueMu.Lock()
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
+	defer utm.queueMu.Unlock()
 
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
@@ -415,8 +420,7 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 		utm.sessionStatus.State = StatusSessionStateCompleted
 	}
 
-	// Also update the queue (avoid calling MarkFileCompleted to prevent deadlock)
-	utm.queueMu.Lock()
+	// Update the queue (queueMu already locked in consistent order)
 	// Remove from pending
 	for i, path := range utm.pendingFiles {
 		if path == filePath {
@@ -426,7 +430,6 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 	}
 	// Add to completed
 	utm.completedFiles = append(utm.completedFiles, filePath)
-	utm.queueMu.Unlock()
 
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
@@ -439,9 +442,13 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 }
 
 // FailTransfer marks the current file transfer as failed
+// Uses consistent lock ordering: queueMu -> statusMu to prevent deadlock
 func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) error {
+	// Lock in consistent order: queueMu first, then statusMu
+	utm.queueMu.Lock()
 	utm.statusMu.Lock()
 	defer utm.statusMu.Unlock()
+	defer utm.queueMu.Unlock()
 
 	if utm.sessionStatus.CurrentFile == nil || utm.sessionStatus.CurrentFile.FilePath != filePath {
 		return ErrTransferNotFound
@@ -472,8 +479,7 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 		utm.sessionStatus.State = StatusSessionStateFailed
 	}
 
-	// Also update the queue (avoid calling MarkFileFailed to prevent deadlock)
-	utm.queueMu.Lock()
+	// Update the queue (queueMu already locked in consistent order)
 	// Remove from pending
 	for i, path := range utm.pendingFiles {
 		if path == filePath {
@@ -483,7 +489,6 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 	}
 	// Add to failed
 	utm.failedFiles = append(utm.failedFiles, filePath)
-	utm.queueMu.Unlock()
 
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
