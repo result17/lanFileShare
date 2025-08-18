@@ -1,15 +1,18 @@
 package transfer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -99,7 +102,11 @@ func TestUnifiedTransferManager_PauseResume(t *testing.T) {
 		t.Errorf("PauseTransfer failed: %v", err)
 	}
 
-	status, _ := manager.GetFileStatus(testFile)
+	status, err := manager.GetFileStatus(testFile)
+	if err != nil {
+		t.Errorf("Failed to get file status: %v", err)
+	}
+
 	if status.State != TransferStatePaused {
 		t.Errorf("Expected paused state, got %s", status.State)
 	}
@@ -261,52 +268,331 @@ func (tsl *testStatusListener) GetSessionEventCount() int {
 }
 
 func TestUnifiedTransferManager_StatusListener(t *testing.T) {
-	manager := NewUnifiedTransferManager("test-service")
-	defer manager.Close()
+	t.Run("complete_transfer_lifecycle_events", func(t *testing.T) {
+		manager := NewUnifiedTransferManager("test-service")
+		defer manager.Close()
 
-	listener := newTestStatusListener()
-	manager.AddStatusListener(listener)
+		listener := newTestStatusListener()
+		manager.AddStatusListener(listener)
 
-	// Create test file
-	tempDir := t.TempDir()
-	testFile := filepath.Join(tempDir, "test.txt")
-	err := os.WriteFile(testFile, []byte("test content"), 0644)
-	require.NoError(t, err, "Failed to create test file")
+		// Create test file
+		tempDir := t.TempDir()
+		testFile := filepath.Join(tempDir, "test.txt")
+		testContent := []byte("test content for status listener")
+		err := os.WriteFile(testFile, testContent, 0644)
+		require.NoError(t, err, "Failed to create test file")
 
-	node, err := fileInfo.CreateNode(testFile)
-	require.NoError(t, err, "Failed to create file node")
+		node, err := fileInfo.CreateNode(testFile)
+		require.NoError(t, err, "Failed to create file node")
 
-	// Add file and start transfer
-	manager.AddFile(&node)
-	err = manager.StartTransfer(testFile)
-	require.NoError(t, err, "StartTransfer failed")
+		// Step 1: Add file (should trigger pending state)
+		err = manager.AddFile(&node)
+		require.NoError(t, err, "AddFile failed")
 
-	// Give time for async events
-	time.Sleep(10 * time.Millisecond)
+		// Step 2: Start transfer (should trigger active state)
+		err = manager.StartTransfer(testFile)
+		require.NoError(t, err, "StartTransfer failed")
 
-	// Check that events were received
-	if listener.GetFileEventCount() == 0 {
-		t.Error("Expected file status events")
-	}
+		// Step 3: Update progress (should trigger progress update)
+		err = manager.UpdateProgress(testFile, int64(len(testContent)/2))
+		require.NoError(t, err, "UpdateProgress failed")
 
-	// Update progress
-	err = manager.UpdateProgress(testFile, int64(len("test content")))
-	if err != nil {
-		t.Errorf("UpdateProgress failed: %v", err)
-	}
+		// Step 4: Complete transfer (should trigger completed state)
+		err = manager.CompleteTransfer(testFile)
+		require.NoError(t, err, "CompleteTransfer failed")
 
-	// Complete transfer
-	err = manager.CompleteTransfer(testFile)
-	if err != nil {
-		t.Errorf("CompleteTransfer failed: %v", err)
-	}
+		// Give time for async events to be processed
+		time.Sleep(50 * time.Millisecond)
 
-	// Give time for async events
-	time.Sleep(10 * time.Millisecond)
+		// Verify file events in correct order
+		fileEvents := listener.GetFileEvents()
+		require.NotEmpty(t, fileEvents, "Should have received file status events")
 
-	if listener.GetSessionEventCount() == 0 {
-		t.Error("Expected session status events")
-	}
+		t.Logf("File events received: %v", fileEvents)
+
+		// Analyze the actual sequence of events
+		// Events may come in different orders due to async processing
+		// What's important is that we have the expected state transitions
+
+		// Verify we have at least some events
+		assert.GreaterOrEqual(t, len(fileEvents), 2, "Should have at least 2 events")
+
+		// Verify all events are for our test file
+		for _, event := range fileEvents {
+			assert.Contains(t, event, testFile, "All events should be for our test file")
+		}
+
+		// Verify session events
+		sessionEvents := listener.GetSessionEvents()
+		require.NotEmpty(t, sessionEvents, "Should have received session status events")
+
+		t.Logf("Session events received: %v", sessionEvents)
+
+		// Session should have transitioned through states
+		// Expected: nil -> active (when first file starts) -> completed (when all files complete)
+		assert.GreaterOrEqual(t, len(sessionEvents), 1, "Should have at least one session event")
+
+		// Check that we have meaningful state transitions, not just event counts
+		// Based on the actual event log, we should see transitions to completed state
+		hasCompletedTransition := false
+		hasActiveState := false
+
+		for _, event := range fileEvents {
+			if strings.Contains(event, "-> completed") {
+				hasCompletedTransition = true
+			}
+			if strings.Contains(event, "active ->") || strings.Contains(event, "-> active") {
+				hasActiveState = true
+			}
+		}
+
+		assert.True(t, hasCompletedTransition, "Should have transition to completed state")
+		assert.True(t, hasActiveState, "Should have active state involved in transitions")
+	})
+
+	t.Run("failed_transfer_events", func(t *testing.T) {
+		manager := NewUnifiedTransferManager("test-service-fail")
+		defer manager.Close()
+
+		listener := newTestStatusListener()
+		manager.AddStatusListener(listener)
+
+		// Create test file
+		tempDir := t.TempDir()
+		testFile := filepath.Join(tempDir, "test_fail.txt")
+		err := os.WriteFile(testFile, []byte("test content"), 0644)
+		require.NoError(t, err, "Failed to create test file")
+
+		node, err := fileInfo.CreateNode(testFile)
+		require.NoError(t, err, "Failed to create file node")
+
+		// Add file and start transfer
+		err = manager.AddFile(&node)
+		require.NoError(t, err, "AddFile failed")
+
+		err = manager.StartTransfer(testFile)
+		require.NoError(t, err, "StartTransfer failed")
+
+		// Fail the transfer
+		testError := errors.New("simulated transfer failure")
+		err = manager.FailTransfer(testFile, testError)
+		require.NoError(t, err, "FailTransfer failed")
+
+		// Give time for async events
+		time.Sleep(50 * time.Millisecond)
+
+		// Verify file events
+		fileEvents := listener.GetFileEvents()
+		require.NotEmpty(t, fileEvents, "Should have received file status events")
+
+		t.Logf("File events for failed transfer: %v", fileEvents)
+
+		// Should have at least some failure events
+		assert.GreaterOrEqual(t, len(fileEvents), 1, "Should have at least one failure event")
+
+		// Verify we have transition to failed state
+		hasFailedTransition := false
+
+		for _, event := range fileEvents {
+			if strings.Contains(event, "-> failed") {
+				hasFailedTransition = true
+			}
+		}
+
+		assert.True(t, hasFailedTransition, "Should have transition to failed state")
+	})
+
+	t.Run("multiple_files_independent_events", func(t *testing.T) {
+		manager := NewUnifiedTransferManager("test-service-multi")
+		defer manager.Close()
+
+		listener := newTestStatusListener()
+		manager.AddStatusListener(listener)
+
+		// Create multiple test files
+		tempDir := t.TempDir()
+		testFiles := make([]string, 3)
+
+		for i := 0; i < 3; i++ {
+			testFiles[i] = filepath.Join(tempDir, fmt.Sprintf("test%d.txt", i))
+			err := os.WriteFile(testFiles[i], []byte(fmt.Sprintf("content %d", i)), 0644)
+			require.NoError(t, err, "Failed to create test file %d", i)
+
+			node, err := fileInfo.CreateNode(testFiles[i])
+			require.NoError(t, err, "Failed to create file node %d", i)
+
+			err = manager.AddFile(&node)
+			require.NoError(t, err, "AddFile failed for file %d", i)
+		}
+
+		// Process files with different outcomes
+		// File 0: Complete successfully
+		err := manager.StartTransfer(testFiles[0])
+		require.NoError(t, err, "StartTransfer failed for file 0")
+		err = manager.CompleteTransfer(testFiles[0])
+		require.NoError(t, err, "CompleteTransfer failed for file 0")
+
+		// File 1: Fail
+		err = manager.StartTransfer(testFiles[1])
+		require.NoError(t, err, "StartTransfer failed for file 1")
+		err = manager.FailTransfer(testFiles[1], errors.New("test failure"))
+		require.NoError(t, err, "FailTransfer failed for file 1")
+
+		// File 2: Leave pending (just add, don't start)
+
+		// Give time for async events
+		time.Sleep(50 * time.Millisecond)
+
+		// Verify events for each file
+		fileEvents := listener.GetFileEvents()
+		require.NotEmpty(t, fileEvents, "Should have received file status events")
+
+		t.Logf("Multi-file events: %v", fileEvents)
+
+		// Count events per file
+		file0Events := 0
+		file1Events := 0
+		file2Events := 0
+
+		for _, event := range fileEvents {
+			if strings.Contains(event, testFiles[0]) {
+				file0Events++
+			}
+			if strings.Contains(event, testFiles[1]) {
+				file1Events++
+			}
+			if strings.Contains(event, testFiles[2]) {
+				file2Events++
+			}
+		}
+
+		// File 0 should have events (start -> complete)
+		assert.GreaterOrEqual(t, file0Events, 2, "File 0 should have start and complete events")
+
+		// File 1 should have events (start -> fail)
+		assert.GreaterOrEqual(t, file1Events, 2, "File 1 should have start and fail events")
+
+		// File 2 should have no events (never started)
+		assert.Equal(t, 0, file2Events, "File 2 should have no events (never started)")
+
+		// Verify specific state transitions
+		hasFile0Completed := false
+		hasFile1Failed := false
+
+		for _, event := range fileEvents {
+			if strings.Contains(event, testFiles[0]) && strings.Contains(event, "-> completed") {
+				hasFile0Completed = true
+			}
+			if strings.Contains(event, testFiles[1]) && strings.Contains(event, "-> failed") {
+				hasFile1Failed = true
+			}
+		}
+
+		assert.True(t, hasFile0Completed, "File 0 should have completed transition")
+		assert.True(t, hasFile1Failed, "File 1 should have failed transition")
+	})
+
+	t.Run("detailed_state_transition_verification", func(t *testing.T) {
+		manager := NewUnifiedTransferManager("test-service-detailed")
+		defer manager.Close()
+
+		listener := newTestStatusListener()
+		manager.AddStatusListener(listener)
+
+		// Create test file
+		tempDir := t.TempDir()
+		testFile := filepath.Join(tempDir, "detailed_test.txt")
+		testContent := []byte("detailed test content for state verification")
+		err := os.WriteFile(testFile, testContent, 0644)
+		require.NoError(t, err, "Failed to create test file")
+
+		node, err := fileInfo.CreateNode(testFile)
+		require.NoError(t, err, "Failed to create file node")
+
+		// Add file
+		err = manager.AddFile(&node)
+		require.NoError(t, err, "AddFile failed")
+
+		// Start transfer
+		err = manager.StartTransfer(testFile)
+		require.NoError(t, err, "StartTransfer failed")
+
+		// Update progress multiple times
+		contentLen := int64(len(testContent))
+		err = manager.UpdateProgress(testFile, contentLen/4)
+		require.NoError(t, err, "UpdateProgress 1 failed")
+
+		err = manager.UpdateProgress(testFile, contentLen/2)
+		require.NoError(t, err, "UpdateProgress 2 failed")
+
+		err = manager.UpdateProgress(testFile, contentLen*3/4)
+		require.NoError(t, err, "UpdateProgress 3 failed")
+
+		// Complete transfer
+		err = manager.CompleteTransfer(testFile)
+		require.NoError(t, err, "CompleteTransfer failed")
+
+		// Give time for async events
+		time.Sleep(100 * time.Millisecond)
+
+		// Analyze events in detail
+		fileEvents := listener.GetFileEvents()
+		require.NotEmpty(t, fileEvents, "Should have received file status events")
+
+		t.Logf("Detailed file events: %v", fileEvents)
+
+		// Verify event structure and content
+		for i, event := range fileEvents {
+			t.Logf("Event %d: %s", i, event)
+
+			// Each event should contain the file path
+			assert.Contains(t, event, testFile, "Event %d should contain file path", i)
+
+			// Each event should have a state transition (contain "->")
+			assert.Contains(t, event, " -> ", "Event %d should contain state transition", i)
+
+			// Event should not be empty or malformed
+			assert.NotEmpty(t, event, "Event %d should not be empty", i)
+			assert.NotContains(t, event, " ->  ", "Event %d should not have empty target state", i)
+		}
+
+		// Count specific state transitions
+		nilToCompletedCount := 0
+		activeToCompletedCount := 0
+		activeToActiveCount := 0
+		otherTransitions := 0
+
+		for _, event := range fileEvents {
+			switch {
+			case strings.Contains(event, "nil -> completed"):
+				nilToCompletedCount++
+			case strings.Contains(event, "active -> completed"):
+				activeToCompletedCount++
+			case strings.Contains(event, "active -> active"):
+				activeToActiveCount++
+			default:
+				otherTransitions++
+				t.Logf("Other transition: %s", event)
+			}
+		}
+
+		// Verify we have expected transitions
+		assert.GreaterOrEqual(t, nilToCompletedCount+activeToCompletedCount, 1,
+			"Should have at least one completion transition")
+
+		// Log transition counts for analysis
+		t.Logf("Transition counts: nil->completed=%d, active->completed=%d, active->active=%d, other=%d",
+			nilToCompletedCount, activeToCompletedCount, activeToActiveCount, otherTransitions)
+
+		// Verify session events are also meaningful
+		sessionEvents := listener.GetSessionEvents()
+		require.NotEmpty(t, sessionEvents, "Should have session events")
+
+		for i, event := range sessionEvents {
+			assert.Contains(t, event, "session:", "Session event %d should be prefixed with 'session:'", i)
+			assert.Contains(t, event, " -> ", "Session event %d should contain state transition", i)
+		}
+	})
 }
 
 func TestUnifiedTransferManager_GetChunker(t *testing.T) {

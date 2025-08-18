@@ -20,10 +20,10 @@ type UnifiedTransferManager struct {
 	chunkers map[string]*Chunker // File path -> Chunker
 	filesMu  sync.RWMutex
 
-	// Transfer queue management
-	pendingFiles   []string // Files waiting to be transferred
-	completedFiles []string // Files that have been transferred
-	failedFiles    []string // Files that failed transfer
+	// Transfer queue management - using maps for O(1) operations
+	pendingFiles   map[string]bool // Set of pending file paths
+	completedFiles map[string]bool // Set of completed file paths
+	failedFiles    map[string]bool // Set of failed file paths
 	queueMu        sync.RWMutex
 
 	// Session status tracking
@@ -77,9 +77,9 @@ func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfi
 		config:         config,
 		structure:      NewFileStructureManager(),
 		chunkers:       make(map[string]*Chunker),
-		pendingFiles:   make([]string, 0),
-		completedFiles: make([]string, 0),
-		failedFiles:    make([]string, 0),
+		pendingFiles:   make(map[string]bool),
+		completedFiles: make(map[string]bool),
+		failedFiles:    make(map[string]bool),
 		sessionStatus:  sessionStatus,
 		listeners:      make([]StatusListener, 0),
 	}
@@ -126,7 +126,7 @@ func (utm *UnifiedTransferManager) addSingleFile(node *fileInfo.FileNode) error 
 
 	// Store chunker
 	utm.chunkers[node.Path] = chunker
-	utm.pendingFiles = append(utm.pendingFiles, node.Path)
+	utm.addFileToQueue(node.Path, FileQueueStatePending)
 
 	// Update session status
 	utm.statusMu.Lock()
@@ -164,11 +164,10 @@ func (utm *UnifiedTransferManager) GetNextPendingFile() (*fileInfo.FileNode, boo
 	utm.queueMu.RLock()
 	defer utm.queueMu.RUnlock()
 
-	if len(utm.pendingFiles) == 0 {
+	filePath, hasPending := utm.getFirstPendingFile()
+	if !hasPending {
 		return nil, false
 	}
-
-	filePath := utm.pendingFiles[0]
 
 	// Get file from structure manager
 	fileNode, exists := utm.structure.GetFile(filePath)
@@ -179,52 +178,52 @@ func (utm *UnifiedTransferManager) GetNextPendingFile() (*fileInfo.FileNode, boo
 	return fileNode, true
 }
 
-// MarkFileCompleted moves a file from pending to completed
+// MarkFileCompleted moves a file to completed state from any current state
 func (utm *UnifiedTransferManager) MarkFileCompleted(filePath string) error {
 	utm.queueMu.Lock()
 	defer utm.queueMu.Unlock()
 
-	// Remove from pending
-	for i, path := range utm.pendingFiles {
-		if path == filePath {
-			utm.pendingFiles = append(utm.pendingFiles[:i], utm.pendingFiles[i+1:]...)
-			break
-		}
-	}
+	// Try to move from any state to completed
+	moved := utm.moveFileInQueue(filePath, FileQueueStatePending, FileQueueStateCompleted) ||
+		utm.moveFileInQueue(filePath, FileQueueStateFailed, FileQueueStateCompleted)
 
-	// Add to completed
-	utm.completedFiles = append(utm.completedFiles, filePath)
+	// If file wasn't in any known state, add it to completed
+	if !moved {
+		utm.addFileToQueue(filePath, FileQueueStateCompleted)
+	}
 
 	// Update session status
 	utm.statusMu.Lock()
-	utm.sessionStatus.CompletedFiles = len(utm.completedFiles)
-	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
+	pending, completed, failed := utm.getQueueCounts()
+	utm.sessionStatus.CompletedFiles = completed
+	utm.sessionStatus.PendingFiles = pending
+	utm.sessionStatus.FailedFiles = failed
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	utm.statusMu.Unlock()
 
 	return nil
 }
 
-// MarkFileFailed moves a file from pending to failed
+// MarkFileFailed moves a file to failed state from any current state
 func (utm *UnifiedTransferManager) MarkFileFailed(filePath string) error {
 	utm.queueMu.Lock()
 	defer utm.queueMu.Unlock()
 
-	// Remove from pending
-	for i, path := range utm.pendingFiles {
-		if path == filePath {
-			utm.pendingFiles = append(utm.pendingFiles[:i], utm.pendingFiles[i+1:]...)
-			break
-		}
-	}
+	// Try to move from any state to failed
+	moved := utm.moveFileInQueue(filePath, FileQueueStatePending, FileQueueStateFailed) ||
+		utm.moveFileInQueue(filePath, FileQueueStateCompleted, FileQueueStateFailed)
 
-	// Add to failed
-	utm.failedFiles = append(utm.failedFiles, filePath)
+	// If file wasn't in any known state, add it to failed
+	if !moved {
+		utm.addFileToQueue(filePath, FileQueueStateFailed)
+	}
 
 	// Update session status
 	utm.statusMu.Lock()
-	utm.sessionStatus.FailedFiles = len(utm.failedFiles)
-	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
+	pending, completed, failed := utm.getQueueCounts()
+	utm.sessionStatus.CompletedFiles = completed
+	utm.sessionStatus.PendingFiles = pending
+	utm.sessionStatus.FailedFiles = failed
 	utm.sessionStatus.LastUpdateTime = time.Now()
 	utm.statusMu.Unlock()
 
@@ -275,9 +274,9 @@ func (utm *UnifiedTransferManager) Close() error {
 	// Clear all data
 	utm.structure.Clear()
 	utm.chunkers = make(map[string]*Chunker)
-	utm.pendingFiles = make([]string, 0)
-	utm.completedFiles = make([]string, 0)
-	utm.failedFiles = make([]string, 0)
+	utm.pendingFiles = make(map[string]bool)
+	utm.completedFiles = make(map[string]bool)
+	utm.failedFiles = make(map[string]bool)
 
 	return nil
 }
@@ -421,15 +420,7 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 	}
 
 	// Update the queue (queueMu already locked in consistent order)
-	// Remove from pending
-	for i, path := range utm.pendingFiles {
-		if path == filePath {
-			utm.pendingFiles = append(utm.pendingFiles[:i], utm.pendingFiles[i+1:]...)
-			break
-		}
-	}
-	// Add to completed
-	utm.completedFiles = append(utm.completedFiles, filePath)
+	utm.moveFileInQueue(filePath, FileQueueStatePending, FileQueueStateCompleted)
 
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
@@ -480,15 +471,7 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 	}
 
 	// Update the queue (queueMu already locked in consistent order)
-	// Remove from pending
-	for i, path := range utm.pendingFiles {
-		if path == filePath {
-			utm.pendingFiles = append(utm.pendingFiles[:i], utm.pendingFiles[i+1:]...)
-			break
-		}
-	}
-	// Add to failed
-	utm.failedFiles = append(utm.failedFiles, filePath)
+	utm.moveFileInQueue(filePath, FileQueueStatePending, FileQueueStateFailed)
 
 	// Create copy for session status notification to avoid race conditions
 	newSessionStatus := *utm.sessionStatus
@@ -562,55 +545,77 @@ func (utm *UnifiedTransferManager) ResumeTransfer(filePath string) error {
 	return nil
 }
 
-// GetFileStatus returns the status of a specific file (for compatibility)
+// GetFileStatus returns the complete status of a specific file
 func (utm *UnifiedTransferManager) GetFileStatus(filePath string) (*TransferStatus, error) {
 	utm.statusMu.RLock()
 	defer utm.statusMu.RUnlock()
 
-	// Check if it's the current file
+	// Check if it's the current file (active transfer)
 	if utm.sessionStatus.CurrentFile != nil && utm.sessionStatus.CurrentFile.FilePath == filePath {
 		statusCopy := *utm.sessionStatus.CurrentFile
 		return &statusCopy, nil
 	}
 
-	// Check if it's in completed files
-	for _, completedPath := range utm.completedFiles {
-		if completedPath == filePath {
-			// Return a completed status
-			return &TransferStatus{
-				FilePath:   filePath,
-				SessionID:  utm.sessionStatus.SessionID,
-				State:      TransferStateCompleted,
-				BytesSent:  0, // We don't track individual file progress after completion
-				TotalBytes: 0, // Would need to look up from managedFile if needed
-			}, nil
-		}
+	// For non-active files, we need to construct complete status information
+	// First, get the file information from the structure manager
+	fileNode, exists := utm.structure.GetFile(filePath)
+	if !exists {
+		return nil, ErrTransferNotFound
 	}
 
-	// Check if it's in failed files
-	for _, failedPath := range utm.failedFiles {
-		if failedPath == filePath {
-			// Return a failed status
-			return &TransferStatus{
-				FilePath:  filePath,
-				SessionID: utm.sessionStatus.SessionID,
-				State:     TransferStateFailed,
-			}, nil
-		}
+	// Create base status with complete file information
+	baseStatus := &TransferStatus{
+		FilePath:       filePath,
+		SessionID:      utm.sessionStatus.SessionID,
+		TotalBytes:     fileNode.Size,
+		LastUpdateTime: utm.sessionStatus.LastUpdateTime,
 	}
 
-	// Check if it's in pending files
-	for _, pendingPath := range utm.pendingFiles {
-		if pendingPath == filePath {
-			// Return a pending status
-			return &TransferStatus{
-				FilePath:  filePath,
-				SessionID: utm.sessionStatus.SessionID,
-				State:     TransferStatePending,
-			}, nil
+	// Determine state and set appropriate fields
+	if utm.isFileInQueue(filePath, FileQueueStateCompleted) {
+		baseStatus.State = TransferStateCompleted
+		baseStatus.BytesSent = fileNode.Size // Completed files have all bytes sent
+
+		// Estimate completion time based on session data
+		// This is an approximation since we don't store individual file completion times
+		if utm.sessionStatus.CompletionTime != nil {
+			baseStatus.CompletionTime = utm.sessionStatus.CompletionTime
 		}
+
+		// Calculate estimated transfer rate if we have session data
+		if !utm.sessionStatus.StartTime.IsZero() && utm.sessionStatus.LastUpdateTime.After(utm.sessionStatus.StartTime) {
+			elapsed := utm.sessionStatus.LastUpdateTime.Sub(utm.sessionStatus.StartTime)
+			if elapsed > 0 {
+				baseStatus.TransferRate = float64(fileNode.Size) / elapsed.Seconds()
+			}
+		}
+
+		return baseStatus, nil
 	}
 
+	if utm.isFileInQueue(filePath, FileQueueStateFailed) {
+		baseStatus.State = TransferStateFailed
+		baseStatus.BytesSent = 0 // Failed files typically have 0 bytes sent
+
+		// For failed files, we don't have completion time
+		// LastError would need to be tracked separately if needed
+
+		return baseStatus, nil
+	}
+
+	if utm.isFileInQueue(filePath, FileQueueStatePending) {
+		baseStatus.State = TransferStatePending
+		baseStatus.BytesSent = 0 // Pending files haven't started
+
+		// Set start time to session start time if available
+		if !utm.sessionStatus.StartTime.IsZero() {
+			baseStatus.StartTime = utm.sessionStatus.StartTime
+		}
+
+		return baseStatus, nil
+	}
+
+	// File exists in structure but not in any queue - this shouldn't happen normally
 	return nil, ErrTransferNotFound
 }
 
@@ -627,26 +632,171 @@ func (utm *UnifiedTransferManager) AddStatusListener(listener StatusListener) {
 func (utm *UnifiedTransferManager) updateSessionTotals() {
 	// This method assumes statusMu is already locked
 	utm.sessionStatus.TotalFiles = utm.GetFileCount()
-	utm.sessionStatus.PendingFiles = len(utm.pendingFiles)
+	pending, completed, failed := utm.getQueueCounts()
+	utm.sessionStatus.PendingFiles = pending
+	utm.sessionStatus.CompletedFiles = completed
+	utm.sessionStatus.FailedFiles = failed
 	utm.sessionStatus.TotalBytes = utm.GetTotalBytes()
 }
 
 func (utm *UnifiedTransferManager) notifyFileStatusChanged(filePath string, oldStatus, newStatus *TransferStatus) {
+	// Copy listeners under lock to minimize lock holding time
 	utm.eventsMu.RLock()
-	defer utm.eventsMu.RUnlock()
+	listenersCopy := make([]StatusListener, len(utm.listeners))
+	copy(listenersCopy, utm.listeners)
+	utm.eventsMu.RUnlock()
 
-	for _, listener := range utm.listeners {
-		// Run in goroutine to prevent blocking (already in goroutine, but being explicit)
-		listener.OnFileStatusChanged(filePath, oldStatus, newStatus)
+	// Notify each listener in its own goroutine to prevent blocking
+	for _, listener := range listenersCopy {
+		go func(l StatusListener) {
+			// Use defer to recover from panics in listener code
+			defer func() {
+				if r := recover(); r != nil {
+					// Log the panic but don't crash the entire system
+					// In a real application, you might want to use a proper logger
+					// log.Printf("Panic in file status listener: %v", r)
+				}
+			}()
+			l.OnFileStatusChanged(filePath, oldStatus, newStatus)
+		}(listener)
 	}
 }
 
 func (utm *UnifiedTransferManager) notifySessionStatusChanged(oldStatus, newStatus *SessionTransferStatus) {
+	// Copy listeners under lock to minimize lock holding time
 	utm.eventsMu.RLock()
-	defer utm.eventsMu.RUnlock()
+	listenersCopy := make([]StatusListener, len(utm.listeners))
+	copy(listenersCopy, utm.listeners)
+	utm.eventsMu.RUnlock()
 
-	for _, listener := range utm.listeners {
-		// Run in goroutine to prevent blocking (already in goroutine, but being explicit)
-		listener.OnSessionStatusChanged(oldStatus, newStatus)
+	// Notify each listener in its own goroutine to prevent blocking
+	for _, listener := range listenersCopy {
+		go func(l StatusListener) {
+			// Use defer to recover from panics in listener code
+			defer func() {
+				if r := recover(); r != nil {
+					// Log the panic but don't crash the entire system
+					// In a real application, you might want to use a proper logger
+					// log.Printf("Panic in session status listener: %v", r)
+				}
+			}()
+			l.OnSessionStatusChanged(oldStatus, newStatus)
+		}(listener)
 	}
+}
+
+// FileQueueState represents the state of a file in the queue
+type FileQueueState int
+
+const (
+	FileQueueStatePending FileQueueState = iota
+	FileQueueStateCompleted
+	FileQueueStateFailed
+)
+
+// moveFileInQueue efficiently moves a file between queue states
+// This method assumes queueMu is already locked by the caller
+func (utm *UnifiedTransferManager) moveFileInQueue(filePath string, fromState, toState FileQueueState) bool {
+	// Remove from source state
+	var removed bool
+	switch fromState {
+	case FileQueueStatePending:
+		if utm.pendingFiles[filePath] {
+			delete(utm.pendingFiles, filePath)
+			removed = true
+		}
+	case FileQueueStateCompleted:
+		if utm.completedFiles[filePath] {
+			delete(utm.completedFiles, filePath)
+			removed = true
+		}
+	case FileQueueStateFailed:
+		if utm.failedFiles[filePath] {
+			delete(utm.failedFiles, filePath)
+			removed = true
+		}
+	}
+
+	// If file wasn't in source state, return false
+	if !removed {
+		return false
+	}
+
+	// Add to target state
+	switch toState {
+	case FileQueueStatePending:
+		utm.pendingFiles[filePath] = true
+	case FileQueueStateCompleted:
+		utm.completedFiles[filePath] = true
+	case FileQueueStateFailed:
+		utm.failedFiles[filePath] = true
+	}
+
+	return true
+}
+
+// addFileToQueue adds a file to the specified queue state
+// This method assumes queueMu is already locked by the caller
+func (utm *UnifiedTransferManager) addFileToQueue(filePath string, state FileQueueState) {
+	switch state {
+	case FileQueueStatePending:
+		utm.pendingFiles[filePath] = true
+	case FileQueueStateCompleted:
+		utm.completedFiles[filePath] = true
+	case FileQueueStateFailed:
+		utm.failedFiles[filePath] = true
+	}
+}
+
+// removeFileFromQueue removes a file from the specified queue state
+// This method assumes queueMu is already locked by the caller
+func (utm *UnifiedTransferManager) removeFileFromQueue(filePath string, state FileQueueState) bool {
+	switch state {
+	case FileQueueStatePending:
+		if utm.pendingFiles[filePath] {
+			delete(utm.pendingFiles, filePath)
+			return true
+		}
+	case FileQueueStateCompleted:
+		if utm.completedFiles[filePath] {
+			delete(utm.completedFiles, filePath)
+			return true
+		}
+	case FileQueueStateFailed:
+		if utm.failedFiles[filePath] {
+			delete(utm.failedFiles, filePath)
+			return true
+		}
+	}
+	return false
+}
+
+// getQueueCounts returns the count of files in each queue state
+// This method assumes queueMu is already locked by the caller
+func (utm *UnifiedTransferManager) getQueueCounts() (pending, completed, failed int) {
+	return len(utm.pendingFiles), len(utm.completedFiles), len(utm.failedFiles)
+}
+
+// getFirstPendingFile returns the first pending file path (for compatibility)
+// Since we're using a map, we'll return any pending file
+// This method assumes queueMu is already locked by the caller
+func (utm *UnifiedTransferManager) getFirstPendingFile() (string, bool) {
+	for filePath := range utm.pendingFiles {
+		return filePath, true
+	}
+	return "", false
+}
+
+// isFileInQueue checks if a file is in the specified queue state
+// This method assumes queueMu is already locked by the caller
+func (utm *UnifiedTransferManager) isFileInQueue(filePath string, state FileQueueState) bool {
+	switch state {
+	case FileQueueStatePending:
+		return utm.pendingFiles[filePath]
+	case FileQueueStateCompleted:
+		return utm.completedFiles[filePath]
+	case FileQueueStateFailed:
+		return utm.failedFiles[filePath]
+	}
+	return false
 }

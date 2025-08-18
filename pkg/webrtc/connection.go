@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
@@ -228,7 +229,7 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 		}
 	}
 
-	var isChannelReadyClose = false
+	var channelReadyOnce sync.Once
 	channelReady := make(chan struct{})
 	channelError := make(chan error, 1)
 
@@ -242,11 +243,15 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 	dataChannel.OnOpen(func() {
 		slog.Info("Data channel opened for file transfer")
 		close(channelReady)
-		isChannelReadyClose = true
+		channelReadyOnce.Do(func() { close(channelReady) })
 	})
 
 	dataChannel.OnError(func(err error) {
-		channelError <- err
+		select {
+		case channelError <- err:
+		default:
+		}
+		channelReadyOnce.Do(func() { close(channelReady) })
 	})
 
 	// Ensure data channel is closed when function exits
@@ -255,9 +260,7 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 			slog.Error("Failed to close data channel", "error", err)
 		}
 		// Clean up channels if they weren't closed
-		if !isChannelReadyClose {
-			close(channelReady)
-		}
+		channelReadyOnce.Do(func() { close(channelReady) })
 	}()
 
 	select {
@@ -274,6 +277,22 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrtc.DataChannel, utm *transfer.UnifiedTransferManager, serviceID string) error {
 	slog.Info("Starting file transfer process")
 
+	// Helper closure to handle transfer failures gracefully
+	// This provides resilient error handling that continues processing other files
+	handleTransferFailure := func(filePath string, transferErr error, context string) {
+		slog.Error("Transfer failure", "file", filePath, "context", context, "error", transferErr)
+
+		// Attempt to mark file as failed, but don't abort the entire batch if this fails
+		if failErr := utm.FailTransfer(filePath, transferErr); failErr != nil {
+			// Log the secondary failure but continue processing other files
+			slog.Warn("Failed to mark file as failed (secondary failure)",
+				"file", filePath,
+				"original_error", transferErr,
+				"fail_error", failErr)
+			// Note: We don't return here - we continue with the next file
+		}
+	}
+
 	// Process files one by one
 	for {
 		// Get next pending file
@@ -287,11 +306,7 @@ func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrt
 
 		// Start transfer for this file
 		if err := utm.StartTransfer(fileNode.Path); err != nil {
-			slog.Error("Failed to start transfer", "file", fileNode.Path, "error", err)
-			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
-				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
-				return err
-			}
+			handleTransferFailure(fileNode.Path, err, "start transfer")
 			continue
 		}
 
@@ -299,27 +314,21 @@ func (c *SenderConn) performFileTransfer(ctx context.Context, dataChannel *webrt
 		chunker, exists := utm.GetChunker(fileNode.Path)
 		if !exists {
 			err := fmt.Errorf("chunker not found for file: %s", fileNode.Path)
-			slog.Error("Chunker not found", "file", fileNode.Path)
-			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
-				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
-				return err
-			}
+			handleTransferFailure(fileNode.Path, err, "get chunker")
 			continue
 		}
 
 		// Transfer file chunks
 		if err := c.transferFileChunks(ctx, dataChannel, utm, fileNode, chunker, serviceID); err != nil {
-			slog.Error("Failed to transfer file chunks", "file", fileNode.Path, "error", err)
-			if err := utm.FailTransfer(fileNode.Path, err); err != nil {
-				slog.Error("Failed to mark file as failed", "file", fileNode.Path, "error", err)
-				return err
-			}
+			handleTransferFailure(fileNode.Path, err, "transfer chunks")
 			continue
 		}
 
 		// Mark file as completed
 		if err := utm.CompleteTransfer(fileNode.Path); err != nil {
 			slog.Error("Failed to mark file as completed", "file", fileNode.Path, "error", err)
+			// Note: We don't use handleTransferFailure here because the file was actually transferred successfully
+			// The failure is only in marking it as completed, which is less critical
 			continue
 		}
 
@@ -355,7 +364,7 @@ func (c *SenderConn) transferFileChunks(ctx context.Context, dataChannel *webrtc
 				FileID:       fileNode.Path,                           // Use path as file ID
 				FileName:     fileNode.Name,
 				SequenceNo:   chunk.SequenceNo,
-				Offset:       chunk.Offset,                            // Add offset to support out-of-order writes
+				Offset:       chunk.Offset, // Add offset to support out-of-order writes
 				Data:         chunk.Data,
 				ChunkHash:    chunk.Hash,
 				TotalSize:    fileNode.Size,
