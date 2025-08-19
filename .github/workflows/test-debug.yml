@@ -1,0 +1,204 @@
+# Debug Test Workflow
+# This workflow provides detailed debugging information for test failures
+
+name: "Debug Tests"
+
+on:
+  workflow_dispatch: # Allow manual triggering
+  push:
+    branches: ["debug-ci"] # Only run on debug branch
+  pull_request:
+    branches: ["debug-ci"]
+
+permissions:
+  contents: read
+
+jobs:
+  debug-test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        go-version: ["1.21", "1.22"]
+        test-mode: ["basic", "race", "verbose"]
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Environment Information
+        run: |
+          echo "=========================================="
+          echo "Environment Information"
+          echo "=========================================="
+          echo "Go version: $(go version)"
+          echo "OS: $(uname -a)"
+          echo "CPU cores: $(nproc)"
+          echo "Memory: $(free -h)"
+          echo "Disk space: $(df -h)"
+          echo "User: $(whoami)"
+          echo "Home: $HOME"
+          echo "PWD: $(pwd)"
+          echo "TMPDIR: ${TMPDIR:-not set}"
+          echo "=========================================="
+          
+          # Go environment
+          echo "Go Environment:"
+          go env
+          echo "=========================================="
+
+      - name: Download Dependencies
+        run: |
+          echo "Downloading dependencies..."
+          go mod download
+          echo "Dependencies downloaded successfully"
+
+      - name: Verify Dependencies
+        run: |
+          echo "Verifying dependencies..."
+          go mod verify
+          echo "Dependencies verified successfully"
+
+      - name: Run go vet
+        run: |
+          echo "Running go vet..."
+          go vet ./...
+          echo "go vet completed successfully"
+
+      - name: List Test Packages
+        run: |
+          echo "Available test packages:"
+          go list ./... | grep -v /cmd/ | sort
+          echo "=========================================="
+
+      - name: Run Tests - ${{ matrix.test-mode }}
+        run: |
+          echo "Running tests in ${{ matrix.test-mode }} mode..."
+          
+          # Set environment for CI
+          export CI=true
+          export GITHUB_ACTIONS=true
+          export GOMAXPROCS=2
+          export CGO_ENABLED=1
+          
+          case "${{ matrix.test-mode }}" in
+            "basic")
+              echo "Running basic tests (no race detector)..."
+              for pkg in $(go list ./... | grep -v /cmd/); do
+                echo "Testing $pkg (basic)..."
+                if ! go test -v -timeout=60s -short "$pkg"; then
+                  echo "FAILED: $pkg"
+                  exit 1
+                fi
+              done
+              ;;
+            "race")
+              echo "Running race detection tests..."
+              for pkg in $(go list ./... | grep -v /cmd/); do
+                echo "Testing $pkg (race)..."
+                if ! go test -v -race -timeout=90s -short "$pkg"; then
+                  echo "FAILED: $pkg"
+                  exit 1
+                fi
+              done
+              ;;
+            "verbose")
+              echo "Running verbose tests..."
+              for pkg in $(go list ./... | grep -v /cmd/); do
+                echo "Testing $pkg (verbose)..."
+                go test -v -race -timeout=120s "$pkg" || {
+                  echo "FAILED: $pkg"
+                  echo "Attempting to get more details..."
+                  go test -v -timeout=60s "$pkg" || true
+                  exit 1
+                }
+              done
+              ;;
+          esac
+          
+          echo "All tests completed successfully in ${{ matrix.test-mode }} mode!"
+
+      - name: Test Specific Packages (if previous step failed)
+        if: failure()
+        run: |
+          echo "Running individual package tests for debugging..."
+          
+          # Test webrtc package specifically (since it was mentioned in the issue)
+          echo "Testing webrtc package..."
+          go test -v -timeout=120s ./pkg/webrtc || {
+            echo "webrtc package failed, trying without race detector..."
+            go test -v -timeout=60s ./pkg/webrtc || true
+          }
+          
+          # Test transfer package
+          echo "Testing transfer package..."
+          go test -v -timeout=120s ./pkg/transfer || {
+            echo "transfer package failed, trying without race detector..."
+            go test -v -timeout=60s ./pkg/transfer || true
+          }
+
+      - name: Generate Coverage Report
+        if: matrix.test-mode == 'basic' && matrix.go-version == '1.22'
+        run: |
+          echo "Generating coverage report..."
+          go test -v -short -coverprofile=coverage.out -covermode=atomic ./... || {
+            echo "Coverage generation failed, but continuing..."
+          }
+          
+          if [ -f coverage.out ]; then
+            echo "Coverage report generated successfully"
+            go tool cover -func=coverage.out | tail -1
+          else
+            echo "No coverage report generated"
+          fi
+
+      - name: Upload Coverage
+        if: matrix.test-mode == 'basic' && matrix.go-version == '1.22'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Build Project
+        run: |
+          echo "Building project..."
+          go build ./... || {
+            echo "Build failed, checking for build issues..."
+            go build -v ./... || true
+            exit 1
+          }
+          echo "Build completed successfully!"
+
+      - name: Final Diagnostics (if failed)
+        if: failure()
+        run: |
+          echo "=========================================="
+          echo "Final Diagnostics"
+          echo "=========================================="
+          
+          # Check for common issues
+          echo "Checking for temporary files..."
+          find /tmp -name "*test*" -type f 2>/dev/null | head -10 || true
+          
+          echo "Checking disk space..."
+          df -h
+          
+          echo "Checking memory usage..."
+          free -h
+          
+          echo "Checking for core dumps..."
+          find . -name "core*" -type f 2>/dev/null | head -5 || true
+          
+          echo "Checking Go cache..."
+          go clean -cache
+          go clean -testcache
+          
+          echo "=========================================="
