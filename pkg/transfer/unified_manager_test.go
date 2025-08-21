@@ -390,16 +390,16 @@ func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 		// Should have at least some failure events
 		assert.GreaterOrEqual(t, len(fileEvents), 1, "Should have at least one failure event")
 
-		// Verify we have transition to failed state
-		hasFailedTransition := false
+		// Verify we have transition to paused state (for retry) or failed state
+		hasPausedOrFailedTransition := false
 
 		for _, event := range fileEvents {
-			if strings.Contains(event, "-> failed") {
-				hasFailedTransition = true
+			if strings.Contains(event, "-> failed") || strings.Contains(event, "-> paused") {
+				hasPausedOrFailedTransition = true
 			}
 		}
 
-		assert.True(t, hasFailedTransition, "Should have transition to failed state")
+		assert.True(t, hasPausedOrFailedTransition, "Should have transition to paused (for retry) or failed state")
 	})
 
 	t.Run("multiple_files_independent_events", func(t *testing.T) {
@@ -483,13 +483,13 @@ func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 			if strings.Contains(event, testFiles[0]) && strings.Contains(event, "-> completed") {
 				hasFile0Completed = true
 			}
-			if strings.Contains(event, testFiles[1]) && strings.Contains(event, "-> failed") {
+			if strings.Contains(event, testFiles[1]) && (strings.Contains(event, "-> failed") || strings.Contains(event, "-> paused")) {
 				hasFile1Failed = true
 			}
 		}
 
 		assert.True(t, hasFile0Completed, "File 0 should have completed transition")
-		assert.True(t, hasFile1Failed, "File 1 should have failed transition")
+		assert.True(t, hasFile1Failed, "File 1 should have failed or paused transition")
 	})
 
 	t.Run("detailed_state_transition_verification", func(t *testing.T) {

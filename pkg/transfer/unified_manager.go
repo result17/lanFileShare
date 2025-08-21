@@ -33,6 +33,10 @@ type UnifiedTransferManager struct {
 	// Event system
 	listeners []StatusListener
 	eventsMu  sync.RWMutex
+
+	// Error handling and retry system
+	errorHandler   ErrorHandler
+	retryScheduler *RetryScheduler
 }
 
 // ManagedFile is no longer needed since we use FileStructureManager
@@ -72,7 +76,7 @@ func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfi
 		State:           StatusSessionStateActive,
 	}
 
-	return &UnifiedTransferManager{
+	utm := &UnifiedTransferManager{
 		session:        session,
 		config:         config,
 		structure:      NewFileStructureManager(),
@@ -83,6 +87,13 @@ func NewUnifiedTransferManagerWithConfig(serviceID string, config *TransferConfi
 		sessionStatus:  sessionStatus,
 		listeners:      make([]StatusListener, 0),
 	}
+
+	// Initialize error handling system
+	utm.errorHandler = NewDefaultErrorHandler(config.DefaultRetryPolicy)
+	utm.retryScheduler = NewRetryScheduler(utm, utm.errorHandler)
+	utm.retryScheduler.Start()
+
+	return utm
 }
 
 // AddFile adds a file to the transfer queue (focused on file management only)
@@ -432,7 +443,7 @@ func (utm *UnifiedTransferManager) CompleteTransfer(filePath string) error {
 	return nil
 }
 
-// FailTransfer marks the current file transfer as failed
+// FailTransfer marks the current file transfer as failed and handles retry logic
 // Uses consistent lock ordering: queueMu -> statusMu to prevent deadlock
 func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) error {
 	// Lock in consistent order: queueMu first, then statusMu
@@ -448,7 +459,31 @@ func (utm *UnifiedTransferManager) FailTransfer(filePath string, err error) erro
 	oldSessionStatus := *utm.sessionStatus
 	oldFileStatus := *utm.sessionStatus.CurrentFile
 
-	// Mark current file as failed
+	// Increment retry count
+	retryCount := utm.sessionStatus.CurrentFile.RetryCount + 1
+	utm.sessionStatus.CurrentFile.RetryCount = retryCount
+
+	// Check if we should schedule a retry
+	if utm.retryScheduler.ScheduleRetry(filePath, err, retryCount) {
+		// Retry scheduled, update status but don't mark as failed yet
+		utm.sessionStatus.CurrentFile.LastError = err
+		utm.sessionStatus.CurrentFile.State = TransferStatePaused // Temporarily paused for retry
+		utm.sessionStatus.CurrentFile = nil                       // No current file until retry
+		utm.sessionStatus.LastUpdateTime = time.Now()
+
+		// Create copy for notification
+		pausedFile := oldFileStatus
+		pausedFile.State = TransferStatePaused
+		pausedFile.LastError = err
+		pausedFile.RetryCount = retryCount
+
+		// Notify listeners
+		go utm.notifyFileStatusChanged(filePath, &oldFileStatus, &pausedFile)
+
+		return nil
+	}
+
+	// No retry scheduled, mark as failed
 	utm.sessionStatus.CurrentFile.State = TransferStateFailed
 	utm.sessionStatus.CurrentFile.LastError = err
 
@@ -799,4 +834,43 @@ func (utm *UnifiedTransferManager) isFileInQueue(filePath string, state FileQueu
 		return utm.failedFiles[filePath]
 	}
 	return false
+}
+
+// GetRetryStatus returns the retry status for a specific file
+func (utm *UnifiedTransferManager) GetRetryStatus(filePath string) (*RetryTask, bool) {
+	return utm.retryScheduler.GetRetryStatus(filePath)
+}
+
+// GetAllRetryTasks returns all currently scheduled retry tasks
+func (utm *UnifiedTransferManager) GetAllRetryTasks() map[string]*RetryTask {
+	return utm.retryScheduler.GetAllRetryTasks()
+}
+
+// GetRetryStatistics returns statistics about retry operations
+func (utm *UnifiedTransferManager) GetRetryStatistics() RetryStatistics {
+	return utm.retryScheduler.GetRetryStatistics()
+}
+
+// CancelRetry cancels a scheduled retry for a file
+func (utm *UnifiedTransferManager) CancelRetry(filePath string) {
+	utm.retryScheduler.CancelRetry(filePath)
+}
+
+// SetErrorHandler allows setting a custom error handler
+func (utm *UnifiedTransferManager) SetErrorHandler(handler ErrorHandler) {
+	utm.errorHandler = handler
+	// Note: We don't update the retry scheduler's handler as it's set during construction
+	// If needed, we could add a method to update the retry scheduler's handler
+}
+
+// GetErrorHandler returns the current error handler
+func (utm *UnifiedTransferManager) GetErrorHandler() ErrorHandler {
+	return utm.errorHandler
+}
+
+// Shutdown gracefully shuts down the transfer manager
+func (utm *UnifiedTransferManager) Shutdown() {
+	if utm.retryScheduler != nil {
+		utm.retryScheduler.Stop()
+	}
 }
