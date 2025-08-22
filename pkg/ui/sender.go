@@ -25,6 +25,7 @@ const (
 	selectingFiles
 	waitingForReceiverConfirmation
 	sendingFiles
+	transferPaused
 	transferComplete
 	transferFailed
 )
@@ -115,6 +116,10 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.updateSelectingReceiverState(msg)
 	case selectingFiles:
 		cmd = m.updateSelectingFilesState(msg)
+	case sendingFiles:
+		cmd = m.updateSendingFilesState(msg)
+	case transferPaused:
+		cmd = m.updateTransferPausedState(msg)
 	case transferComplete, transferFailed:
 		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
 			m.sender.reset()
@@ -171,6 +176,15 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
+		return m.listenForAppMessages(), true
+	case senderEvent.TransferPausedMsg:
+		m.sender.state = transferPaused
+		return m.listenForAppMessages(), true
+	case senderEvent.TransferResumedMsg:
+		m.sender.state = sendingFiles
+		return m.listenForAppMessages(), true
+	case senderEvent.TransferCancelledMsg:
+		m.sender.state = transferFailed // Treat cancellation as failure for UI purposes
 		return m.listenForAppMessages(), true
 	case appevents.Error:
 		m.err = msg.Err
@@ -239,6 +253,8 @@ func (m *model) senderView() string {
 		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), style.HighlightFontStyle.Render(m.sender.selectedService.Name))
 	case sendingFiles:
 		return m.renderTransferProgress()
+	case transferPaused:
+		return m.renderTransferPaused()
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:
@@ -337,5 +353,105 @@ func (m *model) renderTransferProgress() string {
 		result += fmt.Sprintf("\n\nCurrent: %s", style.FileStyle.Render(progress.CurrentFile))
 	}
 
+	// Add control hints
+	result += fmt.Sprintf("\n\n%s", style.FileStyle.Render("Press 'P' to pause, 'C' to cancel"))
+
 	return result
+}
+
+// renderTransferPaused renders the paused transfer display
+func (m *model) renderTransferPaused() string {
+	if m.sender.transferProgress == nil {
+		return fmt.Sprintf("\n⏸️  Transfer paused to %s\n\n%s",
+			style.HighlightFontStyle.Render(m.sender.selectedService.Name),
+			style.FileStyle.Render("Press 'R' or Space to resume, 'C' to cancel"))
+	}
+
+	progress := m.sender.transferProgress
+
+	// Create progress bar (same as active transfer)
+	progressWidth := 40
+	filledWidth := int(float64(progressWidth) * progress.OverallProgress / 100.0)
+	emptyWidth := progressWidth - filledWidth
+
+	progressBar := style.SuccessStyle.Render(strings.Repeat("█", filledWidth)) +
+		style.FileStyle.Render(strings.Repeat("░", emptyWidth))
+
+	// Format transferred bytes
+	var bytesStr string
+	if progress.TotalBytes > 1024*1024*1024 {
+		bytesStr = fmt.Sprintf("%.1f/%.1f GB",
+			float64(progress.TransferredBytes)/(1024*1024*1024),
+			float64(progress.TotalBytes)/(1024*1024*1024))
+	} else if progress.TotalBytes > 1024*1024 {
+		bytesStr = fmt.Sprintf("%.1f/%.1f MB",
+			float64(progress.TransferredBytes)/(1024*1024),
+			float64(progress.TotalBytes)/(1024*1024))
+	} else if progress.TotalBytes > 1024 {
+		bytesStr = fmt.Sprintf("%.1f/%.1f KB",
+			float64(progress.TransferredBytes)/1024,
+			float64(progress.TotalBytes)/1024)
+	} else {
+		bytesStr = fmt.Sprintf("%d/%d B", progress.TransferredBytes, progress.TotalBytes)
+	}
+
+	result := fmt.Sprintf("\n⏸️  Transfer paused to %s\n\n",
+		style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+
+	result += fmt.Sprintf("Files: %d/%d completed\n", progress.CompletedFiles, progress.TotalFiles)
+	result += fmt.Sprintf("Progress: [%s] %.1f%%\n", progressBar, progress.OverallProgress)
+	result += fmt.Sprintf("Data: %s\n", bytesStr)
+
+	if progress.CurrentFile != "" {
+		result += fmt.Sprintf("\nLast file: %s", style.FileStyle.Render(progress.CurrentFile))
+	}
+
+	// Add control hints
+	result += fmt.Sprintf("\n\n%s", style.FileStyle.Render("Press 'R' or Space to resume, 'C' to cancel"))
+
+	return result
+}
+
+// updateSendingFilesState handles UI events during file transfer
+func (m *model) updateSendingFilesState(msg tea.Msg) tea.Cmd {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "p", "P":
+			// Pause transfer
+			return func() tea.Msg {
+				return senderEvent.PauseTransferMsg{}
+			}
+		case "c", "C":
+			// Cancel transfer
+			return func() tea.Msg {
+				return senderEvent.CancelTransferMsg{}
+			}
+		case "q", "ctrl+c":
+			// Quit application
+			return tea.Quit
+		}
+	}
+	return nil
+}
+
+// updateTransferPausedState handles UI events when transfer is paused
+func (m *model) updateTransferPausedState(msg tea.Msg) tea.Cmd {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "r", "R", " ":
+			// Resume transfer
+			return func() tea.Msg {
+				return senderEvent.ResumeTransferMsg{}
+			}
+		case "c", "C":
+			// Cancel transfer
+			return func() tea.Msg {
+				return senderEvent.CancelTransferMsg{}
+			}
+		case "q", "ctrl+c":
+			// Quit application
+			return tea.Quit
+		}
+	}
+	return nil
 }

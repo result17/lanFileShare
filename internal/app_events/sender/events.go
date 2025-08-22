@@ -45,3 +45,21 @@ type ProgressUpdateMsg struct {
 }
 
 type TransferCompleteMsg struct{}
+
+// Transfer control events
+type PauseTransferMsg struct {
+	appevents.Event
+}
+
+type ResumeTransferMsg struct {
+	appevents.Event
+}
+
+type CancelTransferMsg struct {
+	appevents.Event
+}
+
+// Transfer control response events
+type TransferPausedMsg struct{}
+type TransferResumedMsg struct{}
+type TransferCancelledMsg struct{}

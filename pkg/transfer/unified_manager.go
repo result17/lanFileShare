@@ -868,6 +868,109 @@ func (utm *UnifiedTransferManager) GetErrorHandler() ErrorHandler {
 	return utm.errorHandler
 }
 
+// PauseSession pauses the entire transfer session
+func (utm *UnifiedTransferManager) PauseSession() error {
+	utm.statusMu.Lock()
+	defer utm.statusMu.Unlock()
+
+	if utm.sessionStatus.State != StatusSessionStateActive {
+		return fmt.Errorf("cannot pause session: session is not active (current state: %s)", utm.sessionStatus.State)
+	}
+
+	oldStatus := *utm.sessionStatus
+	utm.sessionStatus.State = StatusSessionStatePaused
+	utm.sessionStatus.LastUpdateTime = time.Now()
+
+	// Pause current file if any
+	if utm.sessionStatus.CurrentFile != nil {
+		utm.sessionStatus.CurrentFile.State = TransferStatePaused
+		utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
+	}
+
+	// Notify listeners
+	go utm.notifySessionStatusChanged(&oldStatus, utm.sessionStatus)
+
+	return nil
+}
+
+// ResumeSession resumes a paused transfer session
+func (utm *UnifiedTransferManager) ResumeSession() error {
+	utm.statusMu.Lock()
+	defer utm.statusMu.Unlock()
+
+	if utm.sessionStatus.State != StatusSessionStatePaused {
+		return fmt.Errorf("cannot resume session: session is not paused (current state: %s)", utm.sessionStatus.State)
+	}
+
+	oldStatus := *utm.sessionStatus
+	utm.sessionStatus.State = StatusSessionStateActive
+	utm.sessionStatus.LastUpdateTime = time.Now()
+
+	// Resume current file if any
+	if utm.sessionStatus.CurrentFile != nil {
+		utm.sessionStatus.CurrentFile.State = TransferStateActive
+		utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
+	}
+
+	// Notify listeners
+	go utm.notifySessionStatusChanged(&oldStatus, utm.sessionStatus)
+
+	return nil
+}
+
+// CancelSession cancels the entire transfer session
+func (utm *UnifiedTransferManager) CancelSession() error {
+	utm.statusMu.Lock()
+	defer utm.statusMu.Unlock()
+
+	if utm.sessionStatus.State == StatusSessionStateCompleted ||
+		utm.sessionStatus.State == StatusSessionStateFailed ||
+		utm.sessionStatus.State == StatusSessionStateCancelled {
+		return fmt.Errorf("cannot cancel session: session is already finished (current state: %s)", utm.sessionStatus.State)
+	}
+
+	oldStatus := *utm.sessionStatus
+	utm.sessionStatus.State = StatusSessionStateCancelled
+	utm.sessionStatus.LastUpdateTime = time.Now()
+
+	// Cancel current file if any
+	if utm.sessionStatus.CurrentFile != nil {
+		utm.sessionStatus.CurrentFile.State = TransferStateCancelled
+		utm.sessionStatus.CurrentFile.LastUpdateTime = time.Now()
+	}
+
+	// Cancel all pending retries
+	for filePath := range utm.retryScheduler.GetAllRetryTasks() {
+		utm.retryScheduler.CancelRetry(filePath)
+	}
+
+	// Notify listeners
+	go utm.notifySessionStatusChanged(&oldStatus, utm.sessionStatus)
+
+	return nil
+}
+
+// IsSessionPaused returns true if the session is currently paused
+func (utm *UnifiedTransferManager) IsSessionPaused() bool {
+	utm.statusMu.RLock()
+	defer utm.statusMu.RUnlock()
+	return utm.sessionStatus.State == StatusSessionStatePaused
+}
+
+// IsSessionCancelled returns true if the session has been cancelled
+func (utm *UnifiedTransferManager) IsSessionCancelled() bool {
+	utm.statusMu.RLock()
+	defer utm.statusMu.RUnlock()
+	return utm.sessionStatus.State == StatusSessionStateCancelled
+}
+
+// GetSessionState returns the current session state
+func (utm *UnifiedTransferManager) GetSessionState() StatusSessionState {
+	utm.statusMu.RLock()
+	defer utm.statusMu.RUnlock()
+	return utm.sessionStatus.State
+}
+
 // Shutdown gracefully shuts down the transfer manager
 func (utm *UnifiedTransferManager) Shutdown() {
 	if utm.retryScheduler != nil {

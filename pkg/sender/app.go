@@ -33,6 +33,10 @@ type App struct {
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
 
+	// Transfer control
+	currentTransferManager *transfer.UnifiedTransferManager
+	transferMu             sync.RWMutex // Protects currentTransferManager
+
 	// Note: Removed fileStructure field for stateless design
 	// Each transfer will create its own FileStructureManager
 }
@@ -111,6 +115,12 @@ func (a *App) Run(ctx context.Context) error {
 				case sender.SendFilesMsg:
 					// Show files to users and start the transfer process
 					a.StartSendProcess(ctx, e.Receiver, e.Files)
+				case sender.PauseTransferMsg:
+					a.handlePauseTransfer()
+				case sender.ResumeTransferMsg:
+					a.handleResumeTransfer()
+				case sender.CancelTransferMsg:
+					a.handleCancelTransfer()
 				}
 			}
 		}
@@ -205,6 +215,76 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 			a.uiMessages <- sender.TransferCompleteMsg{}
 		}
 	}()
+}
+
+// handlePauseTransfer pauses the current transfer
+func (a *App) handlePauseTransfer() {
+	a.transferMu.RLock()
+	utm := a.currentTransferManager
+	a.transferMu.RUnlock()
+
+	if utm == nil {
+		slog.Warn("No active transfer to pause")
+		return
+	}
+
+	if err := utm.PauseSession(); err != nil {
+		slog.Error("Failed to pause transfer", "error", err)
+		a.uiMessages <- appevents.Error{Err: fmt.Errorf("failed to pause transfer: %w", err)}
+		return
+	}
+
+	slog.Info("Transfer paused by user")
+	a.uiMessages <- sender.TransferPausedMsg{}
+}
+
+// handleResumeTransfer resumes the current transfer
+func (a *App) handleResumeTransfer() {
+	a.transferMu.RLock()
+	utm := a.currentTransferManager
+	a.transferMu.RUnlock()
+
+	if utm == nil {
+		slog.Warn("No active transfer to resume")
+		return
+	}
+
+	if err := utm.ResumeSession(); err != nil {
+		slog.Error("Failed to resume transfer", "error", err)
+		a.uiMessages <- appevents.Error{Err: fmt.Errorf("failed to resume transfer: %w", err)}
+		return
+	}
+
+	slog.Info("Transfer resumed by user")
+	a.uiMessages <- sender.TransferResumedMsg{}
+}
+
+// handleCancelTransfer cancels the current transfer
+func (a *App) handleCancelTransfer() {
+	a.transferMu.RLock()
+	utm := a.currentTransferManager
+	a.transferMu.RUnlock()
+
+	if utm == nil {
+		slog.Warn("No active transfer to cancel")
+		return
+	}
+
+	if err := utm.CancelSession(); err != nil {
+		slog.Error("Failed to cancel transfer", "error", err)
+		a.uiMessages <- appevents.Error{Err: fmt.Errorf("failed to cancel transfer: %w", err)}
+		return
+	}
+
+	slog.Info("Transfer cancelled by user")
+	a.uiMessages <- sender.TransferCancelledMsg{}
+}
+
+// SetTransferManager sets the current transfer manager (implements ProgressSignaler)
+func (a *App) SetTransferManager(utm *transfer.UnifiedTransferManager) {
+	a.transferMu.Lock()
+	defer a.transferMu.Unlock()
+	a.currentTransferManager = utm
 }
 
 // SendProgressUpdate implements the ProgressSignaler interface

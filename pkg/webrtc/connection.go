@@ -231,6 +231,9 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 
 	// Add progress listener if progress signaler is available
 	if c.progressSignaler != nil {
+		// Set the transfer manager reference in the progress signaler
+		c.progressSignaler.SetTransferManager(utm)
+
 		progressListener := NewProgressListener(c.progressSignaler)
 		utm.AddStatusListener(progressListener)
 	}
@@ -420,6 +423,7 @@ func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.
 type ProgressSignaler interface {
 	SendProgressUpdate(totalFiles, completedFiles int, totalBytes, transferredBytes int64,
 		currentFile string, transferRate float64, eta string, overallProgress float64)
+	SetTransferManager(utm *transfer.UnifiedTransferManager)
 }
 
 // ProgressListener implements transfer.StatusListener to send progress updates
