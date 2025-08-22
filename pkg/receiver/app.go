@@ -179,6 +179,17 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		return err
 	}
 
+	// Get signed files information to determine expected file count
+	signedFiles, err := a.stateManager.GetSignedFiles()
+	expectedFileCount := 0
+	if err != nil {
+		slog.Warn("Could not get signed files information", "error", err)
+		// Continue without setting expected files - fallback behavior
+	} else if signedFiles != nil {
+		expectedFileCount = len(signedFiles.Files)
+		slog.Info("Expected file count determined", "count", expectedFileCount)
+	}
+
 	webrtcAPI := webrtcPkg.NewWebrtcAPI()
 
 	offer, err := a.stateManager.GetOffer()
@@ -353,8 +364,6 @@ func (a *App) setActiveConn(conn webrtcPkg.ReceiverConnection) {
 	}
 }
 
-
-
 // handleFileChunk processes incoming file chunk messages
 func (a *App) handleFileChunk(data []byte) error {
 	a.receiverMu.Lock()
@@ -363,9 +372,12 @@ func (a *App) handleFileChunk(data []byte) error {
 	// Initialize file receiver if not exists
 	if a.fileReceiver == nil {
 		a.fileReceiver = NewFileReceiver(a.outputPath, a.uiMessages)
+
+		// Set expected file count if available
+		if signedFiles, err := a.stateManager.GetSignedFiles(); err == nil && signedFiles != nil {
+			a.fileReceiver.SetExpectedFiles(len(signedFiles.Files))
+		}
 	}
 
 	return a.fileReceiver.ProcessChunk(data)
 }
-
-

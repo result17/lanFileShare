@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rescp17/lanFileSharer/internal/app_events"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
@@ -35,6 +36,21 @@ type senderModel struct {
 	fp              multiFilePicker.Model
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
+
+	// Transfer progress tracking
+	transferProgress *TransferProgress
+}
+
+// TransferProgress tracks the overall transfer progress
+type TransferProgress struct {
+	TotalFiles       int
+	CompletedFiles   int
+	TotalBytes       int64
+	TransferredBytes int64
+	CurrentFile      string
+	TransferRate     float64 // bytes per second
+	ETA              string  // estimated time remaining
+	OverallProgress  float64 // percentage 0-100
 }
 
 var columns = []table.Column{
@@ -140,6 +156,19 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 		// This could be used to update a status line in the UI
 		slog.Info("Status Update", "message", msg.Message) // For now, just log
 		return m.listenForAppMessages(), true
+	case senderEvent.ProgressUpdateMsg:
+		// Update transfer progress
+		m.sender.transferProgress = &TransferProgress{
+			TotalFiles:       msg.TotalFiles,
+			CompletedFiles:   msg.CompletedFiles,
+			TotalBytes:       msg.TotalBytes,
+			TransferredBytes: msg.TransferredBytes,
+			CurrentFile:      msg.CurrentFile,
+			TransferRate:     msg.TransferRate,
+			ETA:              msg.ETA,
+			OverallProgress:  msg.OverallProgress,
+		}
+		return m.listenForAppMessages(), true
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
 		return m.listenForAppMessages(), true
@@ -209,7 +238,7 @@ func (m *model) senderView() string {
 	case waitingForReceiverConfirmation:
 		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), style.HighlightFontStyle.Render(m.sender.selectedService.Name))
 	case sendingFiles:
-		return fmt.Sprintf("\n%s Sending files to %s...", m.sender.spinner.View(), style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+		return m.renderTransferProgress()
 	case transferComplete:
 		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
 	case transferFailed:
@@ -243,4 +272,70 @@ func (m *senderModel) adjustTableCursor(newRowCount int) {
 
 		m.table.SetCursor(newCursor)
 	}
+}
+
+// renderTransferProgress renders the transfer progress display
+func (m *model) renderTransferProgress() string {
+	if m.sender.transferProgress == nil {
+		return fmt.Sprintf("\n%s Sending files to %s...",
+			m.sender.spinner.View(),
+			style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+	}
+
+	progress := m.sender.transferProgress
+
+	// Create progress bar
+	progressWidth := 40
+	filledWidth := int(float64(progressWidth) * progress.OverallProgress / 100.0)
+	emptyWidth := progressWidth - filledWidth
+
+	progressBar := style.SuccessStyle.Render(strings.Repeat("█", filledWidth)) +
+		style.FileStyle.Render(strings.Repeat("░", emptyWidth))
+
+	// Format transfer rate
+	var rateStr string
+	if progress.TransferRate > 1024*1024 {
+		rateStr = fmt.Sprintf("%.1f MB/s", progress.TransferRate/(1024*1024))
+	} else if progress.TransferRate > 1024 {
+		rateStr = fmt.Sprintf("%.1f KB/s", progress.TransferRate/1024)
+	} else {
+		rateStr = fmt.Sprintf("%.0f B/s", progress.TransferRate)
+	}
+
+	// Format transferred bytes
+	var bytesStr string
+	if progress.TotalBytes > 1024*1024*1024 {
+		bytesStr = fmt.Sprintf("%.1f/%.1f GB",
+			float64(progress.TransferredBytes)/(1024*1024*1024),
+			float64(progress.TotalBytes)/(1024*1024*1024))
+	} else if progress.TotalBytes > 1024*1024 {
+		bytesStr = fmt.Sprintf("%.1f/%.1f MB",
+			float64(progress.TransferredBytes)/(1024*1024),
+			float64(progress.TotalBytes)/(1024*1024))
+	} else if progress.TotalBytes > 1024 {
+		bytesStr = fmt.Sprintf("%.1f/%.1f KB",
+			float64(progress.TransferredBytes)/1024,
+			float64(progress.TotalBytes)/1024)
+	} else {
+		bytesStr = fmt.Sprintf("%d/%d B", progress.TransferredBytes, progress.TotalBytes)
+	}
+
+	result := fmt.Sprintf("\n%s Sending files to %s\n\n",
+		m.sender.spinner.View(),
+		style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+
+	result += fmt.Sprintf("Files: %d/%d completed\n", progress.CompletedFiles, progress.TotalFiles)
+	result += fmt.Sprintf("Progress: [%s] %.1f%%\n", progressBar, progress.OverallProgress)
+	result += fmt.Sprintf("Data: %s\n", bytesStr)
+	result += fmt.Sprintf("Speed: %s", rateStr)
+
+	if progress.ETA != "" && progress.ETA != "0s" {
+		result += fmt.Sprintf(" | ETA: %s", progress.ETA)
+	}
+
+	if progress.CurrentFile != "" {
+		result += fmt.Sprintf("\n\nCurrent: %s", style.FileStyle.Render(progress.CurrentFile))
+	}
+
+	return result
 }

@@ -115,7 +115,7 @@ func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("success to verify file structure")
 
-	decisionChan, err := s.stateManager.CreateRequest(req.Offer)
+	decisionChan, err := s.stateManager.CreateRequest(req.Offer, req.SignedFiles)
 	if err != nil {
 		slog.Error("failed to create request", "error", err)
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)

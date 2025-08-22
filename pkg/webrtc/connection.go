@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
@@ -57,8 +58,9 @@ func (c *Connection) Close() error {
 
 type SenderConn struct {
 	*Connection
-	signaler   Signaler // Used to send signals to the remote peer
-	serializer transfer.MessageSerializer
+	signaler         Signaler // Used to send signals to the remote peer
+	serializer       transfer.MessageSerializer
+	progressSignaler ProgressSignaler // Optional progress signaler
 }
 
 // SetSignaler allows setting a custom signaler (mainly for testing)
@@ -112,6 +114,10 @@ func (c *Connection) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 }
 
 func (a *WebrtcAPI) NewSenderConnection(transferCtx context.Context, config Config, apiClient *api.Client, receiverURL string) (SenderConnection, error) {
+	return a.NewSenderConnectionWithProgress(transferCtx, config, apiClient, receiverURL, nil)
+}
+
+func (a *WebrtcAPI) NewSenderConnectionWithProgress(transferCtx context.Context, config Config, apiClient *api.Client, receiverURL string, progressSignaler ProgressSignaler) (SenderConnection, error) {
 	pc, err := a.createPeerConnection(config)
 	if err != nil {
 		return nil, err
@@ -120,7 +126,8 @@ func (a *WebrtcAPI) NewSenderConnection(transferCtx context.Context, config Conf
 		Connection: &Connection{
 			peerConnection: pc,
 		},
-		serializer: transfer.NewJSONSerializer(),
+		serializer:       transfer.NewJSONSerializer(),
+		progressSignaler: progressSignaler,
 	}
 
 	signaler := api.NewAPISignaler(apiClient, receiverURL, conn.AddICECandidate)
@@ -221,6 +228,12 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 			slog.Error("Failed to close unified transfer manager", "error", err)
 		}
 	}()
+
+	// Add progress listener if progress signaler is available
+	if c.progressSignaler != nil {
+		progressListener := NewProgressListener(c.progressSignaler)
+		utm.AddStatusListener(progressListener)
+	}
 
 	// Add files to the transfer manager
 	for _, file := range files {
@@ -401,4 +414,104 @@ func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.
 	}
 
 	return dataChannel.Send(data)
+}
+
+// ProgressSignaler interface for sending progress updates
+type ProgressSignaler interface {
+	SendProgressUpdate(totalFiles, completedFiles int, totalBytes, transferredBytes int64,
+		currentFile string, transferRate float64, eta string, overallProgress float64)
+}
+
+// ProgressListener implements transfer.StatusListener to send progress updates
+type ProgressListener struct {
+	signaler       ProgressSignaler
+	lastUpdate     time.Time
+	updateInterval time.Duration
+}
+
+// NewProgressListener creates a new progress listener
+func NewProgressListener(signaler ProgressSignaler) *ProgressListener {
+	return &ProgressListener{
+		signaler:       signaler,
+		updateInterval: 500 * time.Millisecond, // Update every 500ms
+	}
+}
+
+// ID returns the listener ID
+func (pl *ProgressListener) ID() string {
+	return "webrtc-progress-listener"
+}
+
+// OnFileStatusChanged handles file status changes
+func (pl *ProgressListener) OnFileStatusChanged(filePath string, oldStatus, newStatus *transfer.TransferStatus) {
+	// File-level changes don't need immediate UI updates
+	// We'll rely on session-level updates for better performance
+}
+
+// OnSessionStatusChanged handles session status changes and sends progress updates
+func (pl *ProgressListener) OnSessionStatusChanged(oldStatus, newStatus *transfer.SessionTransferStatus) {
+	// Throttle updates to avoid overwhelming the UI
+	now := time.Now()
+	if now.Sub(pl.lastUpdate) < pl.updateInterval {
+		return
+	}
+	pl.lastUpdate = now
+
+	// Calculate transfer rate and ETA
+	var transferRate float64
+	var eta string
+
+	if newStatus.CurrentFile != nil {
+		transferRate = newStatus.CurrentFile.TransferRate
+
+		// Calculate ETA based on remaining bytes and current rate
+		if transferRate > 0 {
+			remainingBytes := newStatus.TotalBytes - newStatus.BytesCompleted
+			etaSeconds := float64(remainingBytes) / transferRate
+			if etaSeconds > 0 && etaSeconds < 3600 { // Only show ETA if less than 1 hour
+				eta = pl.formatDuration(time.Duration(etaSeconds * float64(time.Second)))
+			}
+		}
+	}
+
+	// Get current file name
+	currentFile := ""
+	if newStatus.CurrentFile != nil {
+		currentFile = pl.extractFileName(newStatus.CurrentFile.FilePath)
+	}
+
+	// Send progress update
+	pl.signaler.SendProgressUpdate(
+		newStatus.TotalFiles,
+		newStatus.CompletedFiles,
+		newStatus.TotalBytes,
+		newStatus.BytesCompleted,
+		currentFile,
+		transferRate,
+		eta,
+		newStatus.OverallProgress,
+	)
+}
+
+// formatDuration formats a duration into a human-readable string
+func (pl *ProgressListener) formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	} else if d < time.Hour {
+		minutes := int(d.Minutes())
+		seconds := int(d.Seconds()) % 60
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	}
+	return "∞"
+}
+
+// extractFileName extracts the file name from a file path
+func (pl *ProgressListener) extractFileName(filePath string) string {
+	// Simple implementation - in production, use filepath.Base()
+	for i := len(filePath) - 1; i >= 0; i-- {
+		if filePath[i] == '/' || filePath[i] == '\\' {
+			return filePath[i+1:]
+		}
+	}
+	return filePath
 }

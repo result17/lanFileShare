@@ -165,7 +165,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
 		config := webrtcPkg.Config{}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(transferCtx, config, a.apiClient, receiverURL)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnectionWithProgress(transferCtx, config, a.apiClient, receiverURL, a)
 		if err != nil {
 			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
@@ -205,4 +205,26 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 			a.uiMessages <- sender.TransferCompleteMsg{}
 		}
 	}()
+}
+
+// SendProgressUpdate implements the ProgressSignaler interface
+func (a *App) SendProgressUpdate(totalFiles, completedFiles int, totalBytes, transferredBytes int64,
+	currentFile string, transferRate float64, eta string, overallProgress float64) {
+
+	// Send progress update to UI
+	select {
+	case a.uiMessages <- sender.ProgressUpdateMsg{
+		TotalFiles:       totalFiles,
+		CompletedFiles:   completedFiles,
+		TotalBytes:       totalBytes,
+		TransferredBytes: transferredBytes,
+		CurrentFile:      currentFile,
+		TransferRate:     transferRate,
+		ETA:              eta,
+		OverallProgress:  overallProgress,
+	}:
+	default:
+		// Don't block if UI channel is full
+		slog.Debug("UI channel full, skipping progress update")
+	}
 }

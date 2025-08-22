@@ -1,7 +1,7 @@
 package sender
 
 import (
-	"github.com/rescp17/lanFileSharer/internal/app_events"
+	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -32,5 +32,16 @@ type StatusUpdateMsg struct {
 type TransferStartedMsg struct{}
 
 type ReceiverAcceptedMsg struct{}
+
+type ProgressUpdateMsg struct {
+	TotalFiles       int
+	CompletedFiles   int
+	TotalBytes       int64
+	TransferredBytes int64
+	CurrentFile      string
+	TransferRate     float64 // bytes per second
+	ETA              string  // estimated time remaining
+	OverallProgress  float64 // percentage 0-100
+}
 
 type TransferCompleteMsg struct{}
