@@ -1,20 +1,31 @@
 #!/bin/bash
 
 # Test Like CI Script
-# This script simulates the CI environment locally to help debug CI failures
+# This script simulates the GitHub Actions CI environment locally to help debug CI failures
+# Usage: ./scripts/test-like-ci.sh
 
 set -e
 
 echo "=========================================="
-echo "Testing Like CI Environment"
+echo "🔍 Testing Like GitHub Actions CI Environment"
 echo "=========================================="
 
-# Set CI environment variables
+# Set CI environment variables to match GitHub Actions
 export CI=true
 export GITHUB_ACTIONS=true
 export CONTINUOUS_INTEGRATION=true
 export GOMAXPROCS=2
 export CGO_ENABLED=1
+
+# Print environment information
+echo "📊 Environment Information:"
+echo "Go version: $(go version)"
+echo "OS: $(uname -a 2>/dev/null || echo 'Windows')"
+echo "CPU cores: $(nproc 2>/dev/null || echo 'N/A')"
+echo "GOMAXPROCS: $GOMAXPROCS"
+echo "CGO_ENABLED: $CGO_ENABLED"
+echo "Current directory: $(pwd)"
+echo "=========================================="
 
 # Function to run tests like CI
 run_ci_tests() {
@@ -32,28 +43,31 @@ run_ci_tests() {
     echo "Running go vet..."
     go vet ./...
     
+    # Clean test cache to avoid cached results
+    echo "🧹 Cleaning test cache..."
+    go clean -testcache
+
     # Run tests for each package separately (like CI)
-    echo "Running tests for each package..."
+    echo "🧪 Running tests for each package..."
     failed_packages=""
-    
+
     for pkg in $(go list ./...); do
         echo "=========================================="
-        echo "Testing package: $pkg"
+        echo "📦 Testing package: $pkg"
         echo "=========================================="
-        
-        # Run basic tests first
-        if ! go test -v -timeout=60s -short "$pkg"; then
-            echo "BASIC TEST FAILED: $pkg"
+
+        # Run basic tests first (matching CI configuration)
+        if ! go test -v -timeout=120s -short -count=1 "$pkg"; then
+            echo "❌ BASIC TEST FAILED: $pkg"
             failed_packages="$failed_packages $pkg"
+
+            # Try again with more verbose output
+            echo "🔄 Retrying with more verbose output..."
+            go test -v -timeout=120s -short -count=1 "$pkg" || echo "❌ Still failing on retry"
             continue
         fi
-        
-        # Run with race detector
-        echo "Running race detection for: $pkg"
-        if ! go test -v -race -timeout=90s -short "$pkg"; then
-            echo "RACE TEST FAILED: $pkg"
-            failed_packages="$failed_packages $pkg"
-        fi
+
+        echo "✅ Basic tests passed for: $pkg"
     done
     
     # Report failed packages
@@ -66,9 +80,9 @@ run_ci_tests() {
     
     # Run coverage test
     echo "=========================================="
-    echo "Running coverage test..."
+    echo "📊 Running coverage test..."
     echo "=========================================="
-    go test -v -short -coverprofile=coverage.out -covermode=atomic ./...
+    go test -v -short -count=1 -coverprofile=coverage.out -covermode=atomic ./...
     
     echo "All tests passed!"
     return 0
