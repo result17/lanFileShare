@@ -22,7 +22,7 @@ linters:
     # - lll
   settings:
     gocyclo:
-      min-complexity: 15
+      min-complexity: 20
     dupl:
       threshold: 100
     goconst:

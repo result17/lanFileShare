@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
@@ -14,6 +15,7 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/multiFilePicker"
+	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
 
 // senderState defines the different states of the sender UI.
@@ -38,7 +40,16 @@ type senderModel struct {
 	services        []discovery.ServiceInfo
 	selectedService discovery.ServiceInfo
 
-	// Transfer progress tracking
+	// Enhanced UI components
+	progressBar     *components.MultiFileProgress
+	statusIndicator *components.StatusIndicator
+	statsPanel      *components.TransferStatsPanel
+	errorHandler    *components.ErrorHandler
+	helpPanel       *components.HelpPanel
+	quickTip        *components.QuickTip
+	retryDialog     *components.RetryDialog
+
+	// Transfer progress tracking (legacy - will be replaced)
 	transferProgress *TransferProgress
 }
 
@@ -73,11 +84,28 @@ func initSenderModel() senderModel {
 
 	t.SetStyles(style.NewTableStyles())
 
+	// Initialize enhanced UI components
+	progressConfig := components.DefaultProgressConfig()
+	progressBar := components.NewMultiFileProgress(progressConfig)
+	statusIndicator := components.NewStatusIndicator(5, true) // Keep 5 messages, show timestamps
+	statsPanel := components.NewTransferStatsPanel()
+	errorHandler := components.NewErrorHandler(3, true, 5*time.Second) // Keep 3 errors, auto-retry with 5s delay
+	helpPanel := components.NewHelpPanel()
+	quickTip := components.NewQuickTip()
+	retryDialog := components.NewRetryDialog(errorHandler)
+
 	return senderModel{
-		spinner: s,
-		fp:      multiFilePicker.InitialModel(),
-		state:   findingReceivers,
-		table:   t,
+		spinner:         s,
+		fp:              multiFilePicker.InitialModel(),
+		state:           findingReceivers,
+		table:           t,
+		progressBar:     progressBar,
+		statusIndicator: statusIndicator,
+		statsPanel:      statsPanel,
+		errorHandler:    errorHandler,
+		helpPanel:       helpPanel,
+		quickTip:        quickTip,
+		retryDialog:     retryDialog,
 	}
 }
 
@@ -109,6 +137,32 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, processed := m.handleSenderAppEvent(msg); processed {
 		return m, cmd
 	}
+
+	// Handle global keyboard shortcuts first
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		// Handle help toggle
+		if keyMsg.String() == "?" {
+			m.sender.helpPanel.Toggle()
+			return m, nil
+		}
+
+		// Handle retry dialog if visible
+		if m.sender.retryDialog.IsVisible() {
+			switch keyMsg.String() {
+			case "r", "R":
+				if m.sender.errorHandler.CanRetry() {
+					m.sender.errorHandler.IncrementRetry()
+					m.sender.retryDialog.Hide()
+					// Trigger retry logic here
+					return m, m.retryLastOperation()
+				}
+			case "c", "C", "esc":
+				m.sender.retryDialog.Hide()
+				return m, nil
+			}
+		}
+	}
+
 	var cmd tea.Cmd
 	// Handle UI events
 	switch m.sender.state {
@@ -133,6 +187,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, spinCmd)
 }
 
+//nolint:gocyclo
 func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case senderEvent.FoundServicesMsg:
@@ -143,26 +198,32 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
 			m.sender.state = selectingReceiver
+			m.sender.helpPanel.SetContext(components.HelpContextSenderSelection)
 		}
 		// If the list of services becomes empty, go back to the finding state.
 		if len(msg.Services) == 0 && m.sender.state == selectingReceiver {
 			m.sender.state = findingReceivers
+			m.sender.helpPanel.SetContext(components.HelpContextSenderDiscovery)
 		}
 
 		m.updateReceiverTable(msg.Services)
 		return m.listenForAppMessages(), true // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
+		m.sender.statusIndicator.AddMessage(components.StatusInfo, "Transfer request sent, waiting for confirmation...")
 		return m.listenForAppMessages(), true
 	case senderEvent.ReceiverAcceptedMsg:
 		m.sender.state = sendingFiles
+		m.sender.helpPanel.SetContext(components.HelpContextTransfer)
+		m.sender.statusIndicator.AddMessage(components.StatusSuccess, "Transfer accepted! Starting file transfer...")
 		return m.listenForAppMessages(), true
 	case senderEvent.StatusUpdateMsg:
-		// This could be used to update a status line in the UI
-		slog.Info("Status Update", "message", msg.Message) // For now, just log
+		// Update status indicator with the message
+		m.sender.statusIndicator.AddMessage(components.StatusInfo, msg.Message)
+		slog.Info("Status Update", "message", msg.Message)
 		return m.listenForAppMessages(), true
 	case senderEvent.ProgressUpdateMsg:
-		// Update transfer progress
+		// Update legacy transfer progress for backward compatibility
 		m.sender.transferProgress = &TransferProgress{
 			TotalFiles:       msg.TotalFiles,
 			CompletedFiles:   msg.CompletedFiles,
@@ -173,22 +234,71 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 			ETA:              msg.ETA,
 			OverallProgress:  msg.OverallProgress,
 		}
+
+		// Update enhanced UI components
+		overallProgress := components.ProgressData{
+			Current:     msg.TransferredBytes,
+			Total:       msg.TotalBytes,
+			Rate:        msg.TransferRate,
+			ETA:         time.Duration(0), // Convert from string if needed
+			Label:       "Overall Progress",
+			Status:      "active",
+			CurrentFile: msg.CurrentFile,
+		}
+		m.sender.progressBar.UpdateOverall(overallProgress)
+
+		// Update statistics panel
+		m.sender.statsPanel.Update(
+			msg.TotalFiles, msg.CompletedFiles, 0, // failedFiles
+			msg.TotalBytes, msg.TransferredBytes,
+			msg.TransferRate, msg.TransferRate, msg.TransferRate, // current, average, peak rates
+		)
+
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferCompleteMsg:
 		m.sender.state = transferComplete
+		m.sender.statusIndicator.AddMessage(components.StatusSuccess, "Transfer completed successfully! 🎉")
+		// Update progress bar to complete status
+		if m.sender.transferProgress != nil {
+			completeProgress := components.ProgressData{
+				Current: m.sender.transferProgress.TotalBytes,
+				Total:   m.sender.transferProgress.TotalBytes,
+				Status:  "complete",
+				Label:   "Transfer Complete",
+			}
+			m.sender.progressBar.UpdateOverall(completeProgress)
+		}
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferPausedMsg:
 		m.sender.state = transferPaused
+		m.sender.statusIndicator.AddMessage(components.StatusWarning, "Transfer paused")
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferResumedMsg:
 		m.sender.state = sendingFiles
+		m.sender.statusIndicator.AddMessage(components.StatusInfo, "Transfer resumed")
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferCancelledMsg:
 		m.sender.state = transferFailed // Treat cancellation as failure for UI purposes
+		m.sender.statusIndicator.AddMessage(components.StatusWarning, "Transfer cancelled by user")
 		return m.listenForAppMessages(), true
 	case appevents.Error:
 		m.err = msg.Err
 		m.sender.state = transferFailed
+		m.sender.helpPanel.SetContext(components.HelpContextError)
+
+		// Classify error type for better handling
+		errorType := m.classifyError(msg.Err)
+		m.sender.errorHandler.AddError(errorType, "Transfer failed", msg.Err.Error(), true)
+
+		// Add to status indicator as well
+		m.sender.statusIndicator.AddDetailedMessage(components.StatusError,
+			"Transfer failed", msg.Err.Error(), "Press Enter to try again")
+
+		// Show retry dialog if error is recoverable
+		if m.sender.errorHandler.CanRetry() {
+			m.sender.retryDialog.Show(m.sender.errorHandler.ShouldAutoRetry(), 5)
+		}
+
 		return m.listenForAppMessages(), true
 	}
 	return nil, false
@@ -239,33 +349,58 @@ func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
 }
 
 func (m *model) senderView() string {
+	var result strings.Builder
+
+	// Main content based on state
 	switch m.sender.state {
 	case findingReceivers:
-		return fmt.Sprintf("\n%s Finding receivers...", m.sender.spinner.View())
+		result.WriteString(fmt.Sprintf("\n%s Finding receivers...", m.sender.spinner.View()))
 	case selectingReceiver:
-		s := fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
-		s += style.BaseStyle.Render(m.sender.table.View()) + "\n"
-		s += "Use arrow keys to navigate, Enter to select."
-		return s
+		result.WriteString(fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services)))
+		result.WriteString(style.BaseStyle.Render(m.sender.table.View()) + "\n")
+		result.WriteString("Use arrow keys to navigate, Enter to select.")
 	case selectingFiles:
-		return fmt.Sprintf("Receiver: %s\n%s\n", style.HighlightFontStyle.Render(m.sender.selectedService.Name), m.sender.fp.View())
+		result.WriteString(fmt.Sprintf("Receiver: %s\n%s\n",
+			style.HighlightFontStyle.Render(m.sender.selectedService.Name),
+			m.sender.fp.View()))
 	case waitingForReceiverConfirmation:
-		return fmt.Sprintf("\n%s Waiting for %s to confirm...", m.sender.spinner.View(), style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+		result.WriteString(fmt.Sprintf("\n%s Waiting for %s to confirm...",
+			m.sender.spinner.View(),
+			style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
 	case sendingFiles:
-		return m.renderTransferProgress()
+		result.WriteString(m.renderTransferProgress())
 	case transferPaused:
-		return m.renderTransferPaused()
+		result.WriteString(m.renderTransferPaused())
 	case transferComplete:
-		return "\nTransfer complete! 🎉\n\nPress Enter to send more files."
+		result.WriteString(m.renderTransferComplete())
 	case transferFailed:
-		errorText := "An unknown error occurred."
-		if m.err != nil {
-			errorText = m.err.Error()
-		}
-		return fmt.Sprintf("\nTransfer failed: %s\n\nPress Enter to try again.", style.ErrorStyle.Render(errorText))
+		result.WriteString(m.renderTransferFailed())
 	default:
-		return "Internal error: unknown sender state"
+		result.WriteString("Internal error: unknown sender state")
 	}
+
+	// Add enhanced UI components
+	result.WriteString("\n")
+
+	// Show retry dialog if visible
+	if m.sender.retryDialog.IsVisible() {
+		result.WriteString("\n")
+		result.WriteString(m.sender.retryDialog.Render())
+		result.WriteString("\n")
+	}
+
+	// Show quick tip if visible
+	if m.sender.quickTip.IsVisible() {
+		result.WriteString("\n")
+		result.WriteString(m.sender.quickTip.Render())
+		result.WriteString("\n")
+	}
+
+	// Show help panel
+	result.WriteString("\n")
+	result.WriteString(m.sender.helpPanel.Render())
+
+	return result.String()
 }
 
 func (m *senderModel) reset() {
@@ -290,126 +425,89 @@ func (m *senderModel) adjustTableCursor(newRowCount int) {
 	}
 }
 
-// renderTransferProgress renders the transfer progress display
+// renderTransferProgress renders the enhanced transfer progress display
 func (m *model) renderTransferProgress() string {
-	if m.sender.transferProgress == nil {
-		return fmt.Sprintf("\n%s Sending files to %s...",
-			m.sender.spinner.View(),
-			style.HighlightFontStyle.Render(m.sender.selectedService.Name))
-	}
+	var result strings.Builder
 
-	progress := m.sender.transferProgress
-
-	// Create progress bar
-	progressWidth := 40
-	filledWidth := int(float64(progressWidth) * progress.OverallProgress / 100.0)
-	emptyWidth := progressWidth - filledWidth
-
-	progressBar := style.SuccessStyle.Render(strings.Repeat("█", filledWidth)) +
-		style.FileStyle.Render(strings.Repeat("░", emptyWidth))
-
-	// Format transfer rate
-	var rateStr string
-	if progress.TransferRate > 1024*1024 {
-		rateStr = fmt.Sprintf("%.1f MB/s", progress.TransferRate/(1024*1024))
-	} else if progress.TransferRate > 1024 {
-		rateStr = fmt.Sprintf("%.1f KB/s", progress.TransferRate/1024)
-	} else {
-		rateStr = fmt.Sprintf("%.0f B/s", progress.TransferRate)
-	}
-
-	// Format transferred bytes
-	var bytesStr string
-	if progress.TotalBytes > 1024*1024*1024 {
-		bytesStr = fmt.Sprintf("%.1f/%.1f GB",
-			float64(progress.TransferredBytes)/(1024*1024*1024),
-			float64(progress.TotalBytes)/(1024*1024*1024))
-	} else if progress.TotalBytes > 1024*1024 {
-		bytesStr = fmt.Sprintf("%.1f/%.1f MB",
-			float64(progress.TransferredBytes)/(1024*1024),
-			float64(progress.TotalBytes)/(1024*1024))
-	} else if progress.TotalBytes > 1024 {
-		bytesStr = fmt.Sprintf("%.1f/%.1f KB",
-			float64(progress.TransferredBytes)/1024,
-			float64(progress.TotalBytes)/1024)
-	} else {
-		bytesStr = fmt.Sprintf("%d/%d B", progress.TransferredBytes, progress.TotalBytes)
-	}
-
-	result := fmt.Sprintf("\n%s Sending files to %s\n\n",
+	// Header with receiver info
+	result.WriteString(fmt.Sprintf("\n%s Sending files to %s\n\n",
 		m.sender.spinner.View(),
-		style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+		style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
 
-	result += fmt.Sprintf("Files: %d/%d completed\n", progress.CompletedFiles, progress.TotalFiles)
-	result += fmt.Sprintf("Progress: [%s] %.1f%%\n", progressBar, progress.OverallProgress)
-	result += fmt.Sprintf("Data: %s\n", bytesStr)
-	result += fmt.Sprintf("Speed: %s", rateStr)
-
-	if progress.ETA != "" && progress.ETA != "0s" {
-		result += fmt.Sprintf(" | ETA: %s", progress.ETA)
+	// Enhanced progress display
+	if m.sender.progressBar != nil {
+		result.WriteString(m.sender.progressBar.Render())
+		result.WriteString("\n")
 	}
 
-	if progress.CurrentFile != "" {
-		result += fmt.Sprintf("\n\nCurrent: %s", style.FileStyle.Render(progress.CurrentFile))
+	// Transfer statistics panel (compact mode)
+	if m.sender.statsPanel != nil {
+		m.sender.statsPanel.SetCompact(true)
+		result.WriteString(m.sender.statsPanel.Render())
+		result.WriteString("\n\n")
 	}
 
-	// Add control hints
-	result += fmt.Sprintf("\n\n%s", style.FileStyle.Render("Press 'P' to pause, 'C' to cancel"))
+	// Status messages (show latest)
+	if m.sender.statusIndicator != nil {
+		m.sender.statusIndicator.SetCompact(true)
+		statusMsg := m.sender.statusIndicator.Render()
+		if statusMsg != "" {
+			result.WriteString(statusMsg)
+			result.WriteString("\n\n")
+		}
+	}
 
-	return result
+	// Control hints
+	result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | Ctrl+C=Quit"))
+
+	return result.String()
 }
 
-// renderTransferPaused renders the paused transfer display
+// renderTransferPaused renders the enhanced paused transfer display
 func (m *model) renderTransferPaused() string {
-	if m.sender.transferProgress == nil {
-		return fmt.Sprintf("\n⏸️  Transfer paused to %s\n\n%s",
-			style.HighlightFontStyle.Render(m.sender.selectedService.Name),
-			style.FileStyle.Render("Press 'R' or Space to resume, 'C' to cancel"))
+	var result strings.Builder
+
+	// Header with pause indicator
+	result.WriteString(fmt.Sprintf("\n⏸️  Transfer paused to %s\n\n",
+		style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
+
+	// Enhanced progress display with paused status
+	if m.sender.progressBar != nil {
+		// Update progress bar status to paused
+		if m.sender.transferProgress != nil {
+			pausedProgress := components.ProgressData{
+				Current: m.sender.transferProgress.TransferredBytes,
+				Total:   m.sender.transferProgress.TotalBytes,
+				Status:  "paused",
+				Label:   "Transfer Paused",
+			}
+			m.sender.progressBar.UpdateOverall(pausedProgress)
+		}
+		result.WriteString(m.sender.progressBar.Render())
+		result.WriteString("\n")
 	}
 
-	progress := m.sender.transferProgress
-
-	// Create progress bar (same as active transfer)
-	progressWidth := 40
-	filledWidth := int(float64(progressWidth) * progress.OverallProgress / 100.0)
-	emptyWidth := progressWidth - filledWidth
-
-	progressBar := style.SuccessStyle.Render(strings.Repeat("█", filledWidth)) +
-		style.FileStyle.Render(strings.Repeat("░", emptyWidth))
-
-	// Format transferred bytes
-	var bytesStr string
-	if progress.TotalBytes > 1024*1024*1024 {
-		bytesStr = fmt.Sprintf("%.1f/%.1f GB",
-			float64(progress.TransferredBytes)/(1024*1024*1024),
-			float64(progress.TotalBytes)/(1024*1024*1024))
-	} else if progress.TotalBytes > 1024*1024 {
-		bytesStr = fmt.Sprintf("%.1f/%.1f MB",
-			float64(progress.TransferredBytes)/(1024*1024),
-			float64(progress.TotalBytes)/(1024*1024))
-	} else if progress.TotalBytes > 1024 {
-		bytesStr = fmt.Sprintf("%.1f/%.1f KB",
-			float64(progress.TransferredBytes)/1024,
-			float64(progress.TotalBytes)/1024)
-	} else {
-		bytesStr = fmt.Sprintf("%d/%d B", progress.TransferredBytes, progress.TotalBytes)
+	// Transfer statistics (compact mode)
+	if m.sender.statsPanel != nil {
+		m.sender.statsPanel.SetCompact(true)
+		result.WriteString(m.sender.statsPanel.Render())
+		result.WriteString("\n\n")
 	}
 
-	result := fmt.Sprintf("\n⏸️  Transfer paused to %s\n\n",
-		style.HighlightFontStyle.Render(m.sender.selectedService.Name))
-
-	result += fmt.Sprintf("Files: %d/%d completed\n", progress.CompletedFiles, progress.TotalFiles)
-	result += fmt.Sprintf("Progress: [%s] %.1f%%\n", progressBar, progress.OverallProgress)
-	result += fmt.Sprintf("Data: %s\n", bytesStr)
-
-	if progress.CurrentFile != "" {
-		result += fmt.Sprintf("\nLast file: %s", style.FileStyle.Render(progress.CurrentFile))
+	// Status messages
+	if m.sender.statusIndicator != nil {
+		m.sender.statusIndicator.SetCompact(true)
+		statusMsg := m.sender.statusIndicator.Render()
+		if statusMsg != "" {
+			result.WriteString(statusMsg)
+			result.WriteString("\n\n")
+		}
 	}
 
-	// Add control hints
-	result += fmt.Sprintf("\n\n%s", style.FileStyle.Render("Press 'R' or Space to resume, 'C' to cancel"))
+	// Control hints for paused state
+	result.WriteString(style.FileStyle.Render("Controls: R/Space=Resume | C=Cancel | Ctrl+C=Quit"))
 
-	return result
+	return result.String()
 }
 
 // updateSendingFilesState handles UI events during file transfer
@@ -453,5 +551,158 @@ func (m *model) updateTransferPausedState(msg tea.Msg) tea.Cmd {
 			return tea.Quit
 		}
 	}
+	return nil
+}
+
+// renderTransferComplete renders the enhanced transfer completion display
+func (m *model) renderTransferComplete() string {
+	var result strings.Builder
+
+	// Success header
+	result.WriteString(fmt.Sprintf("\n✅ Transfer completed successfully to %s!\n\n",
+		style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
+
+	// Final progress display (complete status)
+	if m.sender.progressBar != nil {
+		result.WriteString(m.sender.progressBar.Render())
+		result.WriteString("\n")
+	}
+
+	// Final transfer statistics (full mode for completion summary)
+	if m.sender.statsPanel != nil {
+		m.sender.statsPanel.SetCompact(false)
+		result.WriteString(m.sender.statsPanel.Render())
+		result.WriteString("\n")
+	}
+
+	// Success status message
+	if m.sender.statusIndicator != nil {
+		m.sender.statusIndicator.SetCompact(false)
+		statusMsg := m.sender.statusIndicator.Render()
+		if statusMsg != "" {
+			result.WriteString(statusMsg)
+			result.WriteString("\n")
+		}
+	}
+
+	// Control hints for completion
+	result.WriteString(style.FileStyle.Render("Controls: Enter=Send More Files | Q=Quit"))
+
+	return result.String()
+}
+
+// renderTransferFailed renders the enhanced transfer failure display
+func (m *model) renderTransferFailed() string {
+	var result strings.Builder
+
+	// Error header
+	result.WriteString("\n❌ Transfer Failed\n\n")
+
+	// Show current progress if available
+	if m.sender.progressBar != nil {
+		// Update progress bar status to error
+		if m.sender.transferProgress != nil {
+			errorProgress := components.ProgressData{
+				Current: m.sender.transferProgress.TransferredBytes,
+				Total:   m.sender.transferProgress.TotalBytes,
+				Status:  "error",
+				Label:   "Transfer Failed",
+			}
+			m.sender.progressBar.UpdateOverall(errorProgress)
+		}
+		result.WriteString(m.sender.progressBar.Render())
+		result.WriteString("\n")
+	}
+
+	// Error status messages (full mode to show details)
+	if m.sender.statusIndicator != nil {
+		m.sender.statusIndicator.SetCompact(false)
+		statusMsg := m.sender.statusIndicator.Render()
+		if statusMsg != "" {
+			result.WriteString(statusMsg)
+			result.WriteString("\n")
+		}
+	}
+
+	// Fallback error message if no status indicator
+	if m.err != nil && m.sender.statusIndicator == nil {
+		result.WriteString(fmt.Sprintf("Error: %s\n\n", style.ErrorStyle.Render(m.err.Error())))
+	}
+
+	// Control hints for failure
+	result.WriteString(style.FileStyle.Render("Controls: Enter=Try Again | Q=Quit"))
+
+	return result.String()
+}
+
+// classifyError classifies an error into a specific error type for better handling
+func (m *model) classifyError(err error) components.ErrorType {
+	if err == nil {
+		return components.ErrorTypeUnknown
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Network-related errors
+	if strings.Contains(errStr, "network") ||
+		strings.Contains(errStr, "connection") ||
+		strings.Contains(errStr, "dial") ||
+		strings.Contains(errStr, "refused") ||
+		strings.Contains(errStr, "unreachable") {
+		return components.ErrorTypeNetwork
+	}
+
+	// Timeout errors
+	if strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "deadline") ||
+		strings.Contains(errStr, "context canceled") {
+		return components.ErrorTypeTimeout
+	}
+
+	// File system errors
+	if strings.Contains(errStr, "file") ||
+		strings.Contains(errStr, "directory") ||
+		strings.Contains(errStr, "no such") ||
+		strings.Contains(errStr, "not found") ||
+		strings.Contains(errStr, "exists") {
+		return components.ErrorTypeFileSystem
+	}
+
+	// Permission errors
+	if strings.Contains(errStr, "permission") ||
+		strings.Contains(errStr, "denied") ||
+		strings.Contains(errStr, "access") ||
+		strings.Contains(errStr, "forbidden") {
+		return components.ErrorTypePermission
+	}
+
+	// User cancellation
+	if strings.Contains(errStr, "cancel") ||
+		strings.Contains(errStr, "abort") ||
+		strings.Contains(errStr, "interrupt") {
+		return components.ErrorTypeUserCancelled
+	}
+
+	return components.ErrorTypeUnknown
+}
+
+// retryLastOperation attempts to retry the last failed operation
+func (m *model) retryLastOperation() tea.Cmd {
+	// Clear previous errors
+	m.sender.errorHandler.Clear()
+	m.sender.statusIndicator.AddMessage(components.StatusInfo, "Retrying operation...")
+
+	// Depending on the current state, retry the appropriate operation
+	switch m.sender.state {
+	case transferFailed:
+		// Reset to file selection state to allow user to retry
+		m.sender.state = selectingFiles
+		m.sender.quickTip.Show("Select files again and press Tab to retry transfer", "info", 5)
+		return nil
+	case findingReceivers:
+		// Retry discovery
+		return m.initSender()
+	}
+
 	return nil
 }

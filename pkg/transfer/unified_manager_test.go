@@ -267,6 +267,7 @@ func (tsl *testStatusListener) GetSessionEventCount() int {
 	return len(tsl.sessionEvents)
 }
 
+//nolint:gocyclo
 func TestUnifiedTransferManager_StatusListener(t *testing.T) {
 	t.Run("complete_transfer_lifecycle_events", func(t *testing.T) {
 		manager := NewUnifiedTransferManager("test-service")

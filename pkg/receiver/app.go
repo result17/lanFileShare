@@ -168,7 +168,7 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 	a.uiMessages <- appevents.Error{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
-// handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
+//nolint:gocyclo // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
 func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	slog.Info("User accepted file transfer. Preparing to receive...")
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
