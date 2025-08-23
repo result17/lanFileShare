@@ -62,6 +62,11 @@ type senderModel struct {
 	statusBar       *components.StatusBar
 	contextMenu     *components.ContextualMenu
 
+	// Theme and layout components
+	themeManager     *components.ThemeManager
+	responsiveLayout *components.ResponsiveLayout
+	themeSelector    *components.ThemeSelector
+
 	// Transfer progress tracking (legacy - will be replaced)
 	transferProgress *TransferProgress
 }
@@ -121,26 +126,34 @@ func initSenderModel() senderModel {
 	statusBar := components.NewStatusBar(80)  // 80 characters wide
 	contextMenu := components.NewContextualMenu("Actions")
 
+	// Initialize theme and layout components
+	themeManager := components.NewThemeManager("") // No config dir for now
+	responsiveLayout := components.NewResponsiveLayout(themeManager)
+	themeSelector := components.NewThemeSelector(themeManager)
+
 	return senderModel{
-		spinner:         s,
-		fp:              multiFilePicker.InitialModel(),
-		state:           findingReceivers,
-		table:           t,
-		progressBar:     progressBar,
-		statusIndicator: statusIndicator,
-		statsPanel:      statsPanel,
-		errorHandler:    errorHandler,
-		helpPanel:       helpPanel,
-		quickTip:        quickTip,
-		retryDialog:     retryDialog,
-		statsCollector:  statsCollector,
-		realTimeStats:   realTimeStats,
-		rateChart:       rateChart,
-		sparkLine:       sparkLine,
-		keyboardManager: keyboardManager,
-		breadcrumb:      breadcrumb,
-		statusBar:       statusBar,
-		contextMenu:     contextMenu,
+		spinner:          s,
+		fp:               multiFilePicker.InitialModel(),
+		state:            findingReceivers,
+		table:            t,
+		progressBar:      progressBar,
+		statusIndicator:  statusIndicator,
+		statsPanel:       statsPanel,
+		errorHandler:     errorHandler,
+		helpPanel:        helpPanel,
+		quickTip:         quickTip,
+		retryDialog:      retryDialog,
+		statsCollector:   statsCollector,
+		realTimeStats:    realTimeStats,
+		rateChart:        rateChart,
+		sparkLine:        sparkLine,
+		keyboardManager:  keyboardManager,
+		breadcrumb:       breadcrumb,
+		statusBar:        statusBar,
+		contextMenu:      contextMenu,
+		themeManager:     themeManager,
+		responsiveLayout: responsiveLayout,
+		themeSelector:    themeSelector,
 	}
 }
 
@@ -169,6 +182,14 @@ func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle window size changes for responsive layout
+	if windowMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.sender.responsiveLayout.Update(windowMsg)
+		// Update status bar width
+		m.sender.statusBar.SetWidth(windowMsg.Width)
+		return m, nil
+	}
+
 	if cmd, processed := m.handleSenderAppEvent(msg); processed {
 		return m, cmd
 	}
@@ -186,6 +207,14 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case components.KeyActionRefresh:
 			return m, m.handleRefresh()
+		}
+
+		// Handle theme selector if visible
+		if m.sender.themeSelector.IsVisible() {
+			if m.sender.themeSelector.Navigate(action) {
+				return m, nil
+			}
+			return m, nil
 		}
 
 		// Handle context menu if visible
@@ -212,6 +241,12 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sender.retryDialog.Hide()
 				return m, nil
 			}
+			return m, nil
+		}
+
+		// Handle theme switching (T key)
+		if keyMsg.String() == "t" || keyMsg.String() == "T" {
+			m.sender.themeSelector.Show()
 			return m, nil
 		}
 
@@ -451,39 +486,56 @@ func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
 func (m *model) senderView() string {
 	var result strings.Builder
 
-	// Breadcrumb navigation (if not empty)
-	if len(m.sender.breadcrumb.GetItems()) > 0 {
+	// Show theme selector if visible (overlay)
+	if m.sender.themeSelector.IsVisible() {
+		return m.sender.themeSelector.Render()
+	}
+
+	// Breadcrumb navigation (if not empty and layout allows)
+	if len(m.sender.breadcrumb.GetItems()) > 0 && m.sender.responsiveLayout.GetConfig().ShowBreadcrumb {
 		result.WriteString(m.sender.breadcrumb.Render())
 		result.WriteString("\n\n")
 	}
 
-	// Main content based on state
+	// Main content based on state (wrapped in responsive container)
+	var mainContent string
 	switch m.sender.state {
 	case findingReceivers:
-		result.WriteString(fmt.Sprintf("\n%s Finding receivers...", m.sender.spinner.View()))
+		mainContent = fmt.Sprintf("\n%s Finding receivers...", m.sender.spinner.View())
 	case selectingReceiver:
-		result.WriteString(fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services)))
-		result.WriteString(style.BaseStyle.Render(m.sender.table.View()) + "\n")
-		result.WriteString("Use arrow keys to navigate, Enter to select.")
+		mainContent = fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
+		mainContent += style.BaseStyle.Render(m.sender.table.View()) + "\n"
+		if !m.sender.responsiveLayout.IsCompactMode() {
+			mainContent += "Use arrow keys to navigate, Enter to select."
+		}
 	case selectingFiles:
-		result.WriteString(fmt.Sprintf("Receiver: %s\n%s\n",
-			style.HighlightFontStyle.Render(m.sender.selectedService.Name),
-			m.sender.fp.View()))
+		receiverInfo := fmt.Sprintf("Receiver: %s", style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+		if m.sender.responsiveLayout.IsCompactMode() {
+			receiverInfo = m.sender.responsiveLayout.TruncateText(receiverInfo)
+		}
+		mainContent = receiverInfo + "\n" + m.sender.fp.View() + "\n"
 	case waitingForReceiverConfirmation:
-		result.WriteString(fmt.Sprintf("\n%s Waiting for %s to confirm...",
+		receiverName := m.sender.selectedService.Name
+		if m.sender.responsiveLayout.IsCompactMode() {
+			receiverName = m.sender.responsiveLayout.TruncateText(receiverName)
+		}
+		mainContent = fmt.Sprintf("\n%s Waiting for %s to confirm...",
 			m.sender.spinner.View(),
-			style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
+			style.HighlightFontStyle.Render(receiverName))
 	case sendingFiles:
-		result.WriteString(m.renderTransferProgress())
+		mainContent = m.renderTransferProgress()
 	case transferPaused:
-		result.WriteString(m.renderTransferPaused())
+		mainContent = m.renderTransferPaused()
 	case transferComplete:
-		result.WriteString(m.renderTransferComplete())
+		mainContent = m.renderTransferComplete()
 	case transferFailed:
-		result.WriteString(m.renderTransferFailed())
+		mainContent = m.renderTransferFailed()
 	default:
-		result.WriteString("Internal error: unknown sender state")
+		mainContent = "Internal error: unknown sender state"
 	}
+
+	// Wrap main content in adaptive container
+	result.WriteString(m.sender.responsiveLayout.AdaptiveContainer(mainContent, ""))
 
 	// Add enhanced UI components
 	result.WriteString("\n")
@@ -509,18 +561,33 @@ func (m *model) senderView() string {
 		result.WriteString("\n")
 	}
 
-	// Show help panel
-	result.WriteString("\n")
-	result.WriteString(m.sender.helpPanel.Render())
+	// Show help panel (if layout allows)
+	if !m.sender.responsiveLayout.IsCompactMode() {
+		result.WriteString("\n")
+		result.WriteString(m.sender.helpPanel.Render())
+	}
 
-	// Status bar at the bottom
-	result.WriteString("\n")
-	m.updateStatusBar()
-	result.WriteString(m.sender.statusBar.Render())
+	// Status bar at the bottom (if layout allows)
+	if m.sender.responsiveLayout.GetConfig().ShowStatusBar {
+		result.WriteString("\n")
+		m.updateStatusBar()
+		result.WriteString(m.sender.statusBar.Render())
+	}
 
-	// Keyboard hints at the very bottom
+	// Keyboard hints at the very bottom (always show but adapt to layout)
 	result.WriteString("\n")
-	result.WriteString(m.sender.keyboardManager.RenderHints())
+	hints := m.sender.keyboardManager.RenderHints()
+	if m.sender.responsiveLayout.IsCompactMode() {
+		// Truncate hints for compact mode
+		maxWidth := m.sender.responsiveLayout.GetContentWidth()
+		hints = m.sender.responsiveLayout.FormatText(hints, maxWidth)
+	}
+	result.WriteString(hints)
+
+	// Add theme switch hint
+	if !m.sender.responsiveLayout.IsCompactMode() {
+		result.WriteString(" | T=Theme")
+	}
 
 	return result.String()
 }
@@ -551,10 +618,19 @@ func (m *senderModel) adjustTableCursor(newRowCount int) {
 func (m *model) renderTransferProgress() string {
 	var result strings.Builder
 
-	// Header with receiver info
-	result.WriteString(fmt.Sprintf("\n%s Sending files to %s\n\n",
-		m.sender.spinner.View(),
-		style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
+	// Header with receiver info (adapt to layout)
+	receiverName := m.sender.selectedService.Name
+	if m.sender.responsiveLayout.IsCompactMode() {
+		receiverName = m.sender.responsiveLayout.TruncateText(receiverName)
+	}
+
+	if m.sender.responsiveLayout.ShouldShowIcons() {
+		result.WriteString(fmt.Sprintf("\n%s Sending files to %s\n\n",
+			m.sender.spinner.View(),
+			style.HighlightFontStyle.Render(receiverName)))
+	} else {
+		result.WriteString(fmt.Sprintf("Sending to %s\n\n", receiverName))
+	}
 
 	// Enhanced progress display
 	if m.sender.progressBar != nil {
@@ -562,15 +638,29 @@ func (m *model) renderTransferProgress() string {
 		result.WriteString("\n")
 	}
 
-	// Real-time statistics panel
-	if m.sender.realTimeStats != nil {
+	// Real-time statistics panel (if layout allows details)
+	if m.sender.realTimeStats != nil && m.sender.responsiveLayout.ShouldShowDetails() {
 		result.WriteString(m.sender.realTimeStats.Render())
 		result.WriteString("\n")
 	}
 
 	// Transfer rate chart (compact sparkline)
 	if m.sender.sparkLine != nil {
-		result.WriteString("📈 Rate: ")
+		if m.sender.responsiveLayout.ShouldShowIcons() {
+			result.WriteString("📈 Rate: ")
+		} else {
+			result.WriteString("Rate: ")
+		}
+
+		// Adjust sparkline width based on layout
+		sparklineWidth := 40
+		if m.sender.responsiveLayout.IsCompactMode() {
+			sparklineWidth = m.sender.responsiveLayout.GetContentWidth() - 10
+			if sparklineWidth < 10 {
+				sparklineWidth = 10
+			}
+		}
+
 		result.WriteString(m.sender.sparkLine.Render())
 		if m.sender.transferProgress != nil {
 			result.WriteString(fmt.Sprintf(" %s", formatRate(m.sender.transferProgress.TransferRate)))
@@ -578,9 +668,9 @@ func (m *model) renderTransferProgress() string {
 		result.WriteString("\n\n")
 	}
 
-	// Status messages (show latest)
+	// Status messages (show latest, compact in small layouts)
 	if m.sender.statusIndicator != nil {
-		m.sender.statusIndicator.SetCompact(true)
+		m.sender.statusIndicator.SetCompact(m.sender.responsiveLayout.IsCompactMode())
 		statusMsg := m.sender.statusIndicator.Render()
 		if statusMsg != "" {
 			result.WriteString(statusMsg)
@@ -588,8 +678,12 @@ func (m *model) renderTransferProgress() string {
 		}
 	}
 
-	// Control hints with statistics shortcuts
-	result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | 1-5=Stats Views | ?=Help"))
+	// Control hints (adapt to layout)
+	if m.sender.responsiveLayout.IsCompactMode() {
+		result.WriteString(style.FileStyle.Render("P=Pause | C=Cancel"))
+	} else {
+		result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | 1-5=Stats Views | ?=Help"))
+	}
 
 	return result.String()
 }
