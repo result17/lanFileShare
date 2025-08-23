@@ -178,7 +178,7 @@ jobs:
 
       # Step 9: Run golangci-lint (optional but recommended)
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=5m
