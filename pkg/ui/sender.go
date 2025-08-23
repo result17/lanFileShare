@@ -49,6 +49,12 @@ type senderModel struct {
 	quickTip        *components.QuickTip
 	retryDialog     *components.RetryDialog
 
+	// Advanced statistics components
+	statsCollector *components.AdvancedStatsCollector
+	realTimeStats  *components.RealTimeStatsPanel
+	rateChart      *components.LineChart
+	sparkLine      *components.SparkLine
+
 	// Transfer progress tracking (legacy - will be replaced)
 	transferProgress *TransferProgress
 }
@@ -94,6 +100,13 @@ func initSenderModel() senderModel {
 	quickTip := components.NewQuickTip()
 	retryDialog := components.NewRetryDialog(errorHandler)
 
+	// Initialize advanced statistics components
+	statsCollector := components.NewAdvancedStatsCollector(100, time.Second) // Keep 100 points, update every second
+	realTimeStats := components.NewRealTimeStatsPanel(statsCollector, time.Second)
+	rateChart := components.NewLineChart("📈 Transfer Rate", 60, 10, 60) // 60 chars wide, 10 high, 60 points max
+	rateChart.SetLabels("Time", "rate")
+	sparkLine := components.NewSparkLine(40, 40) // 40 chars wide, 40 values max
+
 	return senderModel{
 		spinner:         s,
 		fp:              multiFilePicker.InitialModel(),
@@ -106,6 +119,10 @@ func initSenderModel() senderModel {
 		helpPanel:       helpPanel,
 		quickTip:        quickTip,
 		retryDialog:     retryDialog,
+		statsCollector:  statsCollector,
+		realTimeStats:   realTimeStats,
+		rateChart:       rateChart,
+		sparkLine:       sparkLine,
 	}
 }
 
@@ -143,6 +160,25 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle help toggle
 		if keyMsg.String() == "?" {
 			m.sender.helpPanel.Toggle()
+			return m, nil
+		}
+
+		// Handle statistics display mode switching
+		switch keyMsg.String() {
+		case "1":
+			m.sender.realTimeStats.SetDisplayMode("overview")
+			return m, nil
+		case "2":
+			m.sender.realTimeStats.SetDisplayMode("detailed")
+			return m, nil
+		case "3":
+			m.sender.realTimeStats.SetDisplayMode("files")
+			return m, nil
+		case "4":
+			m.sender.realTimeStats.SetDisplayMode("network")
+			return m, nil
+		case "5":
+			m.sender.realTimeStats.SetDisplayMode("efficiency")
 			return m, nil
 		}
 
@@ -253,6 +289,21 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 			msg.TotalBytes, msg.TransferredBytes,
 			msg.TransferRate, msg.TransferRate, msg.TransferRate, // current, average, peak rates
 		)
+
+		// Update advanced statistics collector
+		m.sender.statsCollector.UpdateTransferMetrics(msg.TotalBytes, msg.TransferredBytes, msg.TransferRate)
+
+		// Update current file metrics if available
+		if msg.CurrentFile != "" {
+			// Estimate current file size and progress (this would ideally come from the transfer system)
+			m.sender.statsCollector.UpdateFileMetrics(msg.CurrentFile, 0, 0, "active")
+		}
+
+		// Update rate chart
+		m.sender.rateChart.AddPoint(float64(time.Now().Unix()), msg.TransferRate, "")
+
+		// Update sparkline
+		m.sender.sparkLine.AddValue(msg.TransferRate)
 
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferCompleteMsg:
@@ -440,10 +491,19 @@ func (m *model) renderTransferProgress() string {
 		result.WriteString("\n")
 	}
 
-	// Transfer statistics panel (compact mode)
-	if m.sender.statsPanel != nil {
-		m.sender.statsPanel.SetCompact(true)
-		result.WriteString(m.sender.statsPanel.Render())
+	// Real-time statistics panel
+	if m.sender.realTimeStats != nil {
+		result.WriteString(m.sender.realTimeStats.Render())
+		result.WriteString("\n")
+	}
+
+	// Transfer rate chart (compact sparkline)
+	if m.sender.sparkLine != nil {
+		result.WriteString("📈 Rate: ")
+		result.WriteString(m.sender.sparkLine.Render())
+		if m.sender.transferProgress != nil {
+			result.WriteString(fmt.Sprintf(" %s", formatRate(m.sender.transferProgress.TransferRate)))
+		}
 		result.WriteString("\n\n")
 	}
 
@@ -457,8 +517,8 @@ func (m *model) renderTransferProgress() string {
 		}
 	}
 
-	// Control hints
-	result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | Ctrl+C=Quit"))
+	// Control hints with statistics shortcuts
+	result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | 1-5=Stats Views | ?=Help"))
 
 	return result.String()
 }
@@ -705,4 +765,16 @@ func (m *model) retryLastOperation() tea.Cmd {
 	}
 
 	return nil
+}
+
+// formatRate formats transfer rate in a human-readable format
+func formatRate(rate float64) string {
+	if rate > 1024*1024*1024 {
+		return fmt.Sprintf("%.1f GB/s", rate/(1024*1024*1024))
+	} else if rate > 1024*1024 {
+		return fmt.Sprintf("%.1f MB/s", rate/(1024*1024))
+	} else if rate > 1024 {
+		return fmt.Sprintf("%.1f KB/s", rate/1024)
+	}
+	return fmt.Sprintf("%.0f B/s", rate)
 }

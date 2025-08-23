@@ -243,6 +243,11 @@ func (hp *HelpPanel) getHelpItems() []HelpItem {
 			{"P", "Pause transfer", true},
 			{"R", "Resume transfer (if paused)", true},
 			{"C", "Cancel transfer", true},
+			{"1", "Overview statistics", false},
+			{"2", "Detailed statistics", false},
+			{"3", "File statistics", false},
+			{"4", "Network statistics", false},
+			{"5", "Efficiency metrics", false},
 			{"Ctrl+C", "Quit application", false},
 			{"?", "Toggle help", false},
 		}
@@ -421,7 +426,7 @@ func (t *Tutorial) NextStep() {
 	if t.currentStep < len(t.steps) {
 		t.steps[t.currentStep].Completed = true
 		t.currentStep++
-		
+
 		if t.currentStep >= len(t.steps) {
 			t.completed = true
 			t.active = false
