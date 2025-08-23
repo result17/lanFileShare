@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	senderEvent "github.com/rescp17/lanFileSharer/internal/app_events/sender"
 	"github.com/rescp17/lanFileSharer/internal/style"
@@ -54,6 +55,12 @@ type senderModel struct {
 	realTimeStats  *components.RealTimeStatsPanel
 	rateChart      *components.LineChart
 	sparkLine      *components.SparkLine
+
+	// Navigation and keyboard components
+	keyboardManager *components.KeyboardManager
+	breadcrumb      *components.Breadcrumb
+	statusBar       *components.StatusBar
+	contextMenu     *components.ContextualMenu
 
 	// Transfer progress tracking (legacy - will be replaced)
 	transferProgress *TransferProgress
@@ -107,6 +114,13 @@ func initSenderModel() senderModel {
 	rateChart.SetLabels("Time", "rate")
 	sparkLine := components.NewSparkLine(40, 40) // 40 chars wide, 40 values max
 
+	// Initialize navigation and keyboard components
+	keyboardManager := components.NewKeyboardManager()
+	keyboardManager.SetContext("discovery")   // Start with discovery context
+	breadcrumb := components.NewBreadcrumb(5) // Keep up to 5 breadcrumb items
+	statusBar := components.NewStatusBar(80)  // 80 characters wide
+	contextMenu := components.NewContextualMenu("Actions")
+
 	return senderModel{
 		spinner:         s,
 		fp:              multiFilePicker.InitialModel(),
@@ -123,6 +137,10 @@ func initSenderModel() senderModel {
 		realTimeStats:   realTimeStats,
 		rateChart:       rateChart,
 		sparkLine:       sparkLine,
+		keyboardManager: keyboardManager,
+		breadcrumb:      breadcrumb,
+		statusBar:       statusBar,
+		contextMenu:     contextMenu,
 	}
 }
 
@@ -155,48 +173,69 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Handle global keyboard shortcuts first
+	// Handle keyboard input through the keyboard manager
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		// Handle help toggle
-		if keyMsg.String() == "?" {
+		action := m.sender.keyboardManager.ProcessKey(keyMsg)
+
+		// Handle global actions first
+		switch action {
+		case components.KeyActionQuit:
+			return m, tea.Quit
+		case components.KeyActionHelp:
 			m.sender.helpPanel.Toggle()
 			return m, nil
+		case components.KeyActionRefresh:
+			return m, m.handleRefresh()
 		}
 
-		// Handle statistics display mode switching
-		switch keyMsg.String() {
-		case "1":
-			m.sender.realTimeStats.SetDisplayMode("overview")
-			return m, nil
-		case "2":
-			m.sender.realTimeStats.SetDisplayMode("detailed")
-			return m, nil
-		case "3":
-			m.sender.realTimeStats.SetDisplayMode("files")
-			return m, nil
-		case "4":
-			m.sender.realTimeStats.SetDisplayMode("network")
-			return m, nil
-		case "5":
-			m.sender.realTimeStats.SetDisplayMode("efficiency")
+		// Handle context menu if visible
+		if m.sender.contextMenu.IsVisible() {
+			if m.sender.contextMenu.Navigate(action) {
+				selectedItem := m.sender.contextMenu.GetSelectedItem()
+				if selectedItem != nil {
+					return m, m.handleMenuAction(selectedItem.Action)
+				}
+			}
 			return m, nil
 		}
 
 		// Handle retry dialog if visible
 		if m.sender.retryDialog.IsVisible() {
-			switch keyMsg.String() {
-			case "r", "R":
+			switch action {
+			case components.KeyActionRetry:
 				if m.sender.errorHandler.CanRetry() {
 					m.sender.errorHandler.IncrementRetry()
 					m.sender.retryDialog.Hide()
-					// Trigger retry logic here
 					return m, m.retryLastOperation()
 				}
-			case "c", "C", "esc":
+			case components.KeyActionCancel:
 				m.sender.retryDialog.Hide()
 				return m, nil
 			}
+			return m, nil
 		}
+
+		// Handle statistics display mode switching
+		switch action {
+		case components.KeyActionStatsOverview:
+			m.sender.realTimeStats.SetDisplayMode("overview")
+			return m, nil
+		case components.KeyActionStatsDetailed:
+			m.sender.realTimeStats.SetDisplayMode("detailed")
+			return m, nil
+		case components.KeyActionStatsFiles:
+			m.sender.realTimeStats.SetDisplayMode("files")
+			return m, nil
+		case components.KeyActionStatsNetwork:
+			m.sender.realTimeStats.SetDisplayMode("network")
+			return m, nil
+		case components.KeyActionStatsEfficiency:
+			m.sender.realTimeStats.SetDisplayMode("efficiency")
+			return m, nil
+		}
+
+		// Handle state-specific actions
+		return m, m.handleStateSpecificAction(action)
 	}
 
 	var cmd tea.Cmd
@@ -235,11 +274,15 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 		if len(msg.Services) > 0 && m.sender.state == findingReceivers {
 			m.sender.state = selectingReceiver
 			m.sender.helpPanel.SetContext(components.HelpContextSenderSelection)
+			m.sender.keyboardManager.SetContext("selection")
+			m.sender.breadcrumb.AddItem("Select Receiver", "selection", "📡", false)
 		}
 		// If the list of services becomes empty, go back to the finding state.
 		if len(msg.Services) == 0 && m.sender.state == selectingReceiver {
 			m.sender.state = findingReceivers
 			m.sender.helpPanel.SetContext(components.HelpContextSenderDiscovery)
+			m.sender.keyboardManager.SetContext("discovery")
+			m.sender.breadcrumb.PopItem()
 		}
 
 		m.updateReceiverTable(msg.Services)
@@ -251,6 +294,8 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	case senderEvent.ReceiverAcceptedMsg:
 		m.sender.state = sendingFiles
 		m.sender.helpPanel.SetContext(components.HelpContextTransfer)
+		m.sender.keyboardManager.SetContext("transfer")
+		m.sender.breadcrumb.AddItem("Transferring", "transfer", "🚀", false)
 		m.sender.statusIndicator.AddMessage(components.StatusSuccess, "Transfer accepted! Starting file transfer...")
 		return m.listenForAppMessages(), true
 	case senderEvent.StatusUpdateMsg:
@@ -322,10 +367,12 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferPausedMsg:
 		m.sender.state = transferPaused
+		m.sender.keyboardManager.SetContext("paused")
 		m.sender.statusIndicator.AddMessage(components.StatusWarning, "Transfer paused")
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferResumedMsg:
 		m.sender.state = sendingFiles
+		m.sender.keyboardManager.SetContext("transfer")
 		m.sender.statusIndicator.AddMessage(components.StatusInfo, "Transfer resumed")
 		return m.listenForAppMessages(), true
 	case senderEvent.TransferCancelledMsg:
@@ -336,6 +383,8 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 		m.err = msg.Err
 		m.sender.state = transferFailed
 		m.sender.helpPanel.SetContext(components.HelpContextError)
+		m.sender.keyboardManager.SetContext("error")
+		m.sender.breadcrumb.AddItem("Error", "error", "❌", false)
 
 		// Classify error type for better handling
 		errorType := m.classifyError(msg.Err)
@@ -402,6 +451,12 @@ func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
 func (m *model) senderView() string {
 	var result strings.Builder
 
+	// Breadcrumb navigation (if not empty)
+	if len(m.sender.breadcrumb.GetItems()) > 0 {
+		result.WriteString(m.sender.breadcrumb.Render())
+		result.WriteString("\n\n")
+	}
+
 	// Main content based on state
 	switch m.sender.state {
 	case findingReceivers:
@@ -433,6 +488,13 @@ func (m *model) senderView() string {
 	// Add enhanced UI components
 	result.WriteString("\n")
 
+	// Show context menu if visible
+	if m.sender.contextMenu.IsVisible() {
+		result.WriteString("\n")
+		result.WriteString(m.sender.contextMenu.Render())
+		result.WriteString("\n")
+	}
+
 	// Show retry dialog if visible
 	if m.sender.retryDialog.IsVisible() {
 		result.WriteString("\n")
@@ -450,6 +512,15 @@ func (m *model) senderView() string {
 	// Show help panel
 	result.WriteString("\n")
 	result.WriteString(m.sender.helpPanel.Render())
+
+	// Status bar at the bottom
+	result.WriteString("\n")
+	m.updateStatusBar()
+	result.WriteString(m.sender.statusBar.Render())
+
+	// Keyboard hints at the very bottom
+	result.WriteString("\n")
+	result.WriteString(m.sender.keyboardManager.RenderHints())
 
 	return result.String()
 }
@@ -777,4 +848,229 @@ func formatRate(rate float64) string {
 		return fmt.Sprintf("%.1f KB/s", rate/1024)
 	}
 	return fmt.Sprintf("%.0f B/s", rate)
+}
+
+// handleRefresh handles refresh actions
+func (m *model) handleRefresh() tea.Cmd {
+	switch m.sender.state {
+	case findingReceivers:
+		// Restart discovery
+		return m.initSender()
+	case selectingReceiver:
+		// Refresh receiver list
+		return m.initSender()
+	default:
+		// For other states, just show a quick tip
+		m.sender.quickTip.Show("Refresh not available in current state", "info", 3)
+		return nil
+	}
+}
+
+// handleMenuAction handles context menu actions
+func (m *model) handleMenuAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionPause:
+		return m.handlePauseResume()
+	case components.KeyActionCancel:
+		return m.handleCancel()
+	case components.KeyActionRetry:
+		return m.retryLastOperation()
+	default:
+		return nil
+	}
+}
+
+// handleStateSpecificAction handles state-specific keyboard actions
+func (m *model) handleStateSpecificAction(action components.KeyAction) tea.Cmd {
+	switch m.sender.state {
+	case findingReceivers:
+		return m.handleDiscoveryAction(action)
+	case selectingReceiver:
+		return m.handleSelectionAction(action)
+	case selectingFiles:
+		return m.handleFileSelectionAction(action)
+	case sendingFiles, transferPaused:
+		return m.handleTransferAction(action)
+	case transferFailed:
+		return m.handleErrorAction(action)
+	case transferComplete:
+		return m.handleCompleteAction(action)
+	default:
+		return nil
+	}
+}
+
+// handleDiscoveryAction handles actions during discovery phase
+func (m *model) handleDiscoveryAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionRefresh:
+		return m.initSender()
+	case components.KeyActionBack:
+		// Go back to main menu (if implemented)
+		return nil
+	default:
+		return nil
+	}
+}
+
+// handleSelectionAction handles actions during receiver selection
+func (m *model) handleSelectionAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionNavigateUp, components.KeyActionNavigateDown:
+		// Let the table handle navigation
+		return nil
+	case components.KeyActionSelect:
+		// Select current receiver
+		return nil
+	case components.KeyActionBack:
+		return m.initSender()
+	default:
+		return nil
+	}
+}
+
+// handleFileSelectionAction handles actions during file selection
+func (m *model) handleFileSelectionAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionConfirm:
+		// Confirm file selection and start transfer
+		return nil
+	case components.KeyActionBack:
+		m.sender.state = selectingReceiver
+		m.sender.keyboardManager.SetContext("selection")
+		return nil
+	default:
+		return nil
+	}
+}
+
+// handleTransferAction handles actions during transfer
+func (m *model) handleTransferAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionPause:
+		return m.handlePauseResume()
+	case components.KeyActionCancel:
+		return m.handleCancel()
+	default:
+		return nil
+	}
+}
+
+// handleErrorAction handles actions during error state
+func (m *model) handleErrorAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionRetry:
+		return m.retryLastOperation()
+	case components.KeyActionCancel:
+		m.sender.state = selectingFiles
+		m.sender.keyboardManager.SetContext("file_selection")
+		return nil
+	default:
+		return nil
+	}
+}
+
+// handleCompleteAction handles actions after transfer completion
+func (m *model) handleCompleteAction(action components.KeyAction) tea.Cmd {
+	switch action {
+	case components.KeyActionConfirm:
+		// Start new transfer
+		m.sender.state = selectingFiles
+		m.sender.keyboardManager.SetContext("file_selection")
+		return nil
+	case components.KeyActionBack:
+		// Go back to main menu
+		return nil
+	default:
+		return nil
+	}
+}
+
+// handlePauseResume handles pause/resume actions
+func (m *model) handlePauseResume() tea.Cmd {
+	if m.sender.state == sendingFiles {
+		// Pause transfer
+		m.sender.state = transferPaused
+		m.sender.keyboardManager.SetContext("paused")
+		return func() tea.Msg {
+			return senderEvent.PauseTransferMsg{}
+		}
+	} else if m.sender.state == transferPaused {
+		// Resume transfer
+		m.sender.state = sendingFiles
+		m.sender.keyboardManager.SetContext("transfer")
+		return func() tea.Msg {
+			return senderEvent.ResumeTransferMsg{}
+		}
+	}
+	return nil
+}
+
+// updateStatusBar updates the status bar with current information
+func (m *model) updateStatusBar() {
+	// Clear previous items
+	m.sender.statusBar.Clear()
+
+	// Left side - current state and progress
+	switch m.sender.state {
+	case findingReceivers:
+		m.sender.statusBar.AddLeftItem("Discovering...", "🔍", style.FileStyle)
+	case selectingReceiver:
+		m.sender.statusBar.AddLeftItem(fmt.Sprintf("%d receivers found", len(m.sender.services)), "📡", style.FileStyle)
+	case selectingFiles:
+		m.sender.statusBar.AddLeftItem("Select files", "📁", style.FileStyle)
+	case waitingForReceiverConfirmation:
+		m.sender.statusBar.AddLeftItem("Waiting for confirmation", "⏳", style.FileStyle)
+	case sendingFiles:
+		if m.sender.transferProgress != nil {
+			progress := fmt.Sprintf("%.1f%%", m.sender.transferProgress.OverallProgress)
+			m.sender.statusBar.AddLeftItem(progress, "🚀", style.SuccessStyle)
+		} else {
+			m.sender.statusBar.AddLeftItem("Transferring", "🚀", style.FileStyle)
+		}
+	case transferPaused:
+		m.sender.statusBar.AddLeftItem("Paused", "⏸️", lipgloss.NewStyle().Foreground(lipgloss.Color("214")))
+	case transferComplete:
+		m.sender.statusBar.AddLeftItem("Complete", "✅", style.SuccessStyle)
+	case transferFailed:
+		m.sender.statusBar.AddLeftItem("Failed", "❌", style.ErrorStyle)
+	}
+
+	// Center - current file or receiver info
+	if m.sender.state == sendingFiles && m.sender.transferProgress != nil && m.sender.transferProgress.CurrentFile != "" {
+		filename := m.sender.transferProgress.CurrentFile
+		if len(filename) > 30 {
+			filename = filename[:27] + "..."
+		}
+		m.sender.statusBar.AddCenterItem(filename, "📄", style.FileStyle)
+	} else if m.sender.selectedService.Name != "" {
+		receiverName := m.sender.selectedService.Name
+		if len(receiverName) > 20 {
+			receiverName = receiverName[:17] + "..."
+		}
+		m.sender.statusBar.AddCenterItem(receiverName, "📡", style.HighlightFontStyle)
+	}
+
+	// Right side - transfer rate or time
+	if m.sender.state == sendingFiles && m.sender.transferProgress != nil {
+		rate := formatRate(m.sender.transferProgress.TransferRate)
+		m.sender.statusBar.AddRightItem(rate, "⚡", style.FileStyle)
+	} else {
+		// Show current time
+		currentTime := time.Now().Format("15:04:05")
+		m.sender.statusBar.AddRightItem(currentTime, "🕐", style.FileStyle)
+	}
+}
+
+// handleCancel handles cancel actions
+func (m *model) handleCancel() tea.Cmd {
+	if m.sender.state == sendingFiles || m.sender.state == transferPaused {
+		// Cancel transfer
+		m.sender.state = transferFailed
+		m.sender.keyboardManager.SetContext("error")
+		return func() tea.Msg {
+			return senderEvent.CancelTransferMsg{}
+		}
+	}
+	return nil
 }
