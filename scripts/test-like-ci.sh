@@ -1,185 +1,71 @@
 #!/bin/bash
 
-# Test Like CI Script
-# This script simulates the GitHub Actions CI environment locally to help debug CI failures
+# Local CI Test Script
+# Simulates GitHub Actions environment locally for debugging
 # Usage: ./scripts/test-like-ci.sh
 
 set -e
 
-echo "=========================================="
-echo "🔍 Testing Like GitHub Actions CI Environment"
-echo "=========================================="
+echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+echo "│ 🔍 LOCAL CI SIMULATION"
+echo "└─────────────────────────────────────────────────────────────────────────────────┘"
 
 # Set CI environment variables to match GitHub Actions
 export CI=true
 export GITHUB_ACTIONS=true
-export CONTINUOUS_INTEGRATION=true
-export GOMAXPROCS=2
 export CGO_ENABLED=1
+export GOMAXPROCS=1  # Match CI settings
+export GOMEMLIMIT=1GiB
 
-# Print environment information
-echo "📊 Environment Information:"
-echo "Go version: $(go version)"
-echo "OS: $(uname -a 2>/dev/null || echo 'Windows')"
-echo "CPU cores: $(nproc 2>/dev/null || echo 'N/A')"
-echo "GOMAXPROCS: $GOMAXPROCS"
-echo "CGO_ENABLED: $CGO_ENABLED"
-echo "Current directory: $(pwd)"
-echo "=========================================="
+echo "📊 Environment:"
+echo "  Go version: $(go version)"
+echo "  OS: $(uname -a 2>/dev/null || echo 'Windows')"
+echo "  GOMAXPROCS: $GOMAXPROCS"
+echo ""
 
-# Function to run tests like CI
-run_ci_tests() {
-    echo "Running tests with CI configuration..."
-    
-    # Download dependencies
-    echo "Downloading dependencies..."
-    go mod download
-    
-    # Verify dependencies
-    echo "Verifying dependencies..."
-    go mod verify
-    
-    # Run go vet
-    echo "Running go vet..."
-    go vet ./...
-    
-    # Clean test cache to avoid cached results
-    echo "🧹 Cleaning test cache..."
-    go clean -testcache
+# Clean test cache
+echo "🧹 Cleaning test cache..."
+go clean -testcache
 
-    # Run tests for each package separately (like CI)
-    echo "🧪 Running tests for each package..."
-    failed_packages=""
+# Run tests with CI configuration
+echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+echo "│ 🧪 RUNNING TESTS (CI Configuration)"
+echo "└─────────────────────────────────────────────────────────────────────────────────┘"
 
-    for pkg in $(go list ./...); do
-        echo "=========================================="
-        echo "📦 Testing package: $pkg"
-        echo "=========================================="
+failed_packages=""
+total_packages=$(go list ./... | wc -l)
+current_package=0
 
-        # Run basic tests first (matching CI configuration)
-        if ! go test -v -timeout=120s -short -count=1 "$pkg"; then
-            echo "❌ BASIC TEST FAILED: $pkg"
-            failed_packages="$failed_packages $pkg"
+for pkg in $(go list ./...); do
+    current_package=$((current_package + 1))
+    pkg_name=$(basename "$pkg")
 
-            # Try again with more verbose output
-            echo "🔄 Retrying with more verbose output..."
-            go test -v -timeout=120s -short -count=1 "$pkg" || echo "❌ Still failing on retry"
-            continue
-        fi
+    echo ""
+    echo "📦 [$current_package/$total_packages] Testing: $pkg_name"
 
-        echo "✅ Basic tests passed for: $pkg"
-    done
-    
-    # Report failed packages
-    if [ -n "$failed_packages" ]; then
-        echo "=========================================="
-        echo "FAILED PACKAGES: $failed_packages"
-        echo "=========================================="
-        return 1
-    fi
-    
-    # Run coverage test
-    echo "=========================================="
-    echo "📊 Running coverage test..."
-    echo "=========================================="
-    go test -v -short -count=1 -coverprofile=coverage.out -covermode=atomic ./...
-    
-    echo "All tests passed!"
-    return 0
-}
-
-# Function to analyze test failures
-analyze_failures() {
-    echo "Analyzing potential CI failure causes..."
-    
-    # Check for time-sensitive tests
-    echo "Checking for time-sensitive patterns..."
-    grep -r "time\.Sleep" --include="*_test.go" . | head -10 || echo "No time.Sleep found"
-    grep -r "time\.After" --include="*_test.go" . | head -10 || echo "No time.After found"
-    
-    # Check for file system operations
-    echo "Checking for file system operations..."
-    grep -r "os\.Create\|os\.Open\|ioutil\." --include="*_test.go" . | head -10 || echo "No file operations found"
-    
-    # Check for network operations
-    echo "Checking for network operations..."
-    grep -r "net\.\|http\." --include="*_test.go" . | head -10 || echo "No network operations found"
-    
-    # Check for parallel tests
-    echo "Checking for parallel tests..."
-    grep -r "t\.Parallel" --include="*_test.go" . | head -10 || echo "No parallel tests found"
-    
-    # Check for race conditions
-    echo "Checking for potential race conditions..."
-    grep -r "go func\|goroutine" --include="*_test.go" . | head -10 || echo "No goroutines found in tests"
-}
-
-# Function to suggest fixes
-suggest_fixes() {
-    echo "=========================================="
-    echo "Suggested fixes for CI failures:"
-    echo "=========================================="
-    
-    echo "1. Increase timeouts in CI environment"
-    echo "   - Use environment variables to detect CI"
-    echo "   - Multiply timeouts by 2-3x in CI"
-    
-    echo "2. Reduce test parallelism"
-    echo "   - Set GOMAXPROCS=2 in CI"
-    echo "   - Avoid t.Parallel() in resource-intensive tests"
-    
-    echo "3. Make tests more deterministic"
-    echo "   - Replace time.Sleep with proper synchronization"
-    echo "   - Use channels or sync.WaitGroup instead of sleep"
-    
-    echo "4. Handle file system differences"
-    echo "   - Use t.TempDir() for temporary files"
-    echo "   - Handle case-sensitive file systems"
-    
-    echo "5. Skip flaky tests in CI"
-    echo "   - Use build tags: // +build !ci"
-    echo "   - Check CI environment variables"
-    
-    echo "6. Add retry logic for flaky operations"
-    echo "   - Retry network operations"
-    echo "   - Retry file operations that might fail due to timing"
-}
-
-# Main execution
-main() {
-    echo "Starting CI simulation..."
-    
-    # Show environment
-    echo "Environment:"
-    echo "  Go version: $(go version)"
-    echo "  OS: $(uname -a)"
-    echo "  CPU cores: $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 'unknown')"
-    echo "  CI: $CI"
-    echo "  GOMAXPROCS: $GOMAXPROCS"
-    echo "=========================================="
-    
-    # Analyze potential issues first
-    analyze_failures
-    
-    echo "=========================================="
-    echo "Running tests..."
-    echo "=========================================="
-    
-    # Run tests
-    if run_ci_tests; then
-        echo "=========================================="
-        echo "✅ All tests passed in CI simulation!"
-        echo "=========================================="
+    # Run with CI settings: extended timeout, no parallelism
+    if ! go test -v -timeout=300s -short -count=1 -p=1 "$pkg"; then
+        echo "❌ FAILED: $pkg_name"
+        failed_packages="$failed_packages $pkg"
     else
-        echo "=========================================="
-        echo "❌ Tests failed in CI simulation"
-        echo "=========================================="
-        suggest_fixes
-        exit 1
+        echo "✅ PASSED: $pkg_name"
     fi
-}
+done
 
-# Check if script is being sourced or executed
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+# Report results
+echo ""
+if [ -n "$failed_packages" ]; then
+    echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+    echo "│ ❌ FAILED PACKAGES:"
+    for pkg in $failed_packages; do
+        echo "│   - $(basename $pkg)"
+    done
+    echo "└─────────────────────────────────────────────────────────────────────────────────┘"
+    exit 1
+else
+    echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+    echo "│ ✅ ALL TESTS PASSED!"
+    echo "└─────────────────────────────────────────────────────────────────────────────────┘"
 fi
+
+

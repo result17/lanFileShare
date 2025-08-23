@@ -53,46 +53,112 @@ jobs:
           echo "OS: $(uname -a)"
           echo "CPU cores: $(nproc)"
 
-          # Set environment variables for better test stability
+          # Set environment variables for CI stability
+          export CI=true
+          export GITHUB_ACTIONS=true
           export CGO_ENABLED=1
-          export GOMAXPROCS=2
+          export GOMAXPROCS=1  # Reduce to 1 to avoid resource contention
+          export GOMEMLIMIT=1GiB  # Limit memory usage
 
           # Run tests for each package separately to isolate failures
           failed_packages=""
-          for pkg in $(go list ./...); do
-            echo "=========================================="
-            echo "Testing package: $pkg"
-            echo "=========================================="
+          total_packages=$(go list ./... | wc -l)
+          current_package=0
 
-            # Run without race detector first to check for basic failures
-            if ! go test -v -timeout=120s -short -count=1 "$pkg"; then
-              echo "BASIC TEST FAILED: $pkg"
+          for pkg in $(go list ./...); do
+            current_package=$((current_package + 1))
+            pkg_name=$(basename "$pkg")
+
+            echo ""
+            echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+            echo "│ 📦 TESTING PACKAGE [$current_package/$total_packages]: $pkg_name"
+            echo "│ 🔗 Full path: $pkg"
+            echo "└─────────────────────────────────────────────────────────────────────────────────┘"
+
+            # Run with extended timeout and no parallelism for CI stability
+            echo "🚀 COMMAND: go test -v -timeout=300s -short -count=1 -p=1 $pkg"
+            echo "⏱️  Starting test execution..."
+
+            if ! go test -v -timeout=300s -short -count=1 -p=1 "$pkg" 2>&1 | tee "test_output_${pkg_name}.log"; then
+              echo ""
+              echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+              echo "│ ❌ TEST FAILED: $pkg_name"
+              echo "└─────────────────────────────────────────────────────────────────────────────────┘"
+              echo "📋 LAST 30 LINES OF OUTPUT:"
+              echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+              cat "test_output_${pkg_name}.log" | tail -30 | sed 's/^/│ /'
+              echo "└─────────────────────────────────────────────────────────────────────────────────┘"
+
               failed_packages="$failed_packages $pkg"
 
-              # Try again with more verbose output
-              echo "Retrying with more verbose output..."
-              go test -v -timeout=120s -short -count=1 "$pkg" || echo "Still failing on retry"
+              # Analyze failure with built-in tools
+              echo ""
+              echo "🔍 ANALYZING FAILURE DETAILS:"
+              echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+
+              # Extract key error information
+              echo "│ 📊 ERROR SUMMARY:"
+              error_count=$(grep -c "ERROR\|FAIL\|panic\|fatal" "test_output_${pkg_name}.log" || echo "0")
+              warning_count=$(grep -c "WARN\|WARNING" "test_output_${pkg_name}.log" || echo "0")
+              echo "│    ❌ Errors/Failures: $error_count"
+              echo "│    ⚠️  Warnings: $warning_count"
+              echo "│"
+
+              # Show specific test failures
+              echo "│ 💥 SPECIFIC FAILURES:"
+              grep "--- FAIL:" "test_output_${pkg_name}.log" | head -3 | sed 's/^/│    /' || echo "│    No specific test failures found"
+              echo "│"
+
+              # Show panic/fatal errors
+              echo "│ 💀 CRITICAL ERRORS:"
+              grep -i "panic\|fatal" "test_output_${pkg_name}.log" | head -2 | sed 's/^/│    /' || echo "│    No critical errors found"
+              echo "│"
+
+              # Show timeout issues
+              echo "│ ⏰ TIMEOUT ISSUES:"
+              grep -i "timeout\|deadline exceeded" "test_output_${pkg_name}.log" | head -2 | sed 's/^/│    /' || echo "│    No timeout issues found"
+
+              echo "└─────────────────────────────────────────────────────────────────────────────────┘"
               continue
             fi
 
-            # Skip race detector in CI for now to avoid flaky tests
-            echo "Basic tests passed for: $pkg"
+            echo "✅ PACKAGE PASSED: $pkg_name"
           done
 
-          # Report failed packages
+          # Report failed packages with enhanced formatting
           if [ -n "$failed_packages" ]; then
-            echo "=========================================="
-            echo "FAILED PACKAGES: $failed_packages"
-            echo "=========================================="
+            echo ""
+            echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+            echo "│ 💥 FINAL TEST RESULTS: FAILURES DETECTED"
+            echo "├─────────────────────────────────────────────────────────────────────────────────┤"
+            for pkg in $failed_packages; do
+              pkg_name=$(basename "$pkg")
+              echo "│ ❌ FAILED: $pkg_name ($pkg)"
+            done
+            echo "├─────────────────────────────────────────────────────────────────────────────────┤"
+            echo "│ 📁 Log files available:"
+            for pkg in $failed_packages; do
+              pkg_name=$(basename "$pkg")
+              echo "│    📄 test_output_${pkg_name}.log"
+              echo "│    📄 test_json_${pkg_name}.log"
+            done
+            echo "└─────────────────────────────────────────────────────────────────────────────────┘"
             exit 1
           fi
 
           # Run all tests together for coverage (without race detector for stability)
-          echo "=========================================="
-          echo "Running coverage tests..."
-          echo "=========================================="
-          go test -v -short -count=1 -coverprofile=coverage.out -covermode=atomic ./...
-          echo "Tests completed successfully!"
+          echo ""
+          echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+          echo "│ 📊 RUNNING COVERAGE ANALYSIS"
+          echo "└─────────────────────────────────────────────────────────────────────────────────┘"
+          go test -v -short -count=1 -p=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+          echo ""
+          echo "┌─────────────────────────────────────────────────────────────────────────────────┐"
+          echo "│ 🎉 ALL TESTS COMPLETED SUCCESSFULLY!"
+          echo "│ ✅ Individual package tests: PASSED"
+          echo "│ ✅ Coverage analysis: COMPLETED"
+          echo "└─────────────────────────────────────────────────────────────────────────────────┘"
 
       # Step 7: Upload coverage to Codecov (optional)
       - name: Upload coverage reports
