@@ -67,6 +67,10 @@ type senderModel struct {
 	responsiveLayout *components.ResponsiveLayout
 	themeSelector    *components.ThemeSelector
 
+	// Performance optimization components
+	performanceOptimizer *components.PerformanceOptimizer
+	performancePanel     *components.PerformancePanel
+
 	// Transfer progress tracking (legacy - will be replaced)
 	transferProgress *TransferProgress
 }
@@ -131,29 +135,45 @@ func initSenderModel() senderModel {
 	responsiveLayout := components.NewResponsiveLayout(themeManager)
 	themeSelector := components.NewThemeSelector(themeManager)
 
+	// Initialize performance optimization components
+	performanceOptimizer := components.NewPerformanceOptimizer()
+	performancePanel := components.NewPerformancePanel(performanceOptimizer)
+
+	// Start performance monitoring in background
+	go func() {
+		ticker := time.NewTicker(5 * time.Second) // Collect metrics every 5 seconds
+		defer ticker.Stop()
+
+		for range ticker.C {
+			performanceOptimizer.CollectMetrics()
+		}
+	}()
+
 	return senderModel{
-		spinner:          s,
-		fp:               multiFilePicker.InitialModel(),
-		state:            findingReceivers,
-		table:            t,
-		progressBar:      progressBar,
-		statusIndicator:  statusIndicator,
-		statsPanel:       statsPanel,
-		errorHandler:     errorHandler,
-		helpPanel:        helpPanel,
-		quickTip:         quickTip,
-		retryDialog:      retryDialog,
-		statsCollector:   statsCollector,
-		realTimeStats:    realTimeStats,
-		rateChart:        rateChart,
-		sparkLine:        sparkLine,
-		keyboardManager:  keyboardManager,
-		breadcrumb:       breadcrumb,
-		statusBar:        statusBar,
-		contextMenu:      contextMenu,
-		themeManager:     themeManager,
-		responsiveLayout: responsiveLayout,
-		themeSelector:    themeSelector,
+		spinner:              s,
+		fp:                   multiFilePicker.InitialModel(),
+		state:                findingReceivers,
+		table:                t,
+		progressBar:          progressBar,
+		statusIndicator:      statusIndicator,
+		statsPanel:           statsPanel,
+		errorHandler:         errorHandler,
+		helpPanel:            helpPanel,
+		quickTip:             quickTip,
+		retryDialog:          retryDialog,
+		statsCollector:       statsCollector,
+		realTimeStats:        realTimeStats,
+		rateChart:            rateChart,
+		sparkLine:            sparkLine,
+		keyboardManager:      keyboardManager,
+		breadcrumb:           breadcrumb,
+		statusBar:            statusBar,
+		contextMenu:          contextMenu,
+		themeManager:         themeManager,
+		responsiveLayout:     responsiveLayout,
+		themeSelector:        themeSelector,
+		performanceOptimizer: performanceOptimizer,
+		performancePanel:     performancePanel,
 	}
 }
 
@@ -217,6 +237,14 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle performance panel if visible
+		if m.sender.performancePanel.IsVisible() {
+			if m.sender.performancePanel.Navigate(action) {
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Handle context menu if visible
 		if m.sender.contextMenu.IsVisible() {
 			if m.sender.contextMenu.Navigate(action) {
@@ -247,6 +275,13 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle theme switching (T key)
 		if keyMsg.String() == "t" || keyMsg.String() == "T" {
 			m.sender.themeSelector.Show()
+			return m, nil
+		}
+
+		// Handle performance panel (P key when not in transfer)
+		if (keyMsg.String() == "p" || keyMsg.String() == "P") &&
+			m.sender.state != sendingFiles && m.sender.state != transferPaused {
+			m.sender.performancePanel.Show()
 			return m, nil
 		}
 
@@ -491,6 +526,11 @@ func (m *model) senderView() string {
 		return m.sender.themeSelector.Render()
 	}
 
+	// Show performance panel if visible (overlay)
+	if m.sender.performancePanel.IsVisible() {
+		return m.sender.performancePanel.Render()
+	}
+
 	// Breadcrumb navigation (if not empty and layout allows)
 	if len(m.sender.breadcrumb.GetItems()) > 0 && m.sender.responsiveLayout.GetConfig().ShowBreadcrumb {
 		result.WriteString(m.sender.breadcrumb.Render())
@@ -584,9 +624,12 @@ func (m *model) senderView() string {
 	}
 	result.WriteString(hints)
 
-	// Add theme switch hint
+	// Add theme switch and performance hints
 	if !m.sender.responsiveLayout.IsCompactMode() {
 		result.WriteString(" | T=Theme")
+		if m.sender.state != sendingFiles && m.sender.state != transferPaused {
+			result.WriteString(" | P=Performance")
+		}
 	}
 
 	return result.String()
