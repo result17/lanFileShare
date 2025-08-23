@@ -30,7 +30,7 @@ func TestPadRight(t *testing.T) {
 		
 		// Unicode and wide characters (adjust expectations based on actual runewidth behavior)
 		{"ASCII characters", "test", 8, "test    "},
-		{"Unicode characters", "café", 8, "café   "}, // é might have different width
+		{"Unicode characters", "café", 8, "café    "}, // é might have different width
 		{"Chinese characters", "你好", 8, "你好    "}, // Wide chars take 2 spaces each, so 4 + 4 padding
 		{"Mixed characters", "hello世界", 12, "hello世界   "}, // 5 + 4 + 3 padding
 		
