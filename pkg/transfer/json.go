@@ -16,6 +16,7 @@ type JSONChunkMessage struct {
 	FileID       string          `json:"file_id"`
 	FileName     string          `json:"file_name"`
 	SequenceNo   uint32          `json:"sequence_no"`
+	Offset       int64           `json:"offset"`
 	Data         []byte          `json:"data,omitempty"`
 	ChunkHash    string          `json:"chunk_hash,omitempty"`
 	TotalSize    int64           `json:"total_size,omitempty"`
@@ -30,6 +31,7 @@ func (j *JSONSerializer) Marshal(msg *ChunkMessage) ([]byte, error) {
 		FileID:       msg.FileID,
 		FileName:     msg.FileName,
 		SequenceNo:   msg.SequenceNo,
+		Offset:       msg.Offset,
 		Data:         msg.Data,
 		ChunkHash:    msg.ChunkHash,
 		TotalSize:    msg.TotalSize,
@@ -49,6 +51,7 @@ func (j *JSONSerializer) Unmarshal(data []byte) (*ChunkMessage, error) {
 		FileID:       jsonMsg.FileID,
 		FileName:     jsonMsg.FileName,
 		SequenceNo:   jsonMsg.SequenceNo,
+		Offset:       jsonMsg.Offset,
 		Data:         jsonMsg.Data,
 		ChunkHash:    jsonMsg.ChunkHash,
 		TotalSize:    jsonMsg.TotalSize,

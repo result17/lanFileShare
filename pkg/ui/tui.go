@@ -13,16 +13,16 @@ import (
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
 )
 
-type mode int
+type Mode int
 
 const (
-	None mode = iota
+	None Mode = iota
 	Sender
 	Receiver
 )
 
 type model struct {
-	mode          mode
+	mode          Mode
 	appController AppController
 	sender        senderModel
 	receiver      receiverModel
@@ -31,7 +31,7 @@ type model struct {
 	err           error
 }
 
-func InitialModel(m mode, port int) model {
+func InitialModel(m Mode, port int, outputPath string) model {
 	var appController AppController
 	var sender senderModel
 	var receiver receiverModel
@@ -41,7 +41,7 @@ func InitialModel(m mode, port int) model {
 		appController = senderApp.NewApp(&discovery.MDNSAdapter{})
 		sender = initSenderModel()
 	case Receiver:
-		appController = receiverApp.NewApp(port)
+		appController = receiverApp.NewApp(port, outputPath)
 		receiver = initReceiverModel(port)
 	}
 

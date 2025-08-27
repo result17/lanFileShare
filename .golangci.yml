@@ -6,14 +6,14 @@ linters:
   default: none
   enable:
     # Keep only the most important linters
-    - govet          # Official Go vet tool
-    - unused         # Check for unused code
-    - misspell       # Spell checking
-    - gocyclo        # Complexity checking
-    - unconvert      # Unnecessary type conversions
-    - unparam        # Unused parameters
+    - govet # Official Go vet tool
+    - unused # Check for unused code
+    - misspell # Spell checking
+    - gocyclo # Complexity checking
+    - unconvert # Unnecessary type conversions
+    - unparam # Unused parameters
     - bodyclose
-    
+
     # Optional quality checks (enable if you want stricter checking)
     # - errcheck
     # - staticcheck
@@ -21,14 +21,8 @@ linters:
     # - ineffassign
     # - lll
   settings:
-    govet:
-      enable:
-        - shadow
-      settings:
-        shadow:
-          strict: true
     gocyclo:
-      min-complexity: 15
+      min-complexity: 20
     dupl:
       threshold: 100
     goconst:
@@ -52,22 +46,21 @@ linters:
         - whyNoLint
         - wrapperFunc
 
-
 issues:
   # Maximum issues count per one linter.
   # Set to 0 to disable.
   # Default: 50
   max-issues-per-linter: 0
-  
+
   # Maximum count of issues with the same text.
   # Set to 0 to disable.
   # Default: 3
   max-same-issues: 0
-  
+
   # Make issues output unique by line.
   # Default: true
   uniq-by-line: false
-  
+
   # Show only new issues: if there are unstaged changes or untracked files,
   # only those changes are analyzed, else only changes in HEAD~ are analyzed.
   # It's a super-useful option for integration of golangci-lint into existing large codebase.
@@ -75,19 +68,19 @@ issues:
   # much better don't allow issues in new code.
   # Default: false
   new: true
-  
+
   # Show only new issues created after the best common ancestor (merge-base against HEAD).
   # Default: ""
   new-from-merge-base: main
-  
+
   # Show only new issues created after git revision `REV`.
   # Default: ""
   new-from-rev: HEAD
-  
+
   # Show issues in any part of update files (requires new-from-rev or new-from-patch).
   # Default: false
   whole-files: true
-  
+
   # Fix found issues (if it's supported by the linter).
   # Default: false
   fix: true

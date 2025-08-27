@@ -9,6 +9,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rescp17/lanFileSharer/pkg/crypto"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -86,6 +87,7 @@ func processCandidates(t *testing.T, ctx context.Context, conn CommonConnection,
 	}
 }
 
+//nolint:gocyclo // Test function complexity is acceptable
 func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	const testTimeout = 20 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -142,7 +144,7 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 	if sc, ok := senderConn.(*SenderConn); ok {
 		sc.SetSignaler(signaler)
 	} else {
-		t.Fatal("Failed to cast senderConn to *SenderConn")
+		require.Fail(t, "Failed to cast senderConn to *SenderConn")
 	}
 
 	// The Sender's OnICECandidate will call the required SendICECandidate method
@@ -212,7 +214,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		}()
 
 		// This will create offer, send it, and wait for the answer
-		if err := senderConn.Establish(ctx, nil); err != nil {
+		// Create empty FileStructureManager for testing
+		emptyFSM := transfer.NewFileStructureManager()
+		if err := senderConn.Establish(ctx, emptyFSM); err != nil {
 			select {
 			case errChan <- fmt.Errorf("sender failed to establish connection: %w", err):
 			default:
@@ -229,9 +233,9 @@ func TestConnectionHandShake_CorrectArchitecture(t *testing.T) {
 		t.Log("SUCCESS: Message received successfully.")
 		close(done)
 	case err := <-errChan:
-		t.Fatalf("A goroutine reported an error: %v", err)
+		require.Fail(t, "A goroutine reported an error", err)
 	case <-ctx.Done():
-		t.Fatal("Test timed out waiting for message")
+		require.Fail(t, "Test timed out waiting for message")
 	}
 
 	wg.Wait()

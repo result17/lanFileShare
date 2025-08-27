@@ -12,7 +12,7 @@ type FileNode struct {
 	Name     string     `json:"name"`
 	IsDir    bool       `json:"is_dir"`
 	Size     int64      `json:"size"`
-	MimeType string     `json:"mite_type,omitempty"`
+	MimeType string     `json:"mime_type,omitempty"`
 	Checksum string     `json:"checksum,omitempty"`
 	Children []FileNode `json:"children,omitempty"`
 	Path     string     `json:"-"`
@@ -51,8 +51,9 @@ func CreateNode(path string) (FileNode, error) {
 		mime, err := mimetype.DetectFile(path)
 		if err != nil {
 			node.MimeType = "application/octet-stream"
+		} else {
+			node.MimeType = mime.String()
 		}
-		node.MimeType = mime.String()
 	}
 	checksum, err := node.CalcChecksum()
 	if err != nil {

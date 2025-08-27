@@ -19,6 +19,7 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/app"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
+	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
@@ -37,16 +38,45 @@ type App struct {
 	activeConn           webrtcPkg.ReceiverConnection
 	connMu               sync.Mutex
 	errChan              chan error
+	outputPath           string
+
+	// File reception management
+	fileReceiver *FileReceiver
+	receiverMu   sync.Mutex
 }
 
 // NewApp creates a new receiver application instance.
-func NewApp(port int) *App {
+func NewApp(port int, outputPath string) *App {
 	uiMessages := make(chan tea.Msg, 10)
 	stateManager := app.NewSingleRequestManager()
 	apiHandler := api.NewAPI(uiMessages, stateManager)
 
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
+
+	exists, isDir, err := util.CheckDirectory(outputPath)
+
+	var path string
+	if err != nil || !exists || !isDir {
+		if err != nil {
+			slog.Error("Failed to check output directory", "error", err)
+		} else if !exists {
+			slog.Error("Output directory does not exist", "path", outputPath)
+		} else if !isDir {
+			slog.Error("Output path exists but is not a directory", "path", outputPath)
+		}
+
+		// Fallback to current working directory
+		path, err = os.Getwd()
+		if err != nil {
+			slog.Error("Failed to get current working directory", "error", err)
+			return nil
+		}
+		slog.Info("Using current working directory as output path", "path", path)
+	} else {
+		path = outputPath
+		slog.Info("Using specified output directory", "path", path)
+	}
 
 	return &App{
 		guard:                concurrency.NewConcurrencyGuard(),
@@ -58,6 +88,7 @@ func NewApp(port int) *App {
 		stateManager:         stateManager,
 		inboundCandidateChan: make(chan webrtc.ICECandidateInit, 10),
 		errChan:              make(chan error, 1),
+		outputPath:           path,
 	}
 }
 
@@ -120,8 +151,10 @@ func (a *App) Run(ctx context.Context) error {
 				}()
 			case receiver.FileRequestRejected:
 				slog.Info("User rejected file transfer.")
-				err := a.stateManager.SetDecision(app.Rejected)
-				return fmt.Errorf("file request rejected: %w", err)
+				if err := a.stateManager.SetDecision(app.Rejected); err != nil {
+					slog.Error("Failed to set decision", "error", err)
+				}
+				continue
 			default:
 				slog.Warn("Received unhandled app event", "event", event)
 			}
@@ -135,7 +168,7 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 	a.uiMessages <- appevents.Error{Err: fmt.Errorf("%s: %w", baseMessage, err)}
 }
 
-// handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
+//nolint:gocyclo // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
 func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	slog.Info("User accepted file transfer. Preparing to receive...")
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -144,6 +177,17 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	if err := a.stateManager.SetDecision(app.Accepted); err != nil {
 		a.sendAndLogError("Failed to set decision", err)
 		return err
+	}
+
+	// Get signed files information to determine expected file count
+	signedFiles, err := a.stateManager.GetSignedFiles()
+	expectedFileCount := 0
+	if err != nil {
+		slog.Warn("Could not get signed files information", "error", err)
+		// Continue without setting expected files - fallback behavior
+	} else if signedFiles != nil {
+		expectedFileCount = len(signedFiles.Files)
+		slog.Info("Expected file count determined", "count", expectedFileCount)
 	}
 
 	webrtcAPI := webrtcPkg.NewWebrtcAPI()
@@ -182,6 +226,33 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		}
 	})
 
+	// Set up data channel handler for file reception
+	receiverConn.Peer().OnDataChannel(func(dc *webrtc.DataChannel) {
+		slog.Info("Data channel opened for file reception", "label", dc.Label())
+
+		dc.OnOpen(func() {
+			slog.Info("File transfer data channel opened")
+			a.uiMessages <- receiver.StatusUpdateMsg{Message: "Starting file reception..."}
+		})
+
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			if err := a.handleFileChunk(msg.Data); err != nil {
+				slog.Error("Failed to handle file chunk", "error", err)
+				a.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Error receiving file: %v", err)}
+			}
+		})
+
+		dc.OnError(func(err error) {
+			slog.Error("Data channel error", "error", err)
+			a.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Data channel error: %v", err)}
+		})
+
+		dc.OnClose(func() {
+			slog.Info("File transfer data channel closed")
+			a.uiMessages <- receiver.StatusUpdateMsg{Message: "File transfer completed"}
+		})
+	})
+
 	answer, err := receiverConn.HandleOfferAndCreateAnswer(offer)
 	if err != nil {
 		a.sendAndLogError("Failed to create answer", err)
@@ -199,7 +270,7 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	}()
 
 	if err := hctx.Err(); err != nil {
-		slog.Warn("Handshake cancelled or timed out before sending answer.", "error", err)
+		slog.Warn("Handshake canceled or timed out before sending answer.", "error", err)
 		return err
 	}
 	a.setActiveConn(receiverConn)
@@ -291,4 +362,22 @@ func (a *App) setActiveConn(conn webrtcPkg.ReceiverConnection) {
 			slog.Error("Failed to close old connection", "error", err)
 		}
 	}
+}
+
+// handleFileChunk processes incoming file chunk messages
+func (a *App) handleFileChunk(data []byte) error {
+	a.receiverMu.Lock()
+	defer a.receiverMu.Unlock()
+
+	// Initialize file receiver if not exists
+	if a.fileReceiver == nil {
+		a.fileReceiver = NewFileReceiver(a.outputPath, a.uiMessages)
+
+		// Set expected file count if available
+		if signedFiles, err := a.stateManager.GetSignedFiles(); err == nil && signedFiles != nil {
+			a.fileReceiver.SetExpectedFiles(len(signedFiles.Files))
+		}
+	}
+
+	return a.fileReceiver.ProcessChunk(data)
 }

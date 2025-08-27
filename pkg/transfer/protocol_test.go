@@ -2,6 +2,9 @@ package transfer
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestJSONSerializer(t *testing.T) {
@@ -28,35 +31,18 @@ func TestJSONSerializer(t *testing.T) {
 
 	// Test serialization
 	data, err := serializer.Marshal(originalMsg)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
+	require.NoError(t, err, "Marshal failed")
 
 	// Test deserialization
 	deserializedMsg, err := serializer.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
+	require.NoError(t, err, "Unmarshal failed")
 
 	// Verify data consistency
-	if deserializedMsg.Type != originalMsg.Type {
-		t.Errorf("Type mismatch: expected %s, got %s", originalMsg.Type, deserializedMsg.Type)
-	}
-
-	if deserializedMsg.FileID != originalMsg.FileID {
-		t.Errorf("FileID mismatch: expected %s, got %s", originalMsg.FileID, deserializedMsg.FileID)
-	}
-
-	if string(deserializedMsg.Data) != string(originalMsg.Data) {
-		t.Errorf("Data mismatch: expected %s, got %s", string(originalMsg.Data), string(deserializedMsg.Data))
-	}
+	assert.Equal(t, originalMsg.Type, deserializedMsg.Type, "Type mismatch")
+	assert.Equal(t, originalMsg.FileID, deserializedMsg.FileID, "FileID mismatch")
+	assert.Equal(t, string(originalMsg.Data), string(deserializedMsg.Data), "Data mismatch")
 
 	// Test serializer properties
-	if serializer.Name() != "json" {
-		t.Errorf("Name should be 'json', got %s", serializer.Name())
-	}
-
-	if serializer.IsBinary() {
-		t.Error("JSON serializer should not be binary")
-	}
+	assert.Equal(t, "json", serializer.Name(), "Name should be 'json'")
+	assert.False(t, serializer.IsBinary(), "JSON serializer should not be binary")
 }

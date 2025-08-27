@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/pion/webrtc/v4"
+	"github.com/rescp17/lanFileSharer/pkg/crypto"
 )
 
 // Decision is the type for user's decision.
@@ -19,6 +20,7 @@ const (
 // RequestState holds all the necessary information for a single file transfer request.
 type RequestState struct {
 	Offer              webrtc.SessionDescription
+	SignedFiles        *crypto.SignedFileStructure // Store signed files information
 	DecisionChan       chan Decision
 	AnswerChan         chan webrtc.SessionDescription
 	CandidateChan      chan webrtc.ICECandidateInit
@@ -42,7 +44,7 @@ func NewSingleRequestManager() *SingleRequestManager {
 
 // CreateRequest finishes initializing the request state created by SetOffer.
 // It returns the decision channel for the caller to wait on.
-func (m *SingleRequestManager) CreateRequest(offer webrtc.SessionDescription) (<-chan Decision, error) {
+func (m *SingleRequestManager) CreateRequest(offer webrtc.SessionDescription, signedFiles *crypto.SignedFileStructure) (<-chan Decision, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -52,6 +54,7 @@ func (m *SingleRequestManager) CreateRequest(offer webrtc.SessionDescription) (<
 
 	m.state = &RequestState{
 		Offer:         offer,
+		SignedFiles:   signedFiles,
 		DecisionChan:  make(chan Decision, 1),
 		AnswerChan:    make(chan webrtc.SessionDescription, 1),
 		CandidateChan: make(chan webrtc.ICECandidateInit, 10),
@@ -70,6 +73,18 @@ func (m *SingleRequestManager) GetOffer() (webrtc.SessionDescription, error) {
 		return webrtc.SessionDescription{}, errors.New("no active request state")
 	}
 	return m.state.Offer, nil
+}
+
+// GetSignedFiles retrieves the currently stored signed files information.
+func (m *SingleRequestManager) GetSignedFiles() (*crypto.SignedFileStructure, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state == nil {
+		return nil, errors.New("no active request")
+	}
+
+	return m.state.SignedFiles, nil
 }
 
 // SetDecision records the user's decision and sends it to the waiting handler.

@@ -16,6 +16,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/concurrency"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/transfer"
 	webrtcPkg "github.com/rescp17/lanFileSharer/pkg/webrtc"
 	"golang.org/x/sync/errgroup"
 )
@@ -31,6 +32,13 @@ type App struct {
 	webrtcAPI       *webrtcPkg.WebrtcAPI
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
+
+	// Transfer control
+	currentTransferManager *transfer.UnifiedTransferManager
+	transferMu             sync.RWMutex // Protects currentTransferManager
+
+	// Note: Removed fileStructure field for stateless design
+	// Each transfer will create its own FileStructureManager
 }
 
 // NewApp creates a new sender application instance.
@@ -59,6 +67,30 @@ func (a *App) AppEvents() chan<- appevents.AppEvent {
 	return a.appEvents
 }
 
+// prepareFilesForTransfer creates a new FileStructureManager for a specific transfer
+// This function is stateless and creates a fresh manager for each transfer
+func (a *App) prepareFilesForTransfer(files []fileInfo.FileNode) (*transfer.FileStructureManager, error) {
+	// Create a new FileStructureManager for this transfer
+	fileStructure := transfer.NewFileStructureManager()
+
+	// Add files to the new manager
+	for _, file := range files {
+		if err := fileStructure.AddFileNode(&file); err != nil {
+			return nil, fmt.Errorf("failed to add file %s: %w", file.Path, err)
+		}
+	}
+
+	slog.Info("Files prepared for sending",
+		"fileCount", fileStructure.GetFileCount(),
+		"dirCount", fileStructure.GetDirCount(),
+		"totalSize", fileStructure.GetTotalSize())
+
+	return fileStructure, nil
+}
+
+// Note: GetFileStructure method removed as part of stateless design
+// Each transfer now creates its own FileStructureManager
+
 // Run starts the application's main event loop.
 func (a *App) Run(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
@@ -74,11 +106,21 @@ func (a *App) Run(ctx context.Context) error {
 				// Wait for any active transfers to complete gracefully
 				a.transferWG.Wait()
 				return nil
-			case event := <-a.appEvents:
+			case event, ok := <-a.appEvents:
+				if !ok {
+					slog.Info("App event channel closed")
+					return nil
+				}
 				switch e := event.(type) {
 				case sender.SendFilesMsg:
 					// Show files to users and start the transfer process
 					a.StartSendProcess(ctx, e.Receiver, e.Files)
+				case sender.PauseTransferMsg:
+					a.handlePauseTransfer()
+				case sender.ResumeTransferMsg:
+					a.handleResumeTransfer()
+				case sender.CancelTransferMsg:
+					a.handleCancelTransfer()
 				}
 			}
 		}
@@ -115,6 +157,13 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 // StartSendProcess is the main entry point for starting a file transfer.
 func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
 	task := func(taskCtx context.Context) error {
+		// Create a new FileStructureManager for this transfer (stateless)
+		fileStructure, err := a.prepareFilesForTransfer(files)
+		if err != nil {
+			return fmt.Errorf("failed to prepare files: %w", err)
+		}
+		// fileStructure will be garbage collected after this function returns
+
 		// Use the shorter of the two timeouts: main context or transfer timeout
 		transferCtx, cancel := context.WithTimeout(taskCtx, a.transferTimeout)
 		defer cancel()
@@ -126,7 +175,7 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Creating secure connection..."}
 
 		config := webrtcPkg.Config{}
-		webrtcConn, err := a.webrtcAPI.NewSenderConnection(transferCtx, config, a.apiClient, receiverURL)
+		webrtcConn, err := a.webrtcAPI.NewSenderConnectionWithProgress(transferCtx, config, a.apiClient, receiverURL, a)
 		if err != nil {
 			return fmt.Errorf("failed to create webrtc connection: %w", err)
 		}
@@ -137,15 +186,15 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 		}()
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Establishing connection..."}
-		if err := webrtcConn.Establish(transferCtx, files); err != nil {
+		if err := webrtcConn.Establish(transferCtx, fileStructure); err != nil {
 			return fmt.Errorf("could not establish webrtc connection: %w", err)
 		}
 
 		a.uiMessages <- sender.StatusUpdateMsg{Message: "Connection established. Preparing to send files..."}
 
-		// TODO: Add actual file transfer logic over the WebRTC connection
+		transferFiles := fileStructure.GetAllFileEntities()
 
-		if err := webrtcConn.SendFiles(transferCtx, files); err != nil {
+		if err := webrtcConn.SendFiles(transferCtx, transferFiles, a.serviceID); err != nil {
 			return fmt.Errorf("failed to send files: %w", err)
 		}
 
@@ -166,4 +215,96 @@ func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceIn
 			a.uiMessages <- sender.TransferCompleteMsg{}
 		}
 	}()
+}
+
+// handlePauseTransfer pauses the current transfer
+func (a *App) handlePauseTransfer() {
+	a.transferMu.RLock()
+	utm := a.currentTransferManager
+	a.transferMu.RUnlock()
+
+	if utm == nil {
+		slog.Warn("No active transfer to pause")
+		return
+	}
+
+	if err := utm.PauseSession(); err != nil {
+		slog.Error("Failed to pause transfer", "error", err)
+		a.uiMessages <- appevents.Error{Err: fmt.Errorf("failed to pause transfer: %w", err)}
+		return
+	}
+
+	slog.Info("Transfer paused by user")
+	a.uiMessages <- sender.TransferPausedMsg{}
+}
+
+// handleResumeTransfer resumes the current transfer
+func (a *App) handleResumeTransfer() {
+	a.transferMu.RLock()
+	utm := a.currentTransferManager
+	a.transferMu.RUnlock()
+
+	if utm == nil {
+		slog.Warn("No active transfer to resume")
+		return
+	}
+
+	if err := utm.ResumeSession(); err != nil {
+		slog.Error("Failed to resume transfer", "error", err)
+		a.uiMessages <- appevents.Error{Err: fmt.Errorf("failed to resume transfer: %w", err)}
+		return
+	}
+
+	slog.Info("Transfer resumed by user")
+	a.uiMessages <- sender.TransferResumedMsg{}
+}
+
+// handleCancelTransfer cancels the current transfer
+func (a *App) handleCancelTransfer() {
+	a.transferMu.RLock()
+	utm := a.currentTransferManager
+	a.transferMu.RUnlock()
+
+	if utm == nil {
+		slog.Warn("No active transfer to cancel")
+		return
+	}
+
+	if err := utm.CancelSession(); err != nil {
+		slog.Error("Failed to cancel transfer", "error", err)
+		a.uiMessages <- appevents.Error{Err: fmt.Errorf("failed to cancel transfer: %w", err)}
+		return
+	}
+
+	slog.Info("Transfer cancelled by user")
+	a.uiMessages <- sender.TransferCancelledMsg{}
+}
+
+// SetTransferManager sets the current transfer manager (implements ProgressSignaler)
+func (a *App) SetTransferManager(utm *transfer.UnifiedTransferManager) {
+	a.transferMu.Lock()
+	defer a.transferMu.Unlock()
+	a.currentTransferManager = utm
+}
+
+// SendProgressUpdate implements the ProgressSignaler interface
+func (a *App) SendProgressUpdate(totalFiles, completedFiles int, totalBytes, transferredBytes int64,
+	currentFile string, transferRate float64, eta string, overallProgress float64) {
+
+	// Send progress update to UI
+	select {
+	case a.uiMessages <- sender.ProgressUpdateMsg{
+		TotalFiles:       totalFiles,
+		CompletedFiles:   completedFiles,
+		TotalBytes:       totalBytes,
+		TransferredBytes: transferredBytes,
+		CurrentFile:      currentFile,
+		TransferRate:     transferRate,
+		ETA:              eta,
+		OverallProgress:  overallProgress,
+	}:
+	default:
+		// Don't block if UI channel is full
+		slog.Debug("UI channel full, skipping progress update")
+	}
 }
