@@ -33,6 +33,8 @@ type App struct {
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
 
+	selectedReceiver discovery.ServiceInfo
+
 	// Transfer control
 	currentTransferManager *transfer.UnifiedTransferManager
 	transferMu             sync.RWMutex // Protects currentTransferManager
@@ -112,9 +114,11 @@ func (a *App) Run(ctx context.Context) error {
 					return nil
 				}
 				switch e := event.(type) {
+				case sender.ReceiverSelectedMsg:
+					a.handleReceiverSelected(e.Receiver)
 				case sender.SendFilesMsg:
 					// Show files to users and start the transfer process
-					a.StartSendProcess(ctx, e.Receiver, e.Files)
+					a.StartSendProcess(ctx, a.selectedReceiver, e.Files)
 				case sender.PauseTransferMsg:
 					a.handlePauseTransfer()
 				case sender.ResumeTransferMsg:
@@ -126,6 +130,10 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	})
 	return g.Wait()
+}
+
+func (a *App) handleReceiverSelected(receiver discovery.ServiceInfo) {
+	a.selectedReceiver = receiver
 }
 
 // runDiscovery begins the process of finding receivers on the network.

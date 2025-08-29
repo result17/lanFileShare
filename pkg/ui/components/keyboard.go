@@ -52,7 +52,6 @@ type KeyBinding struct {
 
 // KeyboardManager manages keyboard shortcuts and navigation
 type KeyboardManager struct {
-	bindings        map[string]KeyBinding
 	contextBindings map[string][]KeyBinding
 	globalBindings  []KeyBinding
 	currentContext  string
@@ -66,7 +65,6 @@ type KeyboardManager struct {
 // NewKeyboardManager creates a new keyboard manager
 func NewKeyboardManager() *KeyboardManager {
 	km := &KeyboardManager{
-		bindings:        make(map[string]KeyBinding),
 		contextBindings: make(map[string][]KeyBinding),
 		globalBindings:  make([]KeyBinding, 0),
 		enabled:         true,
@@ -141,7 +139,7 @@ func (km *KeyboardManager) initializeDefaultBindings() {
 
 	// Register all bindings
 	for _, binding := range globalBindings {
-		km.AddBinding(binding)
+		km.AddGlobalBinding(binding)
 	}
 
 	for context, bindings := range contextBindings {
@@ -151,21 +149,14 @@ func (km *KeyboardManager) initializeDefaultBindings() {
 	}
 }
 
-// AddBinding adds a new key binding
-func (km *KeyboardManager) AddBinding(binding KeyBinding) {
-	for _, key := range binding.Keys {
-		km.bindings[key] = binding
-	}
-
-	if binding.Global {
-		km.globalBindings = append(km.globalBindings, binding)
-	}
+// AddGlobalBinding adds a new global key binding
+func (km *KeyboardManager) AddGlobalBinding(binding KeyBinding) {
+	binding.Global = true
+	km.globalBindings = append(km.globalBindings, binding)
 }
 
 // AddContextBinding adds a context-specific key binding
 func (km *KeyboardManager) AddContextBinding(context string, binding KeyBinding) {
-	km.AddBinding(binding)
-	
 	if _, exists := km.contextBindings[context]; !exists {
 		km.contextBindings[context] = make([]KeyBinding, 0)
 	}
@@ -189,49 +180,52 @@ func (km *KeyboardManager) ProcessKey(keyMsg tea.KeyMsg) KeyAction {
 	}
 
 	keyStr := keyMsg.String()
-	
-	// Handle key sequences (like vim-style commands)
-	km.keySequence = append(km.keySequence, keyStr)
-	if len(km.keySequence) > km.maxSequenceLen {
-		km.keySequence = km.keySequence[1:]
-	}
 
-	// Try to match key sequences first
-	for i := len(km.keySequence); i > 0; i-- {
-		sequence := strings.Join(km.keySequence[len(km.keySequence)-i:], " ")
-		if binding, exists := km.bindings[sequence]; exists && km.isBindingActive(binding) {
-			km.keySequence = km.keySequence[:0] // Clear sequence on match
-			return binding.Action
+	// Check context-specific bindings first
+	if contextBindings, ok := km.contextBindings[km.currentContext]; ok {
+		for _, binding := range contextBindings {
+			if !binding.Enabled {
+				continue
+			}
+			for _, key := range binding.Keys {
+				if key == keyStr {
+					return binding.Action
+				}
+			}
 		}
 	}
 
-	// Try single key match
-	if binding, exists := km.bindings[keyStr]; exists && km.isBindingActive(binding) {
-		km.keySequence = km.keySequence[:0] // Clear sequence on match
-		return binding.Action
+	// Check global bindings if no context-specific match was found
+	for _, binding := range km.globalBindings {
+		if !binding.Enabled {
+			continue
+		}
+		for _, key := range binding.Keys {
+			if key == keyStr {
+				return binding.Action
+			}
+		}
 	}
-
-	// Clear sequence if no match and it's been too long
-	now := time.Now()
-	if now.Sub(km.lastKeyTime) > time.Second {
-		km.keySequence = km.keySequence[:0]
-	}
-	km.lastKeyTime = now
 
 	return KeyActionNone
 }
 
-// isBindingActive checks if a binding is active in the current context
-func (km *KeyboardManager) isBindingActive(binding KeyBinding) bool {
-	if !binding.Enabled {
-		return false
+func (km *KeyboardManager) ProcessSpecAction(action KeyAction) tea.KeyMsg {
+	switch action {
+	case KeyActionNavigateUp:
+		return tea.KeyMsg{
+			Type: tea.KeyUp,
+		}
+	case KeyActionNavigateDown:
+		return tea.KeyMsg{
+			Type: tea.KeyDown,
+		}
+	case KeyActionSelect:
+		return tea.KeyMsg{
+			Type: tea.KeyEnter,
+		}
 	}
-
-	if binding.Global {
-		return true
-	}
-
-	return binding.Context == km.currentContext
+	return tea.KeyMsg{}
 }
 
 // GetActiveBindings returns all active bindings for the current context
@@ -259,10 +253,34 @@ func (km *KeyboardManager) GetActiveBindings() []KeyBinding {
 
 // EnableBinding enables or disables a specific binding
 func (km *KeyboardManager) EnableBinding(keys []string, enabled bool) {
-	for _, key := range keys {
-		if binding, exists := km.bindings[key]; exists {
-			binding.Enabled = enabled
-			km.bindings[key] = binding
+	keyMap := make(map[string]struct{})
+	for _, k := range keys {
+		keyMap[k] = struct{}{}
+	}
+
+	// Helper function to check for key match
+	hasKey := func(bindingKeys []string) bool {
+		for _, bk := range bindingKeys {
+			if _, ok := keyMap[bk]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Update global bindings
+	for i, binding := range km.globalBindings {
+		if hasKey(binding.Keys) {
+			km.globalBindings[i].Enabled = enabled
+		}
+	}
+
+	// Update context bindings
+	for context, bindings := range km.contextBindings {
+		for i, binding := range bindings {
+			if hasKey(binding.Keys) {
+				km.contextBindings[context][i].Enabled = enabled
+			}
 		}
 	}
 }
@@ -384,7 +402,7 @@ func (km *KeyboardManager) RenderFullHelp() string {
 		for _, binding := range bindings {
 			keys := strings.Join(binding.Keys, ", ")
 			result.WriteString(fmt.Sprintf("│ %s %s\n",
-				style.HighlightFontStyle.Render(fmt.Sprintf("%-15s", keys)),
+				style.HighlightFontStyle.Render(fmt.Sprintf("%-" + "15s", keys)),
 				binding.Description))
 		}
 	}

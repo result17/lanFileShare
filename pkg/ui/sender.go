@@ -162,9 +162,9 @@ func initSenderModel() senderModel {
 		quickTip:             quickTip,
 		retryDialog:          retryDialog,
 		statsCollector:       statsCollector,
-		realTimeStats:        realTimeStats,
-		rateChart:            rateChart,
-		sparkLine:            sparkLine,
+	realTimeStats:        realTimeStats,
+	rateChart:            rateChart,
+	sparkLine:            sparkLine,
 		keyboardManager:      keyboardManager,
 		breadcrumb:           breadcrumb,
 		statusBar:            statusBar,
@@ -190,7 +190,8 @@ func (m *model) initSender() tea.Cmd {
 
 func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
 	m.sender.services = services
-	rows := []table.Row{}
+
+rows := []table.Row{}
 	for index, svc := range services {
 		rows = append(rows, table.Row{
 			strconv.Itoa(index), svc.Name, svc.Addr.String(), strconv.Itoa(svc.Port),
@@ -326,10 +327,14 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var spinCmd tea.Cmd
-	m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
+	if m.sender.state == findingReceivers {
+		var spinCmd tea.Cmd
+		m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
 
-	return m, tea.Batch(cmd, spinCmd)
+		return m, tea.Batch(cmd, spinCmd)
+	}
+
+	return m, cmd
 }
 
 //nolint:gocyclo
@@ -500,7 +505,7 @@ func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 		}
 	}
 	// Update the table on every message to handle navigation
-	m.sender.table, cmd = m.sender.table.Update(msg)
+	// m.sender.table, cmd = m.sender.table.Update(msg)
 	return cmd
 }
 
@@ -509,8 +514,7 @@ func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
 	case multiFilePicker.SelectedFileNodeMsg:
 		// The app will now send messages about the transfer progress
 		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
-			Receiver: m.sender.selectedService,
-			Files:    msg.Files,
+			Files: msg.Files,
 		}
 	}
 	newFpModel, cmd := m.sender.fp.Update(msg)
@@ -610,7 +614,7 @@ func (m *model) senderView() string {
 	// Status bar at the bottom (if layout allows)
 	if m.sender.responsiveLayout.GetConfig().ShowStatusBar {
 		result.WriteString("\n")
-		m.updateStatusBar()
+		m.sender.updateStatusBar()
 		result.WriteString(m.sender.statusBar.Render())
 	}
 
@@ -1054,10 +1058,13 @@ func (m *model) handleDiscoveryAction(action components.KeyAction) tea.Cmd {
 func (m *model) handleSelectionAction(action components.KeyAction) tea.Cmd {
 	switch action {
 	case components.KeyActionNavigateUp, components.KeyActionNavigateDown:
-		// Let the table handle navigation
-		return nil
+		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
+		var cmd tea.Cmd
+		m.sender.table, cmd = m.sender.table.Update(keyMsg)
+		return cmd
 	case components.KeyActionSelect:
-		// Select current receiver
+		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
+		m.updateSelectingReceiverState(keyMsg)
 		return nil
 	case components.KeyActionBack:
 		return m.initSender()
@@ -1144,58 +1151,58 @@ func (m *model) handlePauseResume() tea.Cmd {
 }
 
 // updateStatusBar updates the status bar with current information
-func (m *model) updateStatusBar() {
+func (s *senderModel) updateStatusBar() {
 	// Clear previous items
-	m.sender.statusBar.Clear()
+	s.statusBar.Clear()
 
 	// Left side - current state and progress
-	switch m.sender.state {
+	switch s.state {
 	case findingReceivers:
-		m.sender.statusBar.AddLeftItem("Discovering...", "🔍", style.FileStyle)
+		s.statusBar.AddLeftItem("Discovering...", "🔍", style.FileStyle)
 	case selectingReceiver:
-		m.sender.statusBar.AddLeftItem(fmt.Sprintf("%d receivers found", len(m.sender.services)), "📡", style.FileStyle)
+		s.statusBar.AddLeftItem(fmt.Sprintf("%d receivers found", len(s.services)), "📡", style.FileStyle)
 	case selectingFiles:
-		m.sender.statusBar.AddLeftItem("Select files", "📁", style.FileStyle)
+		s.statusBar.AddLeftItem("Select files", "📁", style.FileStyle)
 	case waitingForReceiverConfirmation:
-		m.sender.statusBar.AddLeftItem("Waiting for confirmation", "⏳", style.FileStyle)
+		s.statusBar.AddLeftItem("Waiting for confirmation", "⏳", style.FileStyle)
 	case sendingFiles:
-		if m.sender.transferProgress != nil {
-			progress := fmt.Sprintf("%.1f%%", m.sender.transferProgress.OverallProgress)
-			m.sender.statusBar.AddLeftItem(progress, "🚀", style.SuccessStyle)
+		if s.transferProgress != nil {
+			progress := fmt.Sprintf("%.1f%%", s.transferProgress.OverallProgress)
+			s.statusBar.AddLeftItem(progress, "🚀", style.SuccessStyle)
 		} else {
-			m.sender.statusBar.AddLeftItem("Transferring", "🚀", style.FileStyle)
+			s.statusBar.AddLeftItem("Transferring", "🚀", style.FileStyle)
 		}
 	case transferPaused:
-		m.sender.statusBar.AddLeftItem("Paused", "⏸️", lipgloss.NewStyle().Foreground(lipgloss.Color("214")))
+		s.statusBar.AddLeftItem("Paused", "⏸️", lipgloss.NewStyle().Foreground(lipgloss.Color("214")))
 	case transferComplete:
-		m.sender.statusBar.AddLeftItem("Complete", "✅", style.SuccessStyle)
+		s.statusBar.AddLeftItem("Complete", "✅", style.SuccessStyle)
 	case transferFailed:
-		m.sender.statusBar.AddLeftItem("Failed", "❌", style.ErrorStyle)
+		s.statusBar.AddLeftItem("Failed", "❌", style.ErrorStyle)
 	}
 
 	// Center - current file or receiver info
-	if m.sender.state == sendingFiles && m.sender.transferProgress != nil && m.sender.transferProgress.CurrentFile != "" {
-		filename := m.sender.transferProgress.CurrentFile
+	if s.state == sendingFiles && s.transferProgress != nil && s.transferProgress.CurrentFile != "" {
+		filename := s.transferProgress.CurrentFile
 		if len(filename) > 30 {
 			filename = filename[:27] + "..."
 		}
-		m.sender.statusBar.AddCenterItem(filename, "📄", style.FileStyle)
-	} else if m.sender.selectedService.Name != "" {
-		receiverName := m.sender.selectedService.Name
+		s.statusBar.AddCenterItem(filename, "📄", style.FileStyle)
+	} else if s.selectedService.Name != "" {
+		receiverName := s.selectedService.Name
 		if len(receiverName) > 20 {
 			receiverName = receiverName[:17] + "..."
 		}
-		m.sender.statusBar.AddCenterItem(receiverName, "📡", style.HighlightFontStyle)
+		s.statusBar.AddCenterItem(receiverName, "📡", style.HighlightFontStyle)
 	}
 
 	// Right side - transfer rate or time
-	if m.sender.state == sendingFiles && m.sender.transferProgress != nil {
-		rate := formatRate(m.sender.transferProgress.TransferRate)
-		m.sender.statusBar.AddRightItem(rate, "⚡", style.FileStyle)
+	if s.state == sendingFiles && s.transferProgress != nil {
+		rate := formatRate(s.transferProgress.TransferRate)
+		s.statusBar.AddRightItem(rate, "⚡", style.FileStyle)
 	} else {
 		// Show current time
 		currentTime := time.Now().Format("15:04:05")
-		m.sender.statusBar.AddRightItem(currentTime, "🕐", style.FileStyle)
+		s.statusBar.AddRightItem(currentTime, "🕐", style.FileStyle)
 	}
 }
 

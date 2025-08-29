@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
@@ -12,6 +13,16 @@ import (
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
 )
+
+// tickMsg is a message sent periodically to trigger UI updates.
+type tickMsg time.Time
+
+// tick is a command that sends a tickMsg after a specified duration.
+func tick(duration time.Duration) tea.Cmd {
+	return tea.Tick(duration, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 type Mode int
 
@@ -82,7 +93,10 @@ func (m model) Init() tea.Cmd {
 		return appevents.AppFinishedMsg{}
 	}
 
-	return tea.Batch(initCmd, runCmd)
+	// Start the global UI tick
+	tickCmd := tick(time.Second)
+
+	return tea.Batch(initCmd, runCmd, tickCmd)
 }
 
 func (m model) View() string {
@@ -105,14 +119,6 @@ func (m model) View() string {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	// case tea.KeyMsg:
-	// 	switch msg.Type {
-	// 	case tea.KeyCtrlC:
-	// 		if m.cancel != nil {
-	// 			m.cancel()
-	// 		}
-	// 		return m, tea.Quit
-	// 	}
 	case tea.QuitMsg:
 		// This is sent on Ctrl+C by default.
 		if m.cancel != nil {
@@ -124,6 +130,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case appevents.AppFinishedMsg:
 		return m, tea.Quit
+	case tickMsg:
+		// This is our global tick. We can update components that need periodic refresh here.
+		// For example, the status bar time.
+		if m.mode == Sender {
+			m.sender.updateStatusBar()
+		}
+		// Always restart the tick.
+		return m, tick(time.Second)
 	}
 
 	switch m.mode {

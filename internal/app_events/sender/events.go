@@ -8,14 +8,21 @@ import (
 
 // --- App Events (from TUI to App) ---
 
-// SendFilesMsg is an event sent when the user selects a receiver to send files to.
-type SendFilesMsg struct {
+// ReceiverSelectedMsg is an event sent when the user selects a receiver from the list.
+type ReceiverSelectedMsg struct {
 	appevents.Event
 	Receiver discovery.ServiceInfo
-	Files    []fileInfo.FileNode
+}
+
+// SendFilesMsg is an event sent when the user confirms which files to send.
+// The receiver is already known to the app via a prior ReceiverSelectedMsg.
+type SendFilesMsg struct {
+	appevents.Event
+	Files []fileInfo.FileNode
 }
 
 var (
+	_ appevents.AppEvent = (*ReceiverSelectedMsg)(nil)
 	_ appevents.AppEvent = (*SendFilesMsg)(nil)
 )
 
