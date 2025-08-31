@@ -188,18 +188,18 @@ func (m *model) initSender() tea.Cmd {
 	return tea.Batch(m.sender.spinner.Tick, m.listenForAppMessages())
 }
 
-func (m *model) updateReceiverTable(services []discovery.ServiceInfo) {
-	m.sender.services = services
+func (m *senderModel) updateReceiverTable(services []discovery.ServiceInfo) {
+	m.services = services
 
-rows := []table.Row{}
+	rows := []table.Row{}
 	for index, svc := range services {
 		rows = append(rows, table.Row{
 			strconv.Itoa(index), svc.Name, svc.Addr.String(), strconv.Itoa(svc.Port),
 		})
 	}
-	m.sender.table.SetRows(rows)
-	m.sender.table.SetHeight(len(rows) + 1)
-	m.sender.adjustTableCursor(len(rows))
+	m.table.SetRows(rows)
+	m.table.SetHeight(len(rows) + 1)
+	m.adjustTableCursor(len(rows))
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -313,13 +313,13 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle UI events
 	switch m.sender.state {
 	case selectingReceiver:
-		cmd = m.updateSelectingReceiverState(msg)
+		cmd = m.sender.updateSelectingReceiverState(msg)
 	case selectingFiles:
-		cmd = m.updateSelectingFilesState(msg)
+		cmd = m.sender.updateSelectingFilesState(msg)
 	case sendingFiles:
-		cmd = m.updateSendingFilesState(msg)
+		cmd = m.sender.updateSendingFilesState(msg)
 	case transferPaused:
-		cmd = m.updateTransferPausedState(msg)
+		cmd = m.sender.updateTransferPausedState(msg)
 	case transferComplete, transferFailed:
 		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
 			m.sender.reset()
@@ -360,7 +360,7 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 			m.sender.breadcrumb.PopItem()
 		}
 
-		m.updateReceiverTable(msg.Services)
+		m.sender.updateReceiverTable(msg.Services)
 		return m.listenForAppMessages(), true // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
@@ -480,46 +480,51 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 // updateSelectingReceiverState handles UI events for the selectingReceiver state.
-func (m *model) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
+func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	// ... logic for key presses and table updates
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			if len(m.sender.services) > 0 {
-				selectedIndex := m.sender.table.Cursor()
-				if selectedIndex >= 0 && selectedIndex < len(m.sender.services) {
-					m.err = nil // Reset any previous error
-					m.sender.selectedService = m.sender.services[selectedIndex]
-					m.sender.state = selectingFiles
+			if len(m.services) > 0 {
+				selectedIndex := m.table.Cursor()
+				if selectedIndex >= 0 && selectedIndex < len(m.services) {
+					m.selectedService = m.services[selectedIndex]
+					m.state = selectingFiles
 				} else {
 					// This case should ideally not be hit, but good to have for safety
-					err := fmt.Errorf("internal error: cursor %d is out of sync with services list (len %d)", selectedIndex, len(m.sender.services))
-					slog.Error("Cursor out of sync", "error", err)
-					m.err = err
+					slog.Error("Cursor out of sync", "cursor", selectedIndex, "services_len", len(m.services))
 				}
-				_, cmd := m.sender.table.Update(msg)
+				_, cmd := m.table.Update(msg)
 				return cmd
 			}
 		}
 	}
 	// Update the table on every message to handle navigation
-	// m.sender.table, cmd = m.sender.table.Update(msg)
+	// m.table, cmd = m.table.Update(msg)
 	return cmd
 }
 
-func (m *model) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
+func (m *senderModel) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
+
+	// Update file picker
+	newFpModel, fpCmd := m.fp.Update(msg)
+	m.fp = newFpModel.(multiFilePicker.Model)
+
 	switch msg := msg.(type) {
 	case multiFilePicker.SelectedFileNodeMsg:
-		// The app will now send messages about the transfer progress
-		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
-			Files: msg.Files,
-		}
+		// Return command to send files (this will be handled by the parent model)
+		return tea.Cmd(func() tea.Msg {
+			// The actual sending will be handled by the parent model
+			// We just return the file selection command
+			return senderEvent.SendFilesMsg{
+				Files: msg.Files,
+			}
+		})
 	}
-	newFpModel, cmd := m.sender.fp.Update(msg)
-	m.sender.fp = newFpModel.(multiFilePicker.Model)
-	return cmd
+
+	return fpCmd
 }
 
 func (m *model) senderView() string {
@@ -783,7 +788,7 @@ func (m *model) renderTransferPaused() string {
 }
 
 // updateSendingFilesState handles UI events during file transfer
-func (m *model) updateSendingFilesState(msg tea.Msg) tea.Cmd {
+func (m *senderModel) updateSendingFilesState(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "p", "P":
@@ -805,7 +810,7 @@ func (m *model) updateSendingFilesState(msg tea.Msg) tea.Cmd {
 }
 
 // updateTransferPausedState handles UI events when transfer is paused
-func (m *model) updateTransferPausedState(msg tea.Msg) tea.Cmd {
+func (m *senderModel) updateTransferPausedState(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "r", "R", " ":
@@ -1064,7 +1069,7 @@ func (m *model) handleSelectionAction(action components.KeyAction) tea.Cmd {
 		return cmd
 	case components.KeyActionSelect:
 		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
-		m.updateSelectingReceiverState(keyMsg)
+		m.sender.updateSelectingReceiverState(keyMsg)
 		return nil
 	case components.KeyActionBack:
 		return m.initSender()
