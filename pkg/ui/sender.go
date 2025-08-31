@@ -215,8 +215,26 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Handle keyboard input through the keyboard manager
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	var cmd tea.Cmd
+	// Handle UI events first - this ensures multiFilePicker gets the message
+	switch m.sender.state {
+	case selectingFiles:
+		cmd = m.sender.updateSelectingFilesState(msg)
+	case selectingReceiver:
+		cmd = m.sender.updateSelectingReceiverState(msg)
+	case sendingFiles:
+		cmd = m.sender.updateSendingFilesState(msg)
+	case transferPaused:
+		cmd = m.sender.updateTransferPausedState(msg)
+	case transferComplete, transferFailed:
+		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
+			m.sender.reset()
+			return m, m.initSender()
+		}
+	}
+
+	// Handle keyboard input through the keyboard manager for non-file-selection states
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.sender.state != selectingFiles {
 		action := m.sender.keyboardManager.ProcessKey(keyMsg)
 
 		// Handle global actions first
@@ -291,6 +309,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.KeyActionStatsOverview:
 			m.sender.realTimeStats.SetDisplayMode("overview")
 			return m, nil
+
 		case components.KeyActionStatsDetailed:
 			m.sender.realTimeStats.SetDisplayMode("detailed")
 			return m, nil
@@ -307,24 +326,6 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle state-specific actions
 		return m, m.handleStateSpecificAction(action)
-	}
-
-	var cmd tea.Cmd
-	// Handle UI events
-	switch m.sender.state {
-	case selectingReceiver:
-		cmd = m.sender.updateSelectingReceiverState(msg)
-	case selectingFiles:
-		cmd = m.sender.updateSelectingFilesState(msg)
-	case sendingFiles:
-		cmd = m.sender.updateSendingFilesState(msg)
-	case transferPaused:
-		cmd = m.sender.updateTransferPausedState(msg)
-	case transferComplete, transferFailed:
-		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
-			m.sender.reset()
-			return m, m.initSender()
-		}
 	}
 
 	if m.sender.state == findingReceivers {
@@ -507,7 +508,6 @@ func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 }
 
 func (m *senderModel) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
-
 	// Update file picker
 	newFpModel, fpCmd := m.fp.Update(msg)
 	m.fp = newFpModel.(multiFilePicker.Model)

@@ -15,7 +15,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
@@ -399,17 +398,17 @@ func (m Model) View() string {
 	}
 
 	if m.path != "" {
-		s.WriteString(fmt.Sprintf("Browsing: %s\n\n", m.path))
+		s.WriteString(fmt.Sprintf("📂 %s\n\n", m.path))
 	}
 
 	// Table column widths
-	nameWidth := 36
-	typeWidth := 30
-	timeWidth := 20
-	sizeWidth := 16
+	nameWidth := 34
+	typeWidth := 20
+	timeWidth := 19
+	sizeWidth := 14
 
 	// Table header: pad first, then style
-	headerStyle := lipgloss.NewStyle().Bold(true)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
 	s.WriteString(
 		headerStyle.Render(util.PadRight("", 5)) + " " +
 			headerStyle.Render(util.PadRight("Name", nameWidth)) + " " +
@@ -441,41 +440,50 @@ func (m Model) View() string {
 	for i, item := range slice {
 		actualIndex := start + i
 		if m.cursor == actualIndex {
-			s.WriteString(style.CursorStyle.String())
+			s.WriteString("▶ ")
 		} else {
 			s.WriteString("  ")
 		}
 
 		if _, ok := m.selected[item.Path]; ok {
-			s.WriteString(style.SelectedStyle.String())
+			s.WriteString("✓ ")
 		} else {
-			s.WriteString(style.DeselectedStyle.String())
+			s.WriteString("  ")
 		}
 
-		nameStr := item.Name
-		if item.IsDir {
-			nameStr += "/"
-		}
+		// Add emoji based on item type
+		nameStr := m.getIconForItem(item) + " " + item.Name
 
 		// Pad right first, then add style
-		nameCell := util.PadRight(nameStr, nameWidth)
+		nameCell := util.PadRight(nameStr, nameWidth+2) // +2 for emoji and spaces
 		typeCell := util.PadRight(item.Type, typeWidth)
 		timeCell := util.PadRight(item.ModTime, timeWidth)
 		sizeCell := util.PadRight(item.Size, sizeWidth)
 
 		if item.IsDir {
-			nameCell = style.DirStyle.Render(nameCell)
+			nameCell = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true).Render(nameCell)
+			typeCell = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(typeCell)
+		} else {
+			nameCell = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Render(nameCell)
+			typeCell = m.getColorForFileType(item).Render(typeCell)
 		}
-		// For regular files, don't add nameCol.Render, just output the padded nameCell
+
 		s.WriteString(nameCell + " " +
-			timeCell + " " +
-			sizeCell + "" +
+			lipgloss.NewStyle().Foreground(lipgloss.Color("237")).Render(timeCell) + " " +
+			sizeCell + " " +
 			typeCell + "\n\n")
 	}
 
 	// Scroll indicator
 	if len(m.items) > visibleItems {
-		s.WriteString(fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, len(m.items)))
+		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Italic(true)
+		s.WriteString(scrollStyle.Render(fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, len(m.items))))
+	}
+
+	// Footer with selection count
+	if len(m.selected) > 0 {
+		footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+		s.WriteString(footerStyle.Render(fmt.Sprintf("\nSelected: %d file(s)", len(m.selected))))
 	}
 
 	return s.String()
@@ -534,4 +542,110 @@ func (m *Model) visibleItems() int {
 		visible = 8
 	}
 	return visible
+}
+
+// getIconForItem returns the appropriate emoji icon for different file types
+func (m Model) getIconForItem(item displayItem) string {
+	if item.IsDir {
+		return "📁"
+	}
+
+	// Get file extension (convert to lowercase for case-insensitive matching)
+	fileType := strings.ToLower(filepath.Ext(item.Name))
+
+	// Return appropriate icon based on file type
+	switch fileType {
+	case ".txt", ".md", ".log":
+		return "📄"
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp":
+		return "🖼️"
+	case ".mp4", ".avi", ".mkv", ".mov", ".wmv":
+		return "🎥"
+	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
+		return "🎵"
+	case ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2":
+		return "📦"
+	case ".pdf":
+		return "📕"
+	case ".doc", ".docx":
+		return "📄"
+	case ".xls", ".xlsx", ".csv":
+		return "📊"
+	case ".ppt", ".pptx":
+		return "📈"
+	case ".py":
+		return "🐍"
+	case ".go":
+		return "🐹"
+	case ".js", ".ts":
+		return "📜"
+	case ".html", ".htm":
+		return "🌐"
+	case ".css":
+		return "🎨"
+	case ".json":
+		return "🔧"
+	case ".yml", ".yaml":
+		return "⚙️"
+	case ".xml":
+		return "🏗️"
+	case ".sh", ".bash", ".zsh":
+		return "🐚"
+	case ".exe", ".bat", ".cmd":
+		return "⚙️"
+	default:
+		// For MIME type-based icons
+		if item.Type != "" {
+			if strings.HasPrefix(item.Type, "text/") {
+				return "📄"
+			}
+			if strings.HasPrefix(item.Type, "image/") {
+				return "🖼️"
+			}
+			if strings.HasPrefix(item.Type, "audio/") {
+				return "🎵"
+			}
+			if strings.HasPrefix(item.Type, "video/") {
+				return "🎥"
+			}
+			if strings.HasPrefix(item.Type, "application/pdf") {
+				return "📕"
+			}
+			// Default file icon for other types
+			return "📄"
+		}
+		return "📄"
+	}
+}
+
+// getColorForFileType returns appropriate color for different file types
+func (m Model) getColorForFileType(item displayItem) lipgloss.Style {
+	fileType := strings.ToLower(filepath.Ext(item.Name))
+
+	switch fileType {
+	case ".txt", ".md", ".log":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("39")) // Blue
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("133")) // Magenta
+	case ".mp4", ".avi", ".mkv", ".mov", ".wmv":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("124")) // Red
+	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
+	case ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("136")) // Yellow
+	case ".pdf":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("160")) // Red (dark)
+	case ".py", ".go", ".js", ".ts":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("26")) // Cyan
+	case ".html", ".htm":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("34")) // Green
+	case ".json", ".xml":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("60")) // Purple
+	case ".css":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("199")) // Pink
+	case ".exe", ".bat", ".cmd":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("22")) // Dark Green
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("244")) // Gray
+	}
 }
