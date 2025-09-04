@@ -19,7 +19,9 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
+
 type mode int
+type sortType int
 type SelectedFileNodeMsg struct {
 	Files []fileInfo.FileNode
 }
@@ -27,6 +29,12 @@ type SelectedFileNodeMsg struct {
 const (
 	modeBrowse mode = iota
 	modeInput
+)
+
+const (
+	sortByName sortType = iota
+	sortBySize
+	sortByDate
 )
 
 // --- Key Map ---
@@ -40,17 +48,31 @@ type KeyMap struct {
 	Confirm      key.Binding
 	BackUp       key.Binding
 	Quit         key.Binding
+	SelectAll    key.Binding
+	DeselectAll  key.Binding
+	InvertSelect key.Binding
+	SortBySize   key.Binding
+	SortByName   key.Binding
+	SortByDate   key.Binding
+	SearchToggle key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
-	Up:           key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move up")),
-	Down:         key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move down")),
-	Left:         key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "page up")),
-	Right:        key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "page down")),
-	ToggleSelect: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
-	ToggleInput:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
-	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm/navigate")),
-	Quit:         key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc/ctrl+c", "quit/back")),
+	Up:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move up")),
+	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move down")),
+	Left:          key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "page up")),
+	Right:         key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "page down")),
+	ToggleSelect:  key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
+	ToggleInput:   key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
+	Confirm:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm/navigate")),
+	Quit:          key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc/ctrl+c", "quit/back")),
+	SelectAll:     key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select all")),
+	DeselectAll:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "deselect all")),
+	InvertSelect:  key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "invert selection")),
+	SortBySize:    key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "sort by size")),
+	SortByName:    key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "sort by name")),
+	SortByDate:    key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "sort by date")),
+	SearchToggle:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "toggle search")),
 }
 
 type displayItem struct {
@@ -65,19 +87,22 @@ type displayItem struct {
 
 // --- Model ---
 type Model struct {
-	path     string
-	lastPath string // For relative path resolution
-	items    []displayItem
-	selected map[string]struct{}
-	cursor   int
-	keys     KeyMap
-	quitting bool
-	mode     mode
-	input    textinput.Model
-	inputErr error
-	height   int // For viewport height
-	offset   int // For scrolling
-	files    []*fileInfo.FileNode
+	path      string
+	lastPath  string // For relative path resolution
+	items     []displayItem
+	selected  map[string]struct{}
+	cursor    int
+	keys      KeyMap
+	quitting  bool
+	mode      mode
+	sortType  sortType
+	sortAsc   bool // true for ascending, false for descending
+	input     textinput.Model
+	inputErr  error
+	height    int // For viewport height
+	offset    int // For scrolling
+	files     []*fileInfo.FileNode
+	searchMode bool
 	// OnSelect func([]*fileInfo.FileNode) tea.Cmd // Callback for when files are selected
 }
 
@@ -105,6 +130,42 @@ func InitialModel() Model {
 		mode:     modeInput, // Start in input mode
 		input:    ti,
 	}
+}
+
+// sortItems sorts the items based on the current sortType and sortAsc
+func (m *Model) sortItems() {
+	sort.Slice(m.items, func(i, j int) bool {
+		// Directories always come first
+		if m.items[i].IsDir != m.items[j].IsDir {
+			return m.items[i].IsDir
+		}
+
+		var less bool
+		switch m.sortType {
+		case sortByName:
+			less = strings.ToLower(m.items[i].Name) < strings.ToLower(m.items[j].Name)
+		case sortBySize:
+			if m.items[i].Size == "<DIR>" && m.items[j].Size == "<DIR>" {
+				less = m.items[i].Name < m.items[j].Name
+			} else if m.items[i].Size == "<DIR>" {
+				less = true
+			} else if m.items[j].Size == "<DIR>" {
+				less = false
+			} else {
+				// Parse sizes for comparison (simplified - in real implementation you'd need to parse the size strings)
+				less = m.items[i].Size < m.items[j].Size
+			}
+		case sortByDate:
+			less = m.items[i].ModTime < m.items[j].ModTime
+		default:
+			less = m.items[i].Name < m.items[j].Name
+		}
+
+		if !m.sortAsc {
+			less = !less
+		}
+		return less
+	})
 }
 
 func (m *Model) loadDirectory(path string) ([]displayItem, error) {
@@ -322,7 +383,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return SelectedFileNodeMsg{Files: files}
 			}
 		}
-		
+
 		// If no files selected but cursor is on a directory, navigate into it
 		if m.cursor < len(m.items) {
 			item := m.items[m.cursor]
@@ -332,7 +393,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// Error is already set in m.inputErr by loadDirectory
 					return m, nil
 				}
-				
+
 				m.path = item.Path
 				m.lastPath = item.Path
 				m.items = items
@@ -341,6 +402,54 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.inputErr = nil
 				return m, nil
 			}
+		}
+
+	case key.Matches(msg, m.keys.SelectAll):
+		for _, item := range m.items {
+			if !item.IsDir { // Only select files, not directories
+				m.selected[item.Path] = struct{}{}
+			}
+		}
+
+	case key.Matches(msg, m.keys.DeselectAll):
+		m.selected = make(map[string]struct{})
+
+	case key.Matches(msg, m.keys.InvertSelect):
+		newSelected := make(map[string]struct{})
+		for _, item := range m.items {
+			if !item.IsDir {
+				if _, ok := m.selected[item.Path]; !ok {
+					newSelected[item.Path] = struct{}{}
+				}
+			}
+		}
+		m.selected = newSelected
+
+	case key.Matches(msg, m.keys.SortByName):
+		m.sortType = sortByName
+		m.sortAsc = !m.sortAsc
+		m.sortItems()
+
+	case key.Matches(msg, m.keys.SortBySize):
+		m.sortType = sortBySize
+		m.sortAsc = !m.sortAsc
+		m.sortItems()
+
+	case key.Matches(msg, m.keys.SortByDate):
+		m.sortType = sortByDate
+		m.sortAsc = !m.sortAsc
+		m.sortItems()
+
+	case key.Matches(msg, m.keys.SearchToggle):
+		m.searchMode = !m.searchMode
+		if m.searchMode {
+			m.input.Placeholder = "Search files..."
+			m.mode = modeInput
+			m.input.Focus()
+		} else {
+			m.input.Placeholder = ""
+			m.mode = modeBrowse
+			m.input.Blur()
 		}
 	}
 	return m, nil

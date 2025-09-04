@@ -34,6 +34,7 @@ const (
 )
 
 type senderModel struct {
+
 	state           senderState
 	spinner         spinner.Model
 	table           table.Model
@@ -210,6 +211,14 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sender.statusBar.SetWidth(windowMsg.Width)
 		return m, nil
 	}
+
+	// send file msg to senderApp
+	if fileMsg, ok := msg.(multiFilePicker.SelectedFileNodeMsg); ok {
+        m.appController.AppEvents() <- senderEvent.SendFilesMsg{
+            Files: fileMsg.Files,
+        }
+        return m, nil 
+    }
 
 	if cmd, processed := m.handleSenderAppEvent(msg); processed {
 		return m, cmd
@@ -479,7 +488,6 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	return nil, false
 }
-
 // updateSelectingReceiverState handles UI events for the selectingReceiver state.
 func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
@@ -514,16 +522,14 @@ func (m *senderModel) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case multiFilePicker.SelectedFileNodeMsg:
-		// Return command to send files (this will be handled by the parent model)
+		// We can't handle this here - need to return it to main model
+		// to access appController properly
 		return tea.Cmd(func() tea.Msg {
-			// The actual sending will be handled by the parent model
-			// We just return the file selection command
-			return senderEvent.SendFilesMsg{
-				Files: msg.Files,
-			}
+			return msg // Pass the message back to main model
 		})
 	}
 
+	// Return UI commands normally
 	return fpCmd
 }
 
@@ -1070,6 +1076,7 @@ func (m *model) handleSelectionAction(action components.KeyAction) tea.Cmd {
 	case components.KeyActionSelect:
 		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
 		m.sender.updateSelectingReceiverState(keyMsg)
+		      m.appController.AppEvents() <- senderEvent.ReceiverSelectedMsg {}
 		return nil
 	case components.KeyActionBack:
 		return m.initSender()
