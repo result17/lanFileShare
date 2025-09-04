@@ -34,7 +34,7 @@ const (
 )
 
 type senderModel struct {
-
+	appController   AppController
 	state           senderState
 	spinner         spinner.Model
 	table           table.Model
@@ -95,7 +95,7 @@ var columns = []table.Column{
 	{Title: "Port", Width: 10},
 }
 
-func initSenderModel() senderModel {
+func initSenderModel(appController AppController) senderModel {
 	s := style.NewSpinner()
 
 	t := table.New(
@@ -163,9 +163,9 @@ func initSenderModel() senderModel {
 		quickTip:             quickTip,
 		retryDialog:          retryDialog,
 		statsCollector:       statsCollector,
-	realTimeStats:        realTimeStats,
-	rateChart:            rateChart,
-	sparkLine:            sparkLine,
+		realTimeStats:        realTimeStats,
+		rateChart:            rateChart,
+		sparkLine:            sparkLine,
 		keyboardManager:      keyboardManager,
 		breadcrumb:           breadcrumb,
 		statusBar:            statusBar,
@@ -204,25 +204,7 @@ func (m *senderModel) updateReceiverTable(services []discovery.ServiceInfo) {
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle window size changes for responsive layout
-	if windowMsg, ok := msg.(tea.WindowSizeMsg); ok {
-		m.sender.responsiveLayout.Update(windowMsg)
-		// Update status bar width
-		m.sender.statusBar.SetWidth(windowMsg.Width)
-		return m, nil
-	}
-
-	// send file msg to senderApp
-	if fileMsg, ok := msg.(multiFilePicker.SelectedFileNodeMsg); ok {
-        m.appController.AppEvents() <- senderEvent.SendFilesMsg{
-            Files: fileMsg.Files,
-        }
-        return m, nil 
-    }
-
-	if cmd, processed := m.handleSenderAppEvent(msg); processed {
-		return m, cmd
-	}
+	m.updateSenderByMsg(msg)
 
 	var cmd tea.Cmd
 	// Handle UI events first - this ensures multiFilePicker gets the message
@@ -347,8 +329,55 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// spinner cmd
+	if tickMsg, ok := msg.(spinner.TickMsg); ok {
+		var spinCmd tea.Cmd
+		m.sender.spinner, spinCmd = m.sender.spinner.Update(tickMsg)
+		return m, spinCmd
+	}
+
+	// Handle window size changes for responsive layout
+	if windowMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.sender.responsiveLayout.Update(windowMsg)
+		// Update status bar width
+		m.sender.statusBar.SetWidth(windowMsg.Width)
+		return m, nil
+	}
+
+	// send file msg to senderApp
+	if fileMsg, ok := msg.(multiFilePicker.SelectedFileNodeMsg); ok {
+		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
+			Files: fileMsg.Files,
+		}
+		return m, nil
+	}
+
+	if ae, ok := msg.(appevents.AppEvent); ok {
+		if cmd, processed := m.handleSenderAppEvent(ae); processed {
+			return m, cmd
+		}
+	}
+
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		// user type file path here
+		if m.sender.state == selectingFiles && !m.sender.fp.IsBrowseMode() {
+			return m.sender.fp.Update(keyMsg)
+		}
+
+		action := m.sender.keyboardManager.ProcessKey(keyMsg)
+		m, cmd, matched := m.handleGlobalAction(action)
+		if matched {
+			return m, cmd
+		}
+		
+	}
+
+	return m, nil
+}
+
 //nolint:gocyclo
-func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
+func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case senderEvent.FoundServicesMsg:
 		slog.Info("Discovery update", "service_count", len(msg.Services))
@@ -488,6 +517,7 @@ func (m *model) handleSenderAppEvent(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	return nil, false
 }
+
 // updateSelectingReceiverState handles UI events for the selectingReceiver state.
 func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
@@ -651,7 +681,7 @@ func (m *model) senderView() string {
 }
 
 func (m *senderModel) reset() {
-	*m = initSenderModel()
+	*m = initSenderModel(m.appController)
 }
 
 func (m *senderModel) adjustTableCursor(newRowCount int) {
@@ -1002,22 +1032,6 @@ func formatRate(rate float64) string {
 	return fmt.Sprintf("%.0f B/s", rate)
 }
 
-// handleRefresh handles refresh actions
-func (m *model) handleRefresh() tea.Cmd {
-	switch m.sender.state {
-	case findingReceivers:
-		// Restart discovery
-		return m.initSender()
-	case selectingReceiver:
-		// Refresh receiver list
-		return m.initSender()
-	default:
-		// For other states, just show a quick tip
-		m.sender.quickTip.Show("Refresh not available in current state", "info", 3)
-		return nil
-	}
-}
-
 // handleMenuAction handles context menu actions
 func (m *model) handleMenuAction(action components.KeyAction) tea.Cmd {
 	switch action {
@@ -1076,7 +1090,7 @@ func (m *model) handleSelectionAction(action components.KeyAction) tea.Cmd {
 	case components.KeyActionSelect:
 		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
 		m.sender.updateSelectingReceiverState(keyMsg)
-		      m.appController.AppEvents() <- senderEvent.ReceiverSelectedMsg {}
+		m.appController.AppEvents() <- senderEvent.ReceiverSelectedMsg{}
 		return nil
 	case components.KeyActionBack:
 		return m.initSender()

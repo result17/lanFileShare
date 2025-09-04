@@ -12,6 +12,7 @@ import (
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
+	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
 
 // tickMsg is a message sent periodically to trigger UI updates.
@@ -50,17 +51,17 @@ func InitialModel(m Mode, port int, outputPath string) model {
 	switch m {
 	case Sender:
 		appController = senderApp.NewApp(&discovery.MDNSAdapter{})
-		sender = initSenderModel()
+		sender = initSenderModel(appController)
 	case Receiver:
 		appController = receiverApp.NewApp(port, outputPath)
-		receiver = initReceiverModel(port)
+		receiver = initReceiverModel(port, appController)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return model{
 		mode:          m,
-		appController: appController,
+		appController: appController, // 传递appController
 		sender:        sender,
 		receiver:      receiver,
 		ctx:           ctx,
@@ -69,9 +70,6 @@ func InitialModel(m Mode, port int, outputPath string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	if m.appController == nil {
-		return tea.Quit
-	}
 
 	var initCmd tea.Cmd
 	switch m.mode {
@@ -148,4 +146,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m model) handleToggleHelpPanel() tea.Cmd {
+	switch m.mode {
+	case Sender:
+		m.sender.helpPanel.Toggle()
+	case Receiver:
+		// TODO
+	}
+	return nil
+}
+
+// handleRefresh handles refresh actions
+func (m *model) handleRefresh() tea.Cmd {
+	switch m.mode {
+	case Sender:
+		switch m.sender.state {
+		case findingReceivers:
+			// Restart discovery
+			return m.initSender()
+		case selectingReceiver:
+			// Refresh receiver list
+			return m.initSender()
+		default:
+			// For other states, just show a quick tip
+			m.sender.quickTip.Show("Refresh not available in current state", "info", 3)
+			return nil
+		}
+	case Receiver:
+		// TODO
+		return nil
+	}
+	return nil
+}
+
+func (m model) handleGlobalAction(action components.KeyAction) (model, tea.Cmd, bool) {
+	switch action {
+	case components.KeyActionQuit:
+		return m, tea.Quit, true
+	case components.KeyActionHelp:
+		return m, m.handleToggleHelpPanel(), true
+	case components.KeyActionRefresh:
+		return m, m.handleRefresh(), true
+	default:
+		return m, nil, false
+	}
 }

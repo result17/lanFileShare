@@ -253,6 +253,10 @@ func (m Model) Init() tea.Cmd {
 	return textinput.Blink
 }
 
+func (m Model) IsBrowseMode() bool {
+	return m.mode == modeBrowse
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quitting {
 		return m, nil

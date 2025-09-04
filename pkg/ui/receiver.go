@@ -24,6 +24,7 @@ const (
 )
 
 type receiverModel struct {
+	appController AppController
 	state     receiverState
 	spinner   spinner.Model
 	port      int
@@ -42,7 +43,7 @@ var DefaultKeyMap = KeyMap{
 	Reject: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "Reject")),
 }
 
-func initReceiverModel(port int) receiverModel {
+func initReceiverModel(port int, appController AppController) receiverModel {
 	s := style.NewSpinner()
 
 	return receiverModel{
@@ -81,7 +82,7 @@ func (m model) receiverView() string {
 }
 
 func (m *model) resetReceiver() (tea.Model, tea.Cmd) {
-	m.receiver = initReceiverModel(m.receiver.port)
+	m.receiver = initReceiverModel(m.receiver.port, m.receiver.appController)
 	return m, m.Init()
 }
 
