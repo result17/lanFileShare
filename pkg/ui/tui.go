@@ -248,6 +248,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.responsiveLayout.Update(msg)
 		// Update status bar width
 		m.statusBar.SetWidth(msg.Width)
+		slog.Info("window size is ", msg)
 	}
 
 	// Handle mode-specific updates
@@ -321,3 +322,11 @@ func (m model) handleGlobalAction(action components.KeyAction) (model, tea.Cmd, 
 	}
 	return m, nil, false
 }
+
+// listenForAppMessages is a command that listens for messages from the app controller.
+func (m *model) listenForAppMessages() tea.Cmd {
+	return func() tea.Msg {
+		return <-m.appController.UIMessages()
+	}
+}
+

@@ -112,13 +112,6 @@ func initSenderModel(appController AppController) senderModel {
 	}
 }
 
-// listenForAppMessages is a command that listens for messages from the app controller.
-func (m *model) listenForAppMessages() tea.Cmd {
-	return func() tea.Msg {
-		return <-m.appController.UIMessages()
-	}
-}
-
 func (m *model) initSender() tea.Cmd {
 	return tea.Batch(m.sender.spinner.Tick, m.listenForAppMessages())
 }
@@ -163,14 +156,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 		action := m.keyboardManager.ProcessKey(keyMsg)
 
 		// Handle state-specific actions
-		return m, m.handleStateSpecificAction(action)
-	}
-
-	if m.sender.state == findingReceivers {
-		var spinCmd tea.Cmd
-		m.sender.spinner, spinCmd = m.sender.spinner.Update(msg)
-
-		return m, tea.Batch(cmd, spinCmd)
+		return m, m.handleStateSpecificAction(action, keyMsg)
 	}
 
 	return m, cmd
@@ -178,7 +164,7 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// spinner cmd
-	if tickMsg, ok := msg.(spinner.TickMsg); ok {
+	if tickMsg, ok := msg.(spinner.TickMsg); ok && m.sender.state == findingReceivers {
 		var spinCmd tea.Cmd
 		m.sender.spinner, spinCmd = m.sender.spinner.Update(tickMsg)
 		return m, spinCmd
@@ -205,29 +191,32 @@ func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		action := m.keyboardManager.ProcessKey(keyMsg)
-
-		// Handle statistics display mode switching
-		switch action {
-		case components.KeyActionStatsOverview:
-			m.sender.realTimeStats.SetDisplayMode("overview")
-			return m, nil
-
-		case components.KeyActionStatsDetailed:
-			m.sender.realTimeStats.SetDisplayMode("detailed")
-			return m, nil
-		case components.KeyActionStatsFiles:
-			m.sender.realTimeStats.SetDisplayMode("files")
-			return m, nil
-		case components.KeyActionStatsNetwork:
-			m.sender.realTimeStats.SetDisplayMode("network")
-			return m, nil
-		case components.KeyActionStatsEfficiency:
-			m.sender.realTimeStats.SetDisplayMode("efficiency")
-			return m, nil
-		}
-
+		return m.handleStatsAction(action)
 	}
 
+	return m, nil
+}
+
+func (m *model) handleStatsAction(action components.KeyAction) (tea.Model, tea.Cmd) {
+	// Handle statistics display mode switching
+	switch action {
+	case components.KeyActionStatsOverview:
+		m.sender.realTimeStats.SetDisplayMode("overview")
+		return m, nil
+
+	case components.KeyActionStatsDetailed:
+		m.sender.realTimeStats.SetDisplayMode("detailed")
+		return m, nil
+	case components.KeyActionStatsFiles:
+		m.sender.realTimeStats.SetDisplayMode("files")
+		return m, nil
+	case components.KeyActionStatsNetwork:
+		m.sender.realTimeStats.SetDisplayMode("network")
+		return m, nil
+	case components.KeyActionStatsEfficiency:
+		m.sender.realTimeStats.SetDisplayMode("efficiency")
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -258,7 +247,6 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 		return m.listenForAppMessages(), true // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
-		// 发送状态更新事件而不是直接更新状态指示器
 		m.appController.AppEvents() <- senderEvent.StatusUpdateMsg{
 			Message: "Transfer request sent, waiting for confirmation...",
 		}
@@ -463,7 +451,7 @@ func (m *model) senderView() string {
 	}
 
 	// Wrap main content in adaptive container
-	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, strconv.Itoa(m.responsiveLayout.GetContentWidth())))
+	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, ""))
 
 	// Add enhanced UI components
 	result.WriteString("\n")
@@ -881,10 +869,10 @@ func (m *model) handleMenuAction(action components.KeyAction) tea.Cmd {
 }
 
 // handleStateSpecificAction handles state-specific keyboard actions
-func (m *model) handleStateSpecificAction(action components.KeyAction) tea.Cmd {
+func (m *model) handleStateSpecificAction(action components.KeyAction, msg tea.KeyMsg) tea.Cmd {
 	switch m.sender.state {
 	case findingReceivers:
-		return m.handleDiscoveryAction(action)
+		return m.handleDiscoveryAction(action, msg)
 	case selectingReceiver:
 		return m.handleSelectionAction(action)
 	case selectingFiles:
@@ -901,7 +889,8 @@ func (m *model) handleStateSpecificAction(action components.KeyAction) tea.Cmd {
 }
 
 // handleDiscoveryAction handles actions during discovery phase
-func (m *model) handleDiscoveryAction(action components.KeyAction) tea.Cmd {
+func (m *model) handleDiscoveryAction(action components.KeyAction, msg tea.KeyMsg) tea.Cmd {
+	
 	switch action {
 	case components.KeyActionRefresh:
 		return m.initSender()

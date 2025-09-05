@@ -43,7 +43,6 @@ type LayoutConfig struct {
 	Padding        int
 	Margin         int
 	CompactMode    bool
-	ShowSidebar    bool
 	ShowStatusBar  bool
 	ShowBreadcrumb bool
 	ColumnCount    int
@@ -84,7 +83,6 @@ func NewResponsiveLayout(themeManager *ThemeManager) *ResponsiveLayout {
 			Padding:        1,
 			Margin:         1,
 			CompactMode:    false,
-			ShowSidebar:    true,
 			ShowStatusBar:  true,
 			ShowBreadcrumb: true,
 			ColumnCount:    1,
@@ -144,7 +142,6 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 	switch rl.breakpoint {
 	case BreakpointXSmall:
 		rl.config.CompactMode = true
-		rl.config.ShowSidebar = false
 		rl.config.ShowBreadcrumb = false
 		rl.config.Padding = 0
 		rl.config.Margin = 0
@@ -159,7 +156,6 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 
 	case BreakpointSmall:
 		rl.config.CompactMode = true
-		rl.config.ShowSidebar = false
 		rl.config.ShowBreadcrumb = true
 		rl.config.Padding = 0
 		rl.config.Margin = 0
@@ -174,7 +170,6 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 
 	case BreakpointMedium:
 		rl.config.CompactMode = false
-		rl.config.ShowSidebar = false
 		rl.config.ShowBreadcrumb = true
 		rl.config.Padding = 1
 		rl.config.Margin = 1
@@ -189,7 +184,6 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 
 	case BreakpointLarge:
 		rl.config.CompactMode = false
-		rl.config.ShowSidebar = true
 		rl.config.ShowBreadcrumb = true
 		rl.config.Padding = 1
 		rl.config.Margin = 1
@@ -204,7 +198,6 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 
 	case BreakpointXLarge:
 		rl.config.CompactMode = false
-		rl.config.ShowSidebar = true
 		rl.config.ShowBreadcrumb = true
 		rl.config.Padding = 2
 		rl.config.Margin = 2
@@ -246,11 +239,6 @@ func (rl *ResponsiveLayout) IsCompactMode() bool {
 	return rl.config.CompactMode
 }
 
-// ShouldShowSidebar returns whether the sidebar should be shown
-func (rl *ResponsiveLayout) ShouldShowSidebar() bool {
-	return rl.config.ShowSidebar
-}
-
 // ShouldShowDetails returns whether detailed information should be shown
 func (rl *ResponsiveLayout) ShouldShowDetails() bool {
 	return rl.showDetails
@@ -279,11 +267,6 @@ func (rl *ResponsiveLayout) GetTruncateLength() int {
 // GetContentWidth returns the available width for content
 func (rl *ResponsiveLayout) GetContentWidth() int {
 	width := rl.viewport.Width
-
-	// Subtract sidebar width
-	if rl.config.ShowSidebar {
-		width -= rl.sidebarWidth + 1 // +1 for border
-	}
 
 	// Subtract padding and margins
 	width -= (rl.config.Padding + rl.config.Margin) * 2
@@ -499,7 +482,6 @@ func (rl *ResponsiveLayout) GetLayoutInfo() map[string]interface{} {
 		"viewport_height": rl.viewport.Height,
 		"breakpoint":      rl.GetBreakpointName(),
 		"compact_mode":    rl.config.CompactMode,
-		"show_sidebar":    rl.config.ShowSidebar,
 		"show_details":    rl.showDetails,
 		"show_icons":      rl.showIcons,
 		"show_timestamps": rl.showTimestamps,
