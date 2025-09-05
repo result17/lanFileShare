@@ -184,14 +184,6 @@ func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, spinCmd
 	}
 
-	// Handle window size changes for responsive layout
-	if windowMsg, ok := msg.(tea.WindowSizeMsg); ok {
-		m.responsiveLayout.Update(windowMsg)
-		// Update status bar width
-		m.statusBar.SetWidth(windowMsg.Width)
-		return m, nil
-	}
-
 	// send file msg to senderApp
 	if fileMsg, ok := msg.(multiFilePicker.SelectedFileNodeMsg); ok {
 		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
@@ -214,7 +206,6 @@ func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		action := m.keyboardManager.ProcessKey(keyMsg)
 
-		
 		// Handle statistics display mode switching
 		switch action {
 		case components.KeyActionStatsOverview:
@@ -234,7 +225,6 @@ func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sender.realTimeStats.SetDisplayMode("efficiency")
 			return m, nil
 		}
-
 
 	}
 
@@ -473,7 +463,7 @@ func (m *model) senderView() string {
 	}
 
 	// Wrap main content in adaptive container
-	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, ""))
+	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, strconv.Itoa(m.responsiveLayout.GetContentWidth())))
 
 	// Add enhanced UI components
 	result.WriteString("\n")

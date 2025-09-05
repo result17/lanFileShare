@@ -22,10 +22,10 @@ const (
 type LayoutMode int
 
 const (
-	LayoutModeAuto LayoutMode = iota // Automatically choose based on screen size
-	LayoutModeCompact                // Force compact layout
-	LayoutModeNormal                 // Force normal layout
-	LayoutModeExpanded               // Force expanded layout
+	LayoutModeAuto     LayoutMode = iota // Automatically choose based on screen size
+	LayoutModeCompact                    // Force compact layout
+	LayoutModeNormal                     // Force normal layout
+	LayoutModeExpanded                   // Force expanded layout
 )
 
 // ViewportSize represents the current viewport dimensions
@@ -51,24 +51,24 @@ type LayoutConfig struct {
 
 // ResponsiveLayout manages responsive layout behavior
 type ResponsiveLayout struct {
-	viewport    ViewportSize
-	breakpoint  LayoutBreakpoint
-	mode        LayoutMode
-	config      LayoutConfig
+	viewport     ViewportSize
+	breakpoint   LayoutBreakpoint
+	mode         LayoutMode
+	config       LayoutConfig
 	themeManager *ThemeManager
-	
+
 	// Layout regions
-	headerHeight    int
-	footerHeight    int
-	sidebarWidth    int
-	contentPadding  int
-	
+	headerHeight   int
+	footerHeight   int
+	sidebarWidth   int
+	contentPadding int
+
 	// Adaptive settings
-	showDetails     bool
-	showIcons       bool
-	showTimestamps  bool
-	maxItems        int
-	truncateLength  int
+	showDetails    bool
+	showIcons      bool
+	showTimestamps bool
+	maxItems       int
+	truncateLength int
 }
 
 // NewResponsiveLayout creates a new responsive layout manager
@@ -156,7 +156,7 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 		rl.truncateLength = 15
 		rl.sidebarWidth = 0
 		rl.contentPadding = 0
-		
+
 	case BreakpointSmall:
 		rl.config.CompactMode = true
 		rl.config.ShowSidebar = false
@@ -171,7 +171,7 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 		rl.truncateLength = 20
 		rl.sidebarWidth = 0
 		rl.contentPadding = 1
-		
+
 	case BreakpointMedium:
 		rl.config.CompactMode = false
 		rl.config.ShowSidebar = false
@@ -186,7 +186,7 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 		rl.truncateLength = 25
 		rl.sidebarWidth = 0
 		rl.contentPadding = 1
-		
+
 	case BreakpointLarge:
 		rl.config.CompactMode = false
 		rl.config.ShowSidebar = true
@@ -201,7 +201,7 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 		rl.truncateLength = 30
 		rl.sidebarWidth = 20
 		rl.contentPadding = 2
-		
+
 	case BreakpointXLarge:
 		rl.config.CompactMode = false
 		rl.config.ShowSidebar = true
@@ -217,7 +217,7 @@ func (rl *ResponsiveLayout) updateLayoutConfig() {
 		rl.sidebarWidth = 25
 		rl.contentPadding = 2
 	}
-	
+
 	// Override with theme settings if compact theme is active
 	if rl.themeManager != nil {
 		theme := rl.themeManager.GetCurrentTheme()
@@ -279,46 +279,46 @@ func (rl *ResponsiveLayout) GetTruncateLength() int {
 // GetContentWidth returns the available width for content
 func (rl *ResponsiveLayout) GetContentWidth() int {
 	width := rl.viewport.Width
-	
+
 	// Subtract sidebar width
 	if rl.config.ShowSidebar {
 		width -= rl.sidebarWidth + 1 // +1 for border
 	}
-	
+
 	// Subtract padding and margins
 	width -= (rl.config.Padding + rl.config.Margin) * 2
-	
+
 	if width < 10 {
 		width = 10 // Minimum content width
 	}
-	
+
 	return width
 }
 
 // GetContentHeight returns the available height for content
 func (rl *ResponsiveLayout) GetContentHeight() int {
 	height := rl.viewport.Height
-	
+
 	// Subtract header and footer
 	height -= rl.headerHeight + rl.footerHeight
-	
+
 	// Subtract status bar if shown
 	if rl.config.ShowStatusBar {
 		height -= 1
 	}
-	
+
 	// Subtract breadcrumb if shown
 	if rl.config.ShowBreadcrumb {
 		height -= 1
 	}
-	
+
 	// Subtract padding and margins
 	height -= (rl.config.Padding + rl.config.Margin) * 2
-	
+
 	if height < 5 {
 		height = 5 // Minimum content height
 	}
-	
+
 	return height
 }
 
@@ -335,15 +335,15 @@ func (rl *ResponsiveLayout) FormatText(text string, maxWidth int) string {
 	if maxWidth <= 0 {
 		maxWidth = rl.GetContentWidth()
 	}
-	
+
 	if len(text) <= maxWidth {
 		return text
 	}
-	
+
 	if maxWidth <= 3 {
 		return "..."
 	}
-	
+
 	return text[:maxWidth-3] + "..."
 }
 
@@ -352,23 +352,23 @@ func (rl *ResponsiveLayout) CreateColumns(items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
-	
+
 	columnCount := rl.config.ColumnCount
 	if columnCount <= 1 {
 		return strings.Join(items, "\n")
 	}
-	
+
 	contentWidth := rl.GetContentWidth()
 	columnWidth := (contentWidth - (columnCount - 1)) / columnCount // -1 for separators
-	
+
 	if columnWidth < 10 {
 		// Fall back to single column if columns would be too narrow
 		return strings.Join(items, "\n")
 	}
-	
+
 	var result strings.Builder
 	rows := (len(items) + columnCount - 1) / columnCount // Ceiling division
-	
+
 	for row := 0; row < rows; row++ {
 		var columns []string
 		for col := 0; col < columnCount; col++ {
@@ -385,7 +385,7 @@ func (rl *ResponsiveLayout) CreateColumns(items []string) string {
 			result.WriteString("\n")
 		}
 	}
-	
+
 	return result.String()
 }
 
@@ -394,27 +394,27 @@ func (rl *ResponsiveLayout) CreateGrid(items []GridItem, itemWidth, itemHeight i
 	if len(items) == 0 {
 		return ""
 	}
-	
+
 	contentWidth := rl.GetContentWidth()
 	contentHeight := rl.GetContentHeight()
-	
+
 	// Calculate how many items fit per row
 	itemsPerRow := contentWidth / (itemWidth + 1) // +1 for spacing
 	if itemsPerRow < 1 {
 		itemsPerRow = 1
 	}
-	
+
 	// Calculate how many rows we can display
 	maxRows := contentHeight / (itemHeight + 1) // +1 for spacing
 	if maxRows < 1 {
 		maxRows = 1
 	}
-	
+
 	maxItems := itemsPerRow * maxRows
 	if len(items) > maxItems {
 		items = items[:maxItems]
 	}
-	
+
 	var result strings.Builder
 	for i, item := range items {
 		if i > 0 && i%itemsPerRow == 0 {
@@ -426,10 +426,10 @@ func (rl *ResponsiveLayout) CreateGrid(items []GridItem, itemWidth, itemHeight i
 		} else if i > 0 {
 			result.WriteString(" ") // Horizontal spacing
 		}
-		
+
 		result.WriteString(item.Render(itemWidth, itemHeight))
 	}
-	
+
 	return result.String()
 }
 
@@ -443,14 +443,14 @@ func (rl *ResponsiveLayout) AdaptiveContainer(content string, title string) stri
 	if rl.themeManager == nil {
 		return content
 	}
-	
+
 	styles := rl.themeManager.GetStyles()
 	if styles == nil {
 		return content
 	}
-	
+
 	containerStyle := styles.Card
-	
+
 	// Adjust container based on layout
 	if rl.config.CompactMode {
 		containerStyle = containerStyle.Padding(0).Margin(0)
@@ -459,18 +459,18 @@ func (rl *ResponsiveLayout) AdaptiveContainer(content string, title string) stri
 			Padding(rl.config.Padding).
 			Margin(rl.config.Margin)
 	}
-	
+
 	// Set width
 	contentWidth := rl.GetContentWidth()
 	containerStyle = containerStyle.Width(contentWidth)
-	
+
 	// Add title if provided and space allows
 	if title != "" && !rl.config.CompactMode {
 		titleStyle := styles.Header
 		titleContent := titleStyle.Render(title)
 		content = titleContent + "\n" + content
 	}
-	
+
 	return containerStyle.Render(content)
 }
 
@@ -495,18 +495,18 @@ func (rl *ResponsiveLayout) GetBreakpointName() string {
 // GetLayoutInfo returns information about the current layout
 func (rl *ResponsiveLayout) GetLayoutInfo() map[string]interface{} {
 	return map[string]interface{}{
-		"viewport_width":    rl.viewport.Width,
-		"viewport_height":   rl.viewport.Height,
-		"breakpoint":        rl.GetBreakpointName(),
-		"compact_mode":      rl.config.CompactMode,
-		"show_sidebar":      rl.config.ShowSidebar,
-		"show_details":      rl.showDetails,
-		"show_icons":        rl.showIcons,
-		"show_timestamps":   rl.showTimestamps,
-		"content_width":     rl.GetContentWidth(),
-		"content_height":    rl.GetContentHeight(),
-		"column_count":      rl.config.ColumnCount,
-		"max_items":         rl.maxItems,
-		"truncate_length":   rl.truncateLength,
+		"viewport_width":  rl.viewport.Width,
+		"viewport_height": rl.viewport.Height,
+		"breakpoint":      rl.GetBreakpointName(),
+		"compact_mode":    rl.config.CompactMode,
+		"show_sidebar":    rl.config.ShowSidebar,
+		"show_details":    rl.showDetails,
+		"show_icons":      rl.showIcons,
+		"show_timestamps": rl.showTimestamps,
+		"content_width":   rl.GetContentWidth(),
+		"content_height":  rl.GetContentHeight(),
+		"column_count":    rl.config.ColumnCount,
+		"max_items":       rl.maxItems,
+		"truncate_length": rl.truncateLength,
 	}
 }
