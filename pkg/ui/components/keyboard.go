@@ -38,6 +38,8 @@ const (
 	KeyActionSlowDown
 	KeyActionFullscreen
 	KeyActionMinimize
+	KeyActionTheme
+	KeyActionShowPerformance
 )
 
 // KeyBinding represents a key binding configuration
@@ -86,6 +88,8 @@ func (km *KeyboardManager) initializeDefaultBindings() {
 		{[]string{"?"}, KeyActionHelp, "Toggle help", "global", true, true},
 		{[]string{"f11"}, KeyActionFullscreen, "Toggle fullscreen", "global", true, true},
 		{[]string{"ctrl+r"}, KeyActionRefresh, "Refresh", "global", true, true},
+		{[]string{"t", "T"}, KeyActionTheme, "Switch theme", "global", true, true},
+		{[]string{"p", "P"}, KeyActionShowPerformance, "Show performance", "global", true, true},
 	}
 
 	// Context-specific bindings

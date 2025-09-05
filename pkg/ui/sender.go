@@ -47,11 +47,7 @@ type senderModel struct {
 	transferProgress *TransferProgress
 	progressBar      *components.MultiFileProgress
 	statsPanel       *components.TransferStatsPanel
-	statusIndicator  *components.StatusIndicator
-	quickTip         *components.QuickTip
 	keyboardManager  *components.KeyboardManager
-	errorHandler     *components.ErrorHandler
-	responsiveLayout *components.ResponsiveLayout
 }
 
 // TransferProgress tracks the overall transfer progress
@@ -88,7 +84,6 @@ func initSenderModel(appController AppController) senderModel {
 	// Initialize enhanced UI components
 	progressConfig := components.DefaultProgressConfig()
 	progressBar := components.NewMultiFileProgress(progressConfig)
-	statusIndicator := components.NewStatusIndicator(5, true) // Keep 5 messages, show timestamps
 	statsPanel := components.NewTransferStatsPanel()
 
 	// Initialize advanced statistics components
@@ -98,33 +93,22 @@ func initSenderModel(appController AppController) senderModel {
 	rateChart.SetLabels("Time", "rate")
 	sparkLine := components.NewSparkLine(40, 40) // 40 chars wide, 40 values max
 
-	// Initialize navigation and keyboard components
-
-	themeManager := components.NewThemeManager("default")
-	layout := components.NewResponsiveLayout(themeManager)
-
-	// Initialize keyboard manager and other UI components
+	// Initialize keyboard manager for sender-specific actions
 	keyboardManager := components.NewKeyboardManager()
-	quickTip := components.NewQuickTip()
-	errorHandler := components.NewErrorHandler(3, true, time.Second*5) // 最多重试3次，自动重试，间隔5秒
 
 	return senderModel{
-		spinner:          s,
-		fp:               multiFilePicker.InitialModel(),
-		state:            findingReceivers,
-		table:            t,
-		progressBar:      progressBar,
-		statsPanel:       statsPanel,
-		statsCollector:   statsCollector,
-		realTimeStats:    realTimeStats,
-		rateChart:        rateChart,
-		sparkLine:        sparkLine,
-		statusIndicator:  statusIndicator,
-		keyboardManager:  keyboardManager,
-		quickTip:         quickTip,
-		errorHandler:     errorHandler,
-		responsiveLayout: layout,
-		appController:    appController,
+		spinner:         s,
+		fp:              multiFilePicker.InitialModel(),
+		state:           findingReceivers,
+		table:           t,
+		progressBar:     progressBar,
+		statsPanel:      statsPanel,
+		statsCollector:  statsCollector,
+		realTimeStats:   realTimeStats,
+		rateChart:       rateChart,
+		sparkLine:       sparkLine,
+		keyboardManager: keyboardManager,
+		appController:   appController,
 	}
 }
 
@@ -178,70 +162,6 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.sender.state != selectingFiles {
 		action := m.keyboardManager.ProcessKey(keyMsg)
 
-		// Handle context menu if visible
-		if m.contextMenu != nil && m.contextMenu.IsVisible() {
-			if m.contextMenu.Navigate(action) {
-				selectedItem := m.contextMenu.GetSelectedItem()
-				if selectedItem != nil {
-					return m, m.handleMenuAction(selectedItem.Action)
-				}
-			}
-			return m, nil
-		}
-
-		// Handle retry dialog if visible
-		if m.retryDialog.IsVisible() {
-			switch action {
-			case components.KeyActionRetry:
-				if m.errorHandler.CanRetry() {
-					m.errorHandler.IncrementRetry()
-					m.retryDialog.Hide()
-					return m, m.retryLastOperation()
-				}
-			case components.KeyActionCancel:
-				m.retryDialog.Hide()
-				return m, nil
-			}
-			return m, nil
-		}
-
-		// Handle theme switching (T key)
-		if keyMsg.String() == "t" || keyMsg.String() == "T" {
-			if m.themeSelector != nil {
-				m.themeSelector.Show()
-			}
-			return m, nil
-		}
-
-		// Handle performance panel (P key when not in transfer)
-		if (keyMsg.String() == "p" || keyMsg.String() == "P") &&
-			m.sender.state != sendingFiles && m.sender.state != transferPaused {
-			if m.performancePanel != nil {
-				m.performancePanel.Show()
-			}
-			return m, nil
-		}
-
-		// Handle statistics display mode switching
-		switch action {
-		case components.KeyActionStatsOverview:
-			m.sender.realTimeStats.SetDisplayMode("overview")
-			return m, nil
-
-		case components.KeyActionStatsDetailed:
-			m.sender.realTimeStats.SetDisplayMode("detailed")
-			return m, nil
-		case components.KeyActionStatsFiles:
-			m.sender.realTimeStats.SetDisplayMode("files")
-			return m, nil
-		case components.KeyActionStatsNetwork:
-			m.sender.realTimeStats.SetDisplayMode("network")
-			return m, nil
-		case components.KeyActionStatsEfficiency:
-			m.sender.realTimeStats.SetDisplayMode("efficiency")
-			return m, nil
-		}
-
 		// Handle state-specific actions
 		return m, m.handleStateSpecificAction(action)
 	}
@@ -293,10 +213,28 @@ func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		action := m.keyboardManager.ProcessKey(keyMsg)
-		m, cmd, matched := m.handleGlobalAction(action)
-		if matched {
-			return m, cmd
+
+		
+		// Handle statistics display mode switching
+		switch action {
+		case components.KeyActionStatsOverview:
+			m.sender.realTimeStats.SetDisplayMode("overview")
+			return m, nil
+
+		case components.KeyActionStatsDetailed:
+			m.sender.realTimeStats.SetDisplayMode("detailed")
+			return m, nil
+		case components.KeyActionStatsFiles:
+			m.sender.realTimeStats.SetDisplayMode("files")
+			return m, nil
+		case components.KeyActionStatsNetwork:
+			m.sender.realTimeStats.SetDisplayMode("network")
+			return m, nil
+		case components.KeyActionStatsEfficiency:
+			m.sender.realTimeStats.SetDisplayMode("efficiency")
+			return m, nil
 		}
+
 
 	}
 
@@ -330,7 +268,10 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 		return m.listenForAppMessages(), true // Continue listening
 	case senderEvent.TransferStartedMsg:
 		m.sender.state = waitingForReceiverConfirmation
-		m.statusIndicator.AddMessage(components.StatusInfo, "Transfer request sent, waiting for confirmation...")
+		// 发送状态更新事件而不是直接更新状态指示器
+		m.appController.AppEvents() <- senderEvent.StatusUpdateMsg{
+			Message: "Transfer request sent, waiting for confirmation...",
+		}
 		return m.listenForAppMessages(), true
 	case senderEvent.ReceiverAcceptedMsg:
 		m.sender.state = sendingFiles
@@ -341,7 +282,7 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 		return m.listenForAppMessages(), true
 	case senderEvent.StatusUpdateMsg:
 		// Update status indicator with the message
-		m.statusIndicator.AddMessage(components.StatusInfo, msg.Message)
+		// Just log the message, status updates will be handled by main model
 		slog.Info("Status Update", "message", msg.Message)
 		return m.listenForAppMessages(), true
 	case senderEvent.ProgressUpdateMsg:
@@ -435,12 +376,7 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 		m.statusIndicator.AddDetailedMessage(components.StatusError,
 			"Transfer failed", msg.Err.Error(), "Press Enter to try again")
 
-		// Show retry dialog if error is recoverable
-		if m.errorHandler.CanRetry() {
-			m.retryDialog.Show(m.errorHandler.ShouldAutoRetry(), 5)
-		}
-
-		return m.listenForAppMessages(), true
+		// Error handling will be managed by the main model		return m.listenForAppMessages(), true
 	}
 	return nil, false
 }
@@ -448,11 +384,11 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 // updateSelectingReceiverState handles UI events for the selectingReceiver state.
 func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
-	// ... logic for key presses and table updates
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
+		action := m.keyboardManager.ProcessKey(msg)
+		switch action {
+		case components.KeyActionSelect:
 			if len(m.services) > 0 {
 				selectedIndex := m.table.Cursor()
 				if selectedIndex >= 0 && selectedIndex < len(m.services) {
@@ -465,10 +401,11 @@ func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
 				_, cmd := m.table.Update(msg)
 				return cmd
 			}
+		case components.KeyActionNavigateUp, components.KeyActionNavigateDown:
+			_, cmd := m.table.Update(msg)
+			return cmd
 		}
 	}
-	// Update the table on every message to handle navigation
-	// m.table, cmd = m.table.Update(msg)
 	return cmd
 }
 
@@ -673,22 +610,10 @@ func (m *model) renderTransferProgress() string {
 		result.WriteString("\n\n")
 	}
 
-	// Status messages (show latest, compact in small layouts)
-	if m.sender.statusIndicator != nil {
-		m.sender.statusIndicator.SetCompact(m.sender.responsiveLayout.IsCompactMode())
-		statusMsg := m.sender.statusIndicator.Render()
-		if statusMsg != "" {
-			result.WriteString(statusMsg)
-			result.WriteString("\n\n")
-		}
-	}
+	// Status messages will be handled by the main model
 
-	// Control hints (adapt to layout)
-	if m.responsiveLayout.IsCompactMode() {
-		result.WriteString(style.FileStyle.Render("P=Pause | C=Cancel"))
-	} else {
-		result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | 1-5=Stats Views | ?=Help"))
-	}
+	// Control hints
+	result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | 1-5=Stats Views | ?=Help"))
 
 	return result.String()
 }
@@ -725,9 +650,9 @@ func (m *model) renderTransferPaused() string {
 	}
 
 	// Status messages
-	if m.sender.statusIndicator != nil {
-		m.sender.statusIndicator.SetCompact(true)
-		statusMsg := m.sender.statusIndicator.Render()
+	if m.statusIndicator != nil {
+		m.statusIndicator.SetCompact(true)
+		statusMsg := m.statusIndicator.Render()
 		if statusMsg != "" {
 			result.WriteString(statusMsg)
 			result.WriteString("\n\n")
@@ -743,18 +668,19 @@ func (m *model) renderTransferPaused() string {
 // updateSendingFilesState handles UI events during file transfer
 func (m *senderModel) updateSendingFilesState(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.String() {
-		case "p", "P":
+		action := m.keyboardManager.ProcessKey(keyMsg)
+		switch action {
+		case components.KeyActionPause:
 			// Pause transfer
 			return func() tea.Msg {
 				return senderEvent.PauseTransferMsg{}
 			}
-		case "c", "C":
+		case components.KeyActionCancel:
 			// Cancel transfer
 			return func() tea.Msg {
 				return senderEvent.CancelTransferMsg{}
 			}
-		case "q", "ctrl+c":
+		case components.KeyActionQuit:
 			// Quit application
 			return tea.Quit
 		}
@@ -765,18 +691,19 @@ func (m *senderModel) updateSendingFilesState(msg tea.Msg) tea.Cmd {
 // updateTransferPausedState handles UI events when transfer is paused
 func (m *senderModel) updateTransferPausedState(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.String() {
-		case "r", "R", " ":
+		action := m.keyboardManager.ProcessKey(keyMsg)
+		switch action {
+		case components.KeyActionResume:
 			// Resume transfer
 			return func() tea.Msg {
 				return senderEvent.ResumeTransferMsg{}
 			}
-		case "c", "C":
+		case components.KeyActionCancel:
 			// Cancel transfer
 			return func() tea.Msg {
 				return senderEvent.CancelTransferMsg{}
 			}
-		case "q", "ctrl+c":
+		case components.KeyActionQuit:
 			// Quit application
 			return tea.Quit
 		}
@@ -806,9 +733,9 @@ func (m *model) renderTransferComplete() string {
 	}
 
 	// Success status message
-	if m.sender.statusIndicator != nil {
-		m.sender.statusIndicator.SetCompact(false)
-		statusMsg := m.sender.statusIndicator.Render()
+	if m.statusIndicator != nil {
+		m.statusIndicator.SetCompact(false)
+		statusMsg := m.statusIndicator.Render()
 		if statusMsg != "" {
 			result.WriteString(statusMsg)
 			result.WriteString("\n")
@@ -845,9 +772,9 @@ func (m *model) renderTransferFailed() string {
 	}
 
 	// Error status messages (full mode to show details)
-	if m.sender.statusIndicator != nil {
-		m.sender.statusIndicator.SetCompact(false)
-		statusMsg := m.sender.statusIndicator.Render()
+	if m.statusIndicator != nil {
+		m.statusIndicator.SetCompact(false)
+		statusMsg := m.statusIndicator.Render()
 		if statusMsg != "" {
 			result.WriteString(statusMsg)
 			result.WriteString("\n")
@@ -855,7 +782,7 @@ func (m *model) renderTransferFailed() string {
 	}
 
 	// Fallback error message if no status indicator
-	if m.err != nil && m.sender.statusIndicator == nil {
+	if m.err != nil && m.statusIndicator == nil {
 		result.WriteString(fmt.Sprintf("Error: %s\n\n", style.ErrorStyle.Render(m.err.Error())))
 	}
 
@@ -919,7 +846,7 @@ func (m *model) classifyError(err error) components.ErrorType {
 // retryLastOperation attempts to retry the last failed operation
 func (m *model) retryLastOperation() tea.Cmd {
 	// Clear previous errors
-	m.sender.errorHandler.Clear()
+	m.errorHandler.Clear()
 	m.statusIndicator.AddMessage(components.StatusInfo, "Retrying operation...")
 
 	// Depending on the current state, retry the appropriate operation
@@ -927,7 +854,7 @@ func (m *model) retryLastOperation() tea.Cmd {
 	case transferFailed:
 		// Reset to file selection state to allow user to retry
 		m.sender.state = selectingFiles
-		m.sender.quickTip.Show("Select files again and press Tab to retry transfer", "info", 5)
+		m.quickTip.Show("Select files again and press Tab to retry transfer", "info", 5)
 		return nil
 	case findingReceivers:
 		// Retry discovery

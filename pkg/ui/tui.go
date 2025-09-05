@@ -174,7 +174,7 @@ func (m model) View() string {
 	if m.performancePanel != nil && m.performancePanel.IsVisible() {
 		return m.performancePanel.Render()
 	}
-	
+
 	switch m.mode {
 	case Sender:
 		s += m.senderView()
@@ -183,7 +183,7 @@ func (m model) View() string {
 	default:
 		return ""
 	}
-	
+
 	if m.contextMenu != nil && m.contextMenu.IsVisible() {
 		s += "\n" + m.contextMenu.Render() + "\n"
 	}
@@ -192,41 +192,86 @@ func (m model) View() string {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.QuitMsg:
-		// This is sent on Ctrl+C by default.
 		if m.cancel != nil {
 			m.cancel()
 		}
 		return m, tea.Quit
 	case appevents.Error:
 		m.err = msg.Err
+		m.errorHandler.AddError(components.ErrorTypeUnknown, "Application Error", msg.Err.Error(), true)
 		return m, tea.Quit
 	case appevents.AppFinishedMsg:
 		return m, tea.Quit
 	case tickMsg:
-		// This is our global tick. We can update components that need periodic refresh here.
-		// For example, the status bar time.
-		if m.mode == Sender {
-			m.sender.updateStatusBar()
+		// Global tick for UI updates
+		cmds = append(cmds, tick(time.Second))
+	case tea.KeyMsg:
+		// Process the key through the keyboard manager
+		action := m.keyboardManager.ProcessKey(msg)
+		if newModel, cmd, handled := m.handleGlobalAction(action); handled {
+			return newModel, cmd
 		}
-		// Always restart the tick.
-		return m, tick(time.Second)
+
+		// Handle context menu if visible
+		if m.contextMenu != nil && m.contextMenu.IsVisible() {
+			if m.contextMenu.Navigate(action) {
+				selectedItem := m.contextMenu.GetSelectedItem()
+				if selectedItem != nil {
+					return m, m.handleMenuAction(selectedItem.Action)
+				}
+			}
+			return m, nil
+		}
+
+		// Handle retry dialog if visible
+		if m.retryDialog.IsVisible() {
+			switch action {
+			case components.KeyActionRetry:
+				if m.errorHandler.CanRetry() {
+					m.errorHandler.IncrementRetry()
+					m.retryDialog.Hide()
+					return m, m.retryLastOperation()
+				}
+			case components.KeyActionCancel:
+				m.retryDialog.Hide()
+				return m, nil
+			}
+			return m, nil
+		}
+
+	case tea.WindowSizeMsg:
+		// Update responsive layout
+		m.responsiveLayout.Update(msg)
+		// Update status bar width
+		m.statusBar.SetWidth(msg.Width)
 	}
 
+	// Handle mode-specific updates
+	var modeCmd tea.Cmd
 	switch m.mode {
 	case Sender:
-		return m.updateSender(msg)
+		var newModel tea.Model
+		newModel, modeCmd = m.updateSender(msg)
+		if newModel, ok := newModel.(model); ok {
+			m = newModel
+		}
 	case Receiver:
-		return m.updateReceiver(msg)
+		var newModel tea.Model
+		newModel, modeCmd = m.updateReceiver(msg)
+		if newModel, ok := newModel.(model); ok {
+			m = newModel
+		}
 	}
 
-	return m, nil
-}
+	if modeCmd != nil {
+		cmds = append(cmds, modeCmd)
+	}
 
-func (m model) handleToggleHelpPanel() tea.Cmd {
-	m.helpPanel.Toggle()
-	return nil
+	return m, tea.Batch(cmds...)
 }
 
 // handleRefresh handles refresh actions
@@ -257,10 +302,22 @@ func (m model) handleGlobalAction(action components.KeyAction) (model, tea.Cmd, 
 	case components.KeyActionQuit:
 		return m, tea.Quit, true
 	case components.KeyActionHelp:
-		return m, m.handleToggleHelpPanel(), true
+		m.helpPanel.Toggle()
+		return m, nil, true
 	case components.KeyActionRefresh:
 		return m, m.handleRefresh(), true
-	default:
-		return m, nil, false
+	case components.KeyActionTheme:
+		if m.themeSelector != nil {
+			m.themeSelector.Show()
+		}
+		return m, nil, true
+	case components.KeyActionShowPerformance:
+		if m.sender.state != sendingFiles && m.sender.state != transferPaused {
+			if m.performancePanel != nil {
+				m.performancePanel.Show()
+			}
+			return m, nil, true
+		}
 	}
+	return m, nil, false
 }
