@@ -321,11 +321,11 @@ func (km *KeyboardManager) RenderHints() string {
 
 	for _, binding := range activeBindings {
 		// Consider global bindings and primary actions as important
-		if binding.Global || 
-		   binding.Action == KeyActionSelect || 
-		   binding.Action == KeyActionConfirm ||
-		   binding.Action == KeyActionPause ||
-		   binding.Action == KeyActionResume {
+		if binding.Global ||
+			binding.Action == KeyActionSelect ||
+			binding.Action == KeyActionConfirm ||
+			binding.Action == KeyActionPause ||
+			binding.Action == KeyActionResume {
 			important = append(important, binding)
 		} else {
 			normal = append(normal, binding)
@@ -340,7 +340,7 @@ func (km *KeyboardManager) RenderHints() string {
 			if i > 0 {
 				result.WriteString(" | ")
 			}
-			
+
 			// Use the first key as the display key
 			displayKey := binding.Keys[0]
 			result.WriteString(fmt.Sprintf("%s=%s",
@@ -360,7 +360,7 @@ func (km *KeyboardManager) RenderHints() string {
 			if len(important) > 0 || i > 0 {
 				result.WriteString(" | ")
 			}
-			
+
 			displayKey := normal[i].Keys[0]
 			result.WriteString(fmt.Sprintf("%s=%s",
 				style.FileStyle.Render(displayKey),
@@ -402,11 +402,11 @@ func (km *KeyboardManager) RenderFullHelp() string {
 		first = false
 
 		result.WriteString(fmt.Sprintf("│ %s\n", style.HeaderStyle.Render(context)))
-		
+
 		for _, binding := range bindings {
 			keys := strings.Join(binding.Keys, ", ")
 			result.WriteString(fmt.Sprintf("│ %s %s\n",
-				style.HighlightFontStyle.Render(fmt.Sprintf("%-" + "15s", keys)),
+				style.HighlightFontStyle.Render(fmt.Sprintf("%-"+"15s", keys)),
 				binding.Description))
 		}
 	}
@@ -418,15 +418,15 @@ func (km *KeyboardManager) RenderFullHelp() string {
 
 // NavigationState represents the current navigation state
 type NavigationState struct {
-	CurrentIndex    int
-	MaxIndex        int
-	CanGoBack       bool
-	CanGoForward    bool
-	SelectionMode   bool
-	MultiSelect     bool
-	SelectedItems   map[int]bool
-	History         []string
-	HistoryIndex    int
+	CurrentIndex  int
+	MaxIndex      int
+	CanGoBack     bool
+	CanGoForward  bool
+	SelectionMode bool
+	MultiSelect   bool
+	SelectedItems map[int]bool
+	History       []string
+	HistoryIndex  int
 }
 
 // NewNavigationState creates a new navigation state
@@ -504,10 +504,10 @@ func (ns *NavigationState) AddToHistory(state string) {
 	if ns.HistoryIndex < len(ns.History)-1 {
 		ns.History = ns.History[:ns.HistoryIndex+1]
 	}
-	
+
 	ns.History = append(ns.History, state)
 	ns.HistoryIndex = len(ns.History) - 1
-	
+
 	// Limit history size
 	if len(ns.History) > 50 {
 		ns.History = ns.History[1:]
