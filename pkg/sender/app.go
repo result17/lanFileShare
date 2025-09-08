@@ -2,6 +2,7 @@ package sender
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -33,7 +34,7 @@ type App struct {
 	transferTimeout time.Duration
 	transferWG      sync.WaitGroup // Track active transfer goroutines
 
-	selectedReceiver discovery.ServiceInfo
+	selectedReceiver *discovery.ServiceInfo
 
 	// Transfer control
 	currentTransferManager *transfer.UnifiedTransferManager
@@ -132,7 +133,11 @@ func (a *App) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
-func (a *App) handleReceiverSelected(receiver discovery.ServiceInfo) {
+func (a *App) handleReceiverSelected(receiver *discovery.ServiceInfo) {
+	if receiver == nil {
+		a.sendAndLogError("selected receiver is nil", errors.New("receiver is nil"))
+		return
+	}
 	a.selectedReceiver = receiver
 }
 
@@ -163,7 +168,12 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 }
 
 // StartSendProcess is the main entry point for starting a file transfer.
-func (a *App) StartSendProcess(ctx context.Context, receiver discovery.ServiceInfo, files []fileInfo.FileNode) {
+func (a *App) StartSendProcess(ctx context.Context, receiver *discovery.ServiceInfo, files []fileInfo.FileNode) {
+	if receiver == nil {
+		a.sendAndLogError("Receiver can't be nil", errors.New("Receiver is nil"))
+		return
+	}
+	
 	task := func(taskCtx context.Context) error {
 		// Create a new FileStructureManager for this transfer (stateless)
 		fileStructure, err := a.prepareFilesForTransfer(files)

@@ -49,7 +49,7 @@ func TestGracefulShutdown(t *testing.T) {
 	transferCtx, transferCancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer transferCancel()
 
-	app.StartSendProcess(transferCtx, receiver, files)
+	app.StartSendProcess(transferCtx, &receiver, files)
 
 	// Give the transfer goroutine a moment to start and fail
 	time.Sleep(200 * time.Millisecond)
@@ -87,7 +87,7 @@ func TestTransferWaitGroup(t *testing.T) {
 	files := []fileInfo.FileNode{}
 
 	// This should add to the WaitGroup
-	app.StartSendProcess(ctx, receiver, files)
+	app.StartSendProcess(ctx, &receiver, files)
 
 	// Give the goroutine a moment to start and fail
 	time.Sleep(200 * time.Millisecond)

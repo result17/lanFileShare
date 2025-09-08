@@ -11,7 +11,7 @@ import (
 // ReceiverSelectedMsg is an event sent when the user selects a receiver from the list.
 type ReceiverSelectedMsg struct {
 	appevents.Event
-	Receiver discovery.ServiceInfo
+	Receiver *discovery.ServiceInfo
 }
 
 // SendFilesMsg is an event sent when the user confirms which files to send.
