@@ -197,6 +197,7 @@ func (s *ReceiverService) sendAnswer(w http.ResponseWriter, flusher http.Flusher
 			return fmt.Errorf("answer channel was closed unexpectedly")
 		}
 	case <-ctx.Done():
+		slog.Error("sendAnswer ctx canceled")
 		return ctx.Err()
 	}
 

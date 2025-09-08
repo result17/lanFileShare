@@ -35,18 +35,25 @@ type Client struct {
 
 // NewClient creates a new API client, configured to automatically inject the provided serviceID.
 func NewClient(serviceID string) *Client {
-	// 1. Create our custom transport (client-side middleware).
-	transport := &serviceIDInjector{
+	// 1. Create a new transport and explicitly disable the proxy.
+	// By default, Go's HTTP client uses the http_proxy environment variable.
+	// Setting Proxy to nil forces a direct connection, which is crucial for LAN discovery.
+	baseTransport := &http.Transport{
+		Proxy: nil,
+	}
+
+	// 2. Create our custom transport (client-side middleware).
+	transportWithID := &serviceIDInjector{
 		serviceID: serviceID,
-		// 2. Use the default transport as the next step in the chain.
-		next: http.DefaultTransport,
+		// 3. Use our created transport, which has the proxy disabled, as the next hop.
+		next: baseTransport,
 	}
 
 	return &Client{
 		HttpClient: &http.Client{
 			Timeout: 30 * time.Second,
-			// 3. Set the custom transport on the http.Client.
-			Transport: transport,
+			// 4. Set our fully custom transport on the http.Client.
+			Transport: transportWithID,
 		},
 	}
 }
