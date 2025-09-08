@@ -112,8 +112,14 @@ func initSenderModel(appController AppController) senderModel {
 	}
 }
 
-func (m *model) initSender() tea.Cmd {
-	return tea.Batch(m.sender.spinner.Tick, m.listenForAppMessages())
+func (m model) initSender() tea.Cmd {
+	return m.sender.initialSenderCmd()
+}
+
+func (m senderModel) initialSenderCmd() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		return <-m.appController.UIMessages()
+	})
 }
 
 func (m *senderModel) updateReceiverTable(services []discovery.ServiceInfo) {
@@ -131,35 +137,7 @@ func (m *senderModel) updateReceiverTable(services []discovery.ServiceInfo) {
 }
 
 func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.updateSenderByMsg(msg)
-
-	var cmd tea.Cmd
-	// Handle UI events first - this ensures multiFilePicker gets the message
-	switch m.sender.state {
-	case selectingFiles:
-		cmd = m.sender.updateSelectingFilesState(msg)
-	case selectingReceiver:
-		cmd = m.sender.updateSelectingReceiverState(msg)
-	case sendingFiles:
-		cmd = m.sender.updateSendingFilesState(msg)
-	case transferPaused:
-		cmd = m.sender.updateTransferPausedState(msg)
-	case transferComplete, transferFailed:
-		if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
-			m.sender.reset()
-			return m, m.initSender()
-		}
-	}
-
-	// Handle keyboard input through the keyboard manager for non-file-selection states
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && m.sender.state != selectingFiles {
-		action := m.keyboardManager.ProcessKey(keyMsg)
-
-		// Handle state-specific actions
-		return m, m.handleStateSpecificAction(action, keyMsg)
-	}
-
-	return m, cmd
+	return m.updateSenderByMsg(msg)
 }
 
 func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -187,37 +165,42 @@ func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		// user type file path here
 		if m.sender.state == selectingFiles && !m.sender.fp.IsBrowseMode() {
-			return m.sender.fp.Update(keyMsg)
+			newFpModel, cmd := m.sender.fp.Update(keyMsg)
+			m.sender.fp = newFpModel.(multiFilePicker.Model)
+			return m, cmd
 		}
 
 		action := m.keyboardManager.ProcessKey(keyMsg)
-		return m.handleStatsAction(action)
+		mod, cmd, match := m.handleStatsAction(action)
+		if match {
+			return mod, cmd
+		}
+		return m, m.handleStateSpecificAction(action, keyMsg)
 	}
 
 	return m, nil
 }
 
-func (m *model) handleStatsAction(action components.KeyAction) (tea.Model, tea.Cmd) {
+func (m *model) handleStatsAction(action components.KeyAction) (tea.Model, tea.Cmd, bool) {
 	// Handle statistics display mode switching
 	switch action {
 	case components.KeyActionStatsOverview:
 		m.sender.realTimeStats.SetDisplayMode("overview")
-		return m, nil
-
+		return m, nil, true
 	case components.KeyActionStatsDetailed:
 		m.sender.realTimeStats.SetDisplayMode("detailed")
-		return m, nil
+		return m, nil, true
 	case components.KeyActionStatsFiles:
 		m.sender.realTimeStats.SetDisplayMode("files")
-		return m, nil
+		return m, nil, true
 	case components.KeyActionStatsNetwork:
 		m.sender.realTimeStats.SetDisplayMode("network")
-		return m, nil
+		return m, nil, true
 	case components.KeyActionStatsEfficiency:
 		m.sender.realTimeStats.SetDisplayMode("efficiency")
-		return m, nil
+		return m, nil, true
 	}
-	return m, nil
+	return m, nil, false
 }
 
 //nolint:gocyclo
@@ -357,52 +340,6 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 		// Error handling will be managed by the main model		return m.listenForAppMessages(), true
 	}
 	return nil, false
-}
-
-// updateSelectingReceiverState handles UI events for the selectingReceiver state.
-func (m *senderModel) updateSelectingReceiverState(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		action := m.keyboardManager.ProcessKey(msg)
-		switch action {
-		case components.KeyActionSelect:
-			if len(m.services) > 0 {
-				selectedIndex := m.table.Cursor()
-				if selectedIndex >= 0 && selectedIndex < len(m.services) {
-					m.selectedService = m.services[selectedIndex]
-					m.state = selectingFiles
-				} else {
-					// This case should ideally not be hit, but good to have for safety
-					slog.Error("Cursor out of sync", "cursor", selectedIndex, "services_len", len(m.services))
-				}
-				_, cmd := m.table.Update(msg)
-				return cmd
-			}
-		case components.KeyActionNavigateUp, components.KeyActionNavigateDown:
-			_, cmd := m.table.Update(msg)
-			return cmd
-		}
-	}
-	return cmd
-}
-
-func (m *senderModel) updateSelectingFilesState(msg tea.Msg) tea.Cmd {
-	// Update file picker
-	newFpModel, fpCmd := m.fp.Update(msg)
-	m.fp = newFpModel.(multiFilePicker.Model)
-
-	switch msg := msg.(type) {
-	case multiFilePicker.SelectedFileNodeMsg:
-		// We can't handle this here - need to return it to main model
-		// to access appController properly
-		return tea.Cmd(func() tea.Msg {
-			return msg // Pass the message back to main model
-		})
-	}
-
-	// Return UI commands normally
-	return fpCmd
 }
 
 func (m *model) senderView() string {
@@ -872,11 +809,11 @@ func (m *model) handleMenuAction(action components.KeyAction) tea.Cmd {
 func (m *model) handleStateSpecificAction(action components.KeyAction, msg tea.KeyMsg) tea.Cmd {
 	switch m.sender.state {
 	case findingReceivers:
-		return m.handleDiscoveryAction(action, msg)
+		return m.sender.handleDiscoveryAction(action, msg)
 	case selectingReceiver:
-		return m.handleSelectionAction(action)
+		return m.sender.handleSelectionAction(action, msg)
 	case selectingFiles:
-		return m.handleFileSelectionAction(action)
+		return m.sender.handleFileSelectionAction(msg)
 	case sendingFiles, transferPaused:
 		return m.handleTransferAction(action)
 	case transferFailed:
@@ -889,61 +826,83 @@ func (m *model) handleStateSpecificAction(action components.KeyAction, msg tea.K
 }
 
 // handleDiscoveryAction handles actions during discovery phase
-func (m *model) handleDiscoveryAction(action components.KeyAction, msg tea.KeyMsg) tea.Cmd {
-	
+func (m *senderModel) handleDiscoveryAction(action components.KeyAction, msg tea.KeyMsg) tea.Cmd {
+
 	switch action {
 	case components.KeyActionRefresh:
-		return m.initSender()
-	case components.KeyActionBack:
-		// Go back to main menu (if implemented)
-		return nil
+		return m.initialSenderCmd()
 	default:
 		return nil
 	}
 }
 
 // handleSelectionAction handles actions during receiver selection
-func (m *model) handleSelectionAction(action components.KeyAction) tea.Cmd {
+func (m *senderModel) handleSelectionAction(action components.KeyAction, msg tea.KeyMsg) tea.Cmd {
+
 	switch action {
 	case components.KeyActionNavigateUp, components.KeyActionNavigateDown:
-		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
+		keyMsg := m.keyboardManager.ProcessSpecAction(action)
 		var cmd tea.Cmd
-		m.sender.table, cmd = m.sender.table.Update(keyMsg)
+		m.table, cmd = m.table.Update(keyMsg)
 		return cmd
 	case components.KeyActionSelect:
-		keyMsg := m.sender.keyboardManager.ProcessSpecAction(action)
-		m.sender.updateSelectingReceiverState(keyMsg)
+
+		if len(m.services) > 0 {
+			selectedIndex := m.table.Cursor()
+			if selectedIndex >= 0 && selectedIndex < len(m.services) {
+				m.selectedService = m.services[selectedIndex]
+				m.state = selectingFiles
+			} else {
+				// This case should ideally not be hit, but good to have for safety
+				slog.Error("Cursor out of sync", "cursor", selectedIndex, "services_len", len(m.services))
+			}
+			_, cmd := m.table.Update(msg)
+			return cmd
+		}
 		m.appController.AppEvents() <- senderEvent.ReceiverSelectedMsg{}
 		return nil
 	case components.KeyActionBack:
-		return m.initSender()
+		return m.initialSenderCmd()
 	default:
 		return nil
 	}
 }
 
 // handleFileSelectionAction handles actions during file selection
-func (m *model) handleFileSelectionAction(action components.KeyAction) tea.Cmd {
-	switch action {
-	case components.KeyActionConfirm:
-		// Confirm file selection and start transfer
-		return nil
-	case components.KeyActionBack:
-		m.sender.state = selectingReceiver
-		m.sender.keyboardManager.SetContext("selection")
-		return nil
-	default:
-		return nil
+func (m *senderModel) handleFileSelectionAction(msg tea.Msg) tea.Cmd {
+	// Update file picker
+	newFpModel, fpCmd := m.fp.Update(msg)
+	m.fp = newFpModel.(multiFilePicker.Model)
+
+	switch msg := msg.(type) {
+	case multiFilePicker.SelectedFileNodeMsg:
+		// We can't handle this here - need to return it to main model
+		// to access appController properly
+		return tea.Cmd(func() tea.Msg {
+			return msg // Pass the message back to main model
+		})
 	}
+
+	// Return UI commands normally
+	return fpCmd
 }
 
 // handleTransferAction handles actions during transfer
 func (m *model) handleTransferAction(action components.KeyAction) tea.Cmd {
 	switch action {
 	case components.KeyActionPause:
-		return m.handlePauseResume()
+		// Pause transfer
+		return func() tea.Msg {
+			return senderEvent.PauseTransferMsg{}
+		}
 	case components.KeyActionCancel:
-		return m.handleCancel()
+		// Cancel transfer
+		return func() tea.Msg {
+			return senderEvent.CancelTransferMsg{}
+		}
+	case components.KeyActionQuit:
+		// Quit application
+		return tea.Quit
 	default:
 		return nil
 	}

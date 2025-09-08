@@ -207,8 +207,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appevents.AppFinishedMsg:
 		return m, tea.Quit
 	case tickMsg:
-		// Global tick for UI updates
-		cmds = append(cmds, tick(time.Second))
+		return m, tick(time.Second)
 	case tea.KeyMsg:
 		// Process the key through the keyboard manager
 		action := m.keyboardManager.ProcessKey(msg)
