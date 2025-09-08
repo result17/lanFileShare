@@ -170,10 +170,10 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 // StartSendProcess is the main entry point for starting a file transfer.
 func (a *App) StartSendProcess(ctx context.Context, receiver *discovery.ServiceInfo, files []fileInfo.FileNode) {
 	if receiver == nil {
-		a.sendAndLogError("Receiver can't be nil", errors.New("Receiver is nil"))
+		a.sendAndLogError("Receiver can't be nil", errors.New("receiver is nil"))
 		return
 	}
-	
+
 	task := func(taskCtx context.Context) error {
 		// Create a new FileStructureManager for this transfer (stateless)
 		fileStructure, err := a.prepareFilesForTransfer(files)

@@ -8,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
-	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
@@ -31,6 +30,7 @@ const (
 	None Mode = iota
 	Sender
 	Receiver
+	FatalError
 )
 
 type model struct {
@@ -40,7 +40,6 @@ type model struct {
 	receiver             receiverModel
 	ctx                  context.Context
 	cancel               context.CancelFunc
-	err                  error
 	statusIndicator      *components.StatusIndicator // Global status indicator
 	quickTip             *components.QuickTip        // Global quick tip
 	themeManager         *components.ThemeManager
@@ -152,10 +151,6 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) View() string {
-	if m.err != nil {
-		return style.ErrorStyle.Render(m.err.Error()) + "\n\nPress ctrl+c to quit."
-	}
-
 	// Show theme selector if visible (overlay)
 	if m.themeSelector.IsVisible() {
 		return m.themeSelector.Render()
@@ -180,6 +175,8 @@ func (m model) View() string {
 		s += m.senderView()
 	case Receiver:
 		s += m.receiverView()
+	case FatalError:
+		return m.errorHandler.Render()
 	default:
 		return ""
 	}
@@ -201,9 +198,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case appevents.Error:
-		m.err = msg.Err
-		m.errorHandler.AddError(components.ErrorTypeUnknown, "Application Error", msg.Err.Error(), true)
-		return m, tea.Quit
+		m.renderFatalErr(msg.Err)
+		return m, nil
 	case appevents.AppFinishedMsg:
 		return m, tea.Quit
 	case tickMsg:
@@ -329,3 +325,7 @@ func (m *model) listenForAppMessages() tea.Cmd {
 	}
 }
 
+func (m *model) renderFatalErr(err error) {
+	m.errorHandler.AddError(components.ErrorTypeUnknown, "Application Error", err.Error(), true)
+	m.mode = FatalError
+}

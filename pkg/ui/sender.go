@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -39,7 +40,7 @@ type senderModel struct {
 	table            table.Model
 	fp               multiFilePicker.Model
 	services         []discovery.ServiceInfo
-	selectedService  discovery.ServiceInfo
+	selectedService  *discovery.ServiceInfo
 	statsCollector   *components.AdvancedStatsCollector
 	realTimeStats    *components.RealTimeStatsPanel
 	rateChart        *components.LineChart
@@ -323,12 +324,10 @@ func (m *model) handleSenderAppEvent(msg appevents.AppEvent) (tea.Cmd, bool) {
 		m.statusIndicator.AddMessage(components.StatusWarning, "Transfer cancelled by user")
 		return m.listenForAppMessages(), true
 	case appevents.Error:
-		m.err = msg.Err
 		m.sender.state = transferFailed
 		m.helpPanel.SetContext(components.HelpContextError)
 		m.keyboardManager.SetContext("error")
 		m.breadcrumb.AddItem("Error", "error", "❌", false)
-
 		// Classify error type for better handling
 		errorType := m.classifyError(msg.Err)
 		m.errorHandler.AddError(errorType, "Transfer failed", msg.Err.Error(), true)
@@ -362,13 +361,20 @@ func (m *model) senderView() string {
 			mainContent += "Use arrow keys to navigate, Enter to select."
 		}
 	case selectingFiles:
-		receiverInfo := fmt.Sprintf("Receiver: %s", style.HighlightFontStyle.Render(m.sender.selectedService.Name))
+		var receiverName string
+		if m.sender.selectedService != nil {
+			receiverName = m.sender.selectedService.Name
+		}
+		receiverInfo := fmt.Sprintf("Receiver: %s", style.HighlightFontStyle.Render(receiverName))
 		if m.responsiveLayout.IsCompactMode() {
 			receiverInfo = m.responsiveLayout.TruncateText(receiverInfo)
 		}
 		mainContent = receiverInfo + "\n" + m.sender.fp.View() + "\n"
 	case waitingForReceiverConfirmation:
-		receiverName := m.sender.selectedService.Name
+		var receiverName string
+		if m.sender.selectedService != nil {
+			receiverName = m.sender.selectedService.Name
+		}
 		if m.responsiveLayout.IsCompactMode() {
 			receiverName = m.responsiveLayout.TruncateText(receiverName)
 		}
@@ -476,7 +482,10 @@ func (m *model) renderTransferProgress() string {
 	var result strings.Builder
 
 	// Header with receiver info (adapt to layout)
-	receiverName := m.sender.selectedService.Name
+	var receiverName string
+	if m.sender.selectedService != nil {
+		receiverName = m.sender.selectedService.Name
+	}
 	if m.responsiveLayout.IsCompactMode() {
 		receiverName = m.responsiveLayout.TruncateText(receiverName)
 	}
@@ -538,8 +547,12 @@ func (m *model) renderTransferPaused() string {
 	var result strings.Builder
 
 	// Header with pause indicator
+	var receiverName string
+	if m.sender.selectedService != nil {
+		receiverName = m.sender.selectedService.Name
+	}
 	result.WriteString(fmt.Sprintf("\n⏸️  Transfer paused to %s\n\n",
-		style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
+		style.HighlightFontStyle.Render(receiverName)))
 
 	// Enhanced progress display with paused status
 	if m.sender.progressBar != nil {
@@ -631,8 +644,12 @@ func (m *model) renderTransferComplete() string {
 	var result strings.Builder
 
 	// Success header
+	var receiverName string
+	if m.sender.selectedService != nil {
+		receiverName = m.sender.selectedService.Name
+	}
 	result.WriteString(fmt.Sprintf("\n✅ Transfer completed successfully to %s!\n\n",
-		style.HighlightFontStyle.Render(m.sender.selectedService.Name)))
+		style.HighlightFontStyle.Render(receiverName)))
 
 	// Final progress display (complete status)
 	if m.sender.progressBar != nil {
@@ -697,8 +714,8 @@ func (m *model) renderTransferFailed() string {
 	}
 
 	// Fallback error message if no status indicator
-	if m.err != nil && m.statusIndicator == nil {
-		result.WriteString(fmt.Sprintf("Error: %s\n\n", style.ErrorStyle.Render(m.err.Error())))
+	if m.statusIndicator == nil {
+		m.renderFatalErr(errors.New("statusIndicator is nil"))
 	}
 
 	// Control hints for failure
@@ -848,7 +865,7 @@ func (m *senderModel) handleSelectionAction(action components.KeyAction, msg tea
 		if len(m.services) > 0 {
 			selectedIndex := m.table.Cursor()
 			if selectedIndex >= 0 && selectedIndex < len(m.services) {
-				m.selectedService = m.services[selectedIndex]
+				m.selectedService = &m.services[selectedIndex]
 				m.state = selectingFiles
 			} else {
 				// This case should ideally not be hit, but good to have for safety
@@ -856,7 +873,7 @@ func (m *senderModel) handleSelectionAction(action components.KeyAction, msg tea
 			}
 			_, cmd := m.table.Update(msg)
 			m.appController.AppEvents() <- senderEvent.ReceiverSelectedMsg{
-				Receiver: &m.selectedService,
+				Receiver: m.selectedService,
 			}
 			return cmd
 		}

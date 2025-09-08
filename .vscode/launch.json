@@ -10,7 +10,10 @@
             "args": ["send"],
             "console": "integratedTerminal",
             "internalConsoleOptions": "neverOpen",
-            "showLoadGoRuntimeMessage": true
+            "showLoadGoRuntimeMessage": true,
+            "env": {
+                "no_proxy": "localhost,127.0.0.1,192.168.0.100"
+            }
         },
           {
             "name": "Launch receiver TUI App",
@@ -18,10 +21,13 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/lanfilesharer",
-            "args": ["receive"],
+            "args": ["receive", "-p", "7120"],
             "console": "integratedTerminal",
             "internalConsoleOptions": "neverOpen",
-            "showLoadGoRuntimeMessage": true
+            "showLoadGoRuntimeMessage": true,
+            "env": {
+                "no_proxy": "localhost,127.0.0.1,192.168.0.100"
+            }
         }
     ]
 }

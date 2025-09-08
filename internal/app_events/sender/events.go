@@ -38,11 +38,11 @@ type StatusUpdateMsg struct {
 	Message string
 }
 
-type TransferStartedMsg struct{
+type TransferStartedMsg struct {
 	appevents.Event
 }
 
-type ReceiverAcceptedMsg struct{
+type ReceiverAcceptedMsg struct {
 	appevents.Event
 }
 
@@ -58,7 +58,7 @@ type ProgressUpdateMsg struct {
 	OverallProgress  float64 // percentage 0-100
 }
 
-type TransferCompleteMsg struct{
+type TransferCompleteMsg struct {
 	appevents.Event
 }
 
@@ -76,12 +76,12 @@ type CancelTransferMsg struct {
 }
 
 // Transfer control response events
-type TransferPausedMsg struct{
+type TransferPausedMsg struct {
 	appevents.Event
 }
-type TransferResumedMsg struct{
+type TransferResumedMsg struct {
 	appevents.Event
 }
-type TransferCancelledMsg struct{
+type TransferCancelledMsg struct {
 	appevents.Event
 }
