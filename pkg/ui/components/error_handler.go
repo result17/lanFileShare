@@ -35,10 +35,10 @@ type ErrorInfo struct {
 
 // ErrorHandler manages error display and recovery suggestions
 type ErrorHandler struct {
-	errors      []ErrorInfo
-	maxErrors   int
-	autoRetry   bool
-	retryDelay  time.Duration
+	errors     []ErrorInfo
+	maxErrors  int
+	autoRetry  bool
+	retryDelay time.Duration
 }
 
 // NewErrorHandler creates a new error handler
@@ -144,6 +144,16 @@ func (eh *ErrorHandler) Render() string {
 func (eh *ErrorHandler) renderError(err ErrorInfo, detailed bool) string {
 	var result strings.Builder
 
+	// Define a style for the details text with word wrapping
+	// We'll set the width dynamically based on terminal size if possible,
+	// otherwise fallback to a reasonable default.
+	// For now, let's use a fixed width for simplicity. A more advanced
+	// implementation would get the terminal width from the main model.
+	detailStyle := lipgloss.NewStyle().
+		Foreground(style.FileStyle.GetForeground()).
+		Width(80). // Set a max width for word wrapping
+		PaddingLeft(3)
+
 	// Error header with icon and type
 	icon := eh.getErrorIcon(err.Type)
 	typeStr := eh.getErrorTypeString(err.Type)
@@ -155,40 +165,38 @@ func (eh *ErrorHandler) renderError(err ErrorInfo, detailed bool) string {
 			headerStyle.Render(typeStr),
 			headerStyle.Render(err.Message)))
 
-		// Add details if available
+		// Add details if available, now with word wrapping
 		if err.Details != "" {
-			result.WriteString(fmt.Sprintf("   %s\n", style.FileStyle.Render(err.Details)))
+			result.WriteString(detailStyle.Render(err.Details) + "\n")
 		}
 
 		// Add timestamp
 		timeStr := err.Timestamp.Format("15:04:05")
-		result.WriteString(fmt.Sprintf("   %s\n", style.FileStyle.Render(fmt.Sprintf("Time: %s", timeStr))))
+		result.WriteString(detailStyle.Render(fmt.Sprintf("Time: %s", timeStr)) + "\n")
 
 		// Add retry information
 		if err.Recoverable {
 			if err.RetryCount > 0 {
-				result.WriteString(fmt.Sprintf("   %s\n",
-					style.FileStyle.Render(fmt.Sprintf("Retries: %d/%d", err.RetryCount, err.MaxRetries))))
+				result.WriteString(detailStyle.Render(
+					fmt.Sprintf("Retries: %d/%d", err.RetryCount, err.MaxRetries)) + "\n")
 			}
 
 			if err.RetryCount < err.MaxRetries {
-				result.WriteString(fmt.Sprintf("   %s\n",
-					lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("This error can be retried")))
+				result.WriteString(detailStyle.Foreground(lipgloss.Color("39")).Render("This error can be retried") + "\n")
 			} else {
-				result.WriteString(fmt.Sprintf("   %s\n",
-					style.ErrorStyle.Render("Maximum retries exceeded")))
+				result.WriteString(detailStyle.Inherit(style.ErrorStyle).Render("Maximum retries exceeded") + "\n")
 			}
 		} else {
-			result.WriteString(fmt.Sprintf("   %s\n",
-				style.ErrorStyle.Render("This error cannot be automatically recovered")))
+			result.WriteString(detailStyle.Inherit(style.ErrorStyle).Render("This error cannot be automatically recovered") + "\n")
 		}
 
 		// Add suggestions
 		if len(err.Suggestions) > 0 {
 			result.WriteString("\n   💡 Suggestions:\n")
+			suggestionStyle := lipgloss.NewStyle().PaddingLeft(3)
 			for _, suggestion := range err.Suggestions {
-				result.WriteString(fmt.Sprintf("   • %s\n",
-					lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(suggestion)))
+				result.WriteString(suggestionStyle.Render(
+					fmt.Sprintf("• %s", lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(suggestion))) + "\n")
 			}
 		}
 	} else {

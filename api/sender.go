@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -51,8 +50,10 @@ func NewClient(serviceID string) *Client {
 
 	return &Client{
 		HttpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			// 4. Set our fully custom transport on the http.Client.
+			// Timeout is intentionally not set here.
+			// Timeouts are controlled on a per-request basis using the context
+			// passed to methods like SendOffer, SendICECandidateRequest, etc.
+			// This is crucial for long-polling requests like the /ask endpoint.
 			Transport: transportWithID,
 		},
 	}

@@ -56,7 +56,7 @@ func NewApp(adapter discovery.Adapter) *App {
 		uiMessages:      make(chan tea.Msg, 10),
 		appEvents:       make(chan appevents.AppEvent),
 		webrtcAPI:       webrtcAPI,
-		transferTimeout: 2 * time.Minute,
+		transferTimeout: 15 * time.Minute,
 	}
 }
 
