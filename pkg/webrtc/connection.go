@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,52 @@ const (
 	MTU uint = 1400
 )
 
+// validateSDP checks if the SessionDescription contains required ICE information
+func validateSDP(sd webrtc.SessionDescription, sdpType string) error {
+	if sd.SDP == "" {
+		return fmt.Errorf("%s SDP is empty", sdpType)
+	}
+
+	// Check for ICE ufrag (user fragment) - this is required for ICE to work
+	hasUfrag := strings.Contains(sd.SDP, "a=ice-ufrag:")
+	if !hasUfrag {
+		// Log detailed debug info for missing ufrag
+		slog.Error("SDP missing ice-ufrag",
+			"type", sdpType,
+			"sdp_length", len(sd.SDP),
+			"has_ice_lines", strings.Contains(sd.SDP, "a=ice-"),
+			"has_candidate_lines", strings.Contains(sd.SDP, "a=candidate:"),
+			"sdp_preview", sd.SDP[:min(len(sd.SDP), 500)])
+		return fmt.Errorf("%s SDP missing ice-ufrag attribute", sdpType)
+	}
+
+	// Check for ICE pwd (password) - also required for ICE
+	hasPwd := strings.Contains(sd.SDP, "a=ice-pwd:")
+	if !hasPwd {
+		return fmt.Errorf("%s SDP missing ice-pwd attribute", sdpType)
+	}
+
+	// Count ICE candidates for additional insight
+	candidateCount := strings.Count(sd.SDP, "a=candidate:")
+
+	// Log SDP details for debugging
+	slog.Info("SDP validation passed",
+		"type", sdpType,
+		"sdp_length", len(sd.SDP),
+		"has_ufrag", hasUfrag,
+		"has_pwd", hasPwd,
+		"candidate_count", candidateCount)
+	return nil
+}
+
+// Helper function since Go doesn't have built-in min for int
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // Connection wraps a single WebRTC peer connection and its state.
 type Connection struct {
 	peerConnection *webrtc.PeerConnection
@@ -61,6 +108,7 @@ type SenderConn struct {
 	signaler         Signaler // Used to send signals to the remote peer
 	serializer       transfer.MessageSerializer
 	progressSignaler ProgressSignaler // Optional progress signaler
+	dataChannel      *webrtc.DataChannel // Store the data channel reference
 }
 
 // SetSignaler allows setting a custom signaler (mainly for testing)
@@ -85,6 +133,8 @@ func NewWebrtcAPI() *WebrtcAPI {
 	settings := webrtc.SettingEngine{}
 	settings.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
 	settings.SetReceiveMTU(MTU)
+	// Set more conservative ICE timeouts for better reliability
+	settings.SetICETimeouts(30*time.Second, 10*time.Second, 3*time.Second)
 
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
 	return &WebrtcAPI{
@@ -95,17 +145,44 @@ func NewWebrtcAPI() *WebrtcAPI {
 func (a *WebrtcAPI) createPeerConnection(config Config) (*webrtc.PeerConnection, error) {
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: config.ICEServers,
+		// Enable bundle policy for better compatibility
+		BundlePolicy: webrtc.BundlePolicyMaxBundle,
+		// Use aggressive ICE mode for faster connection establishment
+		ICETransportPolicy: webrtc.ICETransportPolicyAll,
 	}
 	if len(config.ICEServers) == 0 {
+		// Use multiple STUN servers for better reliability
 		peerConnectionConfig.ICEServers = []webrtc.ICEServer{
 			{URLs: []string{"stun:stun.l.google.com:19302"}},
+			{URLs: []string{"stun:stun1.l.google.com:19302"}},
+			{URLs: []string{"stun:stun2.l.google.com:19302"}},
 		}
 	}
+
+	slog.Info("Creating PeerConnection", "ice_servers_count", len(peerConnectionConfig.ICEServers))
+	for i, server := range peerConnectionConfig.ICEServers {
+		slog.Debug("ICE Server", "index", i, "urls", server.URLs)
+	}
+
 	pc, err := a.api.NewPeerConnection(peerConnectionConfig)
 	if err != nil {
 		// Just wrap and return. Let the caller log.
 		return nil, fmt.Errorf("failed to create new peer connection: %w", err)
 	}
+
+	// Add detailed state change logging
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		slog.Info("PeerConnection state changed", "state", state.String())
+	})
+
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		slog.Info("ICE connection state changed", "state", state.String())
+	})
+
+	pc.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
+		slog.Info("ICE gathering state changed", "state", state.String())
+	})
+
 	return pc, nil
 }
 
@@ -165,13 +242,10 @@ func (c *SenderConn) Establish(ctx context.Context, fsm *transfer.FileStructureM
 		return err
 	}
 
-	offer, err := c.Peer().CreateOffer(nil)
+	// Create offer and wait for ICE gathering completion
+	localDesc, err := c.createOfferAndWaitForICE(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to create offer: %w", err)
-	}
-
-	if err := c.Peer().SetLocalDescription(offer); err != nil {
-		return fmt.Errorf("failed to set local description: %w", err)
+		return fmt.Errorf("failed to create valid offer: %w", err)
 	}
 
 	fileStructureSigner, err := crypto.NewFileStructureSigner()
@@ -184,7 +258,8 @@ func (c *SenderConn) Establish(ctx context.Context, fsm *transfer.FileStructureM
 		return fmt.Errorf("failed to sign file structure: %w", err)
 	}
 
-	if err := c.signaler.SendOffer(ctx, offer, signed); err != nil {
+	// Send the offer with the complete local description.
+	if err := c.signaler.SendOffer(ctx, *localDesc, signed); err != nil {
 		return fmt.Errorf("failed to send offer via signaler: %w", err)
 	}
 
@@ -193,15 +268,142 @@ func (c *SenderConn) Establish(ctx context.Context, fsm *transfer.FileStructureM
 		return fmt.Errorf("failed to wait for answer: %w", err)
 	}
 
-	if err := c.Peer().SetRemoteDescription(*answer); err != nil {
+	// Validate the received answer contains required ICE information
+	if answer == nil {
+		return fmt.Errorf("received nil answer")
+	}
+	if err := validateSDP(*answer, "answer"); err != nil {
+		slog.Error("Invalid answer SDP received", "error", err, "sdp", answer.SDP)
+		return fmt.Errorf("invalid answer SDP: %w", err)
+	}
+
+	if err := c.retrySetRemoteDescription(*answer, 3); err != nil {
 		return fmt.Errorf("failed to set remote description for answer: %w", err)
 	}
 
 	return nil
 }
 
+// retrySetRemoteDescription attempts to set the remote description with retry logic
+// This helps handle temporary ICE gathering issues
+func (c *Connection) retrySetRemoteDescription(sd webrtc.SessionDescription, maxRetries int) error {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		err := c.peerConnection.SetRemoteDescription(sd)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		slog.Warn("SetRemoteDescription failed, retrying", "attempt", i+1, "max_retries", maxRetries, "error", err)
+
+		// Wait before retrying
+		if i < maxRetries-1 {
+			time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("failed to set remote description after %d retries: %w", maxRetries, lastErr)
+}
+
+// createOfferAndWaitForICE creates an offer and waits for ICE gathering with flexible validation
+func (c *SenderConn) createOfferAndWaitForICE(ctx context.Context) (*webrtc.SessionDescription, error) {
+	slog.Info("Creating initial offer")
+	
+	// IMPORTANT: Create data channel BEFORE creating the offer
+	// This ensures the offer includes the data channel in the SDP
+	var err error
+	c.dataChannel, err = c.CreateDataChannel("file-transfer", &webrtc.DataChannelInit{
+		Ordered: &[]bool{true}[0],
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create data channel before offer: %w", err)
+	}
+	slog.Info("Data channel created, now creating offer")
+	
+	// Create the offer (now it will include the data channel)
+	offer, err := c.Peer().CreateOffer(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create offer: %w", err)
+	}
+
+	// Log current signaling state before setting local description
+	slog.Info("Setting local description", "signaling_state", c.Peer().SignalingState().String())
+
+	// Set local description
+	if err := c.Peer().SetLocalDescription(offer); err != nil {
+		return nil, fmt.Errorf("failed to set local description: %w", err)
+	}
+
+	// Wait for ICE gathering to complete with extended timeout
+	gatheringComplete := webrtc.GatheringCompletePromise(c.Peer())
+	timeout := 30 * time.Second // Increased timeout for better reliability
+
+	// Monitor ICE gathering state changes
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-gatheringComplete:
+			slog.Info("ICE gathering completed successfully")
+			return c.validateAndReturnLocalDescription()
+
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context canceled during ICE gathering: %w", ctx.Err())
+
+		case <-ticker.C:
+			// Periodic status update
+			gatheringState := c.Peer().ICEGatheringState()
+			slog.Info("ICE gathering progress", "state", gatheringState.String())
+
+			// If gathering is complete but promise didn't fire, break out
+			if gatheringState == webrtc.ICEGatheringStateComplete {
+				slog.Info("ICE gathering detected as complete via polling")
+				return c.validateAndReturnLocalDescription()
+			}
+
+		case <-time.After(timeout):
+			slog.Warn("ICE gathering timeout, attempting to use current description", "timeout", timeout)
+			// Try to proceed with whatever we have
+			return c.validateAndReturnLocalDescription()
+		}
+	}
+}
+
+// validateAndReturnLocalDescription gets and validates the current local description
+func (c *SenderConn) validateAndReturnLocalDescription() (*webrtc.SessionDescription, error) {
+	// Get the current local description
+	localDesc := c.Peer().LocalDescription()
+	if localDesc == nil {
+		return nil, fmt.Errorf("local description is nil after ICE gathering")
+	}
+
+	// Log detailed state information
+	slog.Info("Current connection state",
+		"signaling_state", c.Peer().SignalingState().String(),
+		"ice_gathering_state", c.Peer().ICEGatheringState().String(),
+		"ice_connection_state", c.Peer().ICEConnectionState().String(),
+		"sdp_length", len(localDesc.SDP))
+
+	// Try to validate the SDP
+	if err := validateSDP(*localDesc, "offer"); err != nil {
+		slog.Error("SDP validation failed, returning error", "error", err, "sdp", localDesc.SDP)
+		return nil, fmt.Errorf("SDP validation failed: %w", err)
+	}
+
+	slog.Info("SDP validation passed successfully")
+	return localDesc, nil
+}
+
 func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
-	if err := c.Peer().SetRemoteDescription(offer); err != nil {
+	// Validate the received offer contains required ICE information
+	if err := validateSDP(offer, "offer"); err != nil {
+		slog.Error("Invalid offer SDP received", "error", err, "sdp", offer.SDP)
+		return nil, fmt.Errorf("invalid offer SDP: %w", err)
+	}
+
+	if err := c.retrySetRemoteDescription(offer, 3); err != nil {
+		slog.Error("SetRemoteDescription failed", "error", err, "offer_type", offer.Type, "sdp_length", len(offer.SDP))
 		return nil, fmt.Errorf("failed to set remote description: %w", err)
 	}
 
@@ -213,6 +415,13 @@ func (c *ReceiverConn) HandleOfferAndCreateAnswer(offer webrtc.SessionDescriptio
 	if err := c.Peer().SetLocalDescription(answer); err != nil {
 		return nil, fmt.Errorf("failed to set local description for answer: %w", err)
 	}
+
+	// Validate the created answer contains required ICE information
+	if err := validateSDP(answer, "answer"); err != nil {
+		slog.Error("Generated answer SDP is invalid", "error", err)
+		return nil, fmt.Errorf("generated invalid answer SDP: %w", err)
+	}
+
 	return &answer, nil
 }
 
@@ -245,16 +454,15 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 		}
 	}
 
+	// Use the data channel that was created during offer creation
+	if c.dataChannel == nil {
+		return fmt.Errorf("data channel not found - it should have been created during offer creation")
+	}
+	dataChannel := c.dataChannel
+
 	var channelReadyOnce sync.Once
 	channelReady := make(chan struct{})
 	channelError := make(chan error, 1)
-
-	dataChannel, err := c.CreateDataChannel("file-transfer", &webrtc.DataChannelInit{
-		Ordered: &[]bool{true}[0],
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create data channel: %w", err)
-	}
 
 	dataChannel.OnOpen(func() {
 		slog.Info("Data channel opened for file transfer")

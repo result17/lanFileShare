@@ -198,6 +198,7 @@ func (s *ReceiverService) sendAnswer(w http.ResponseWriter, flusher http.Flusher
 		}
 	case <-ctx.Done():
 		slog.Error("sendAnswer ctx canceled")
+		s.uiMessages <- receiver.TransferTimeoutMsg{}
 		return ctx.Err()
 	}
 

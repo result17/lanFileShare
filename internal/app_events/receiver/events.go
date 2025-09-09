@@ -36,3 +36,8 @@ type StatusUpdateMsg struct {
 	appevents.AppUIMessage
 	Message string
 }
+
+// TransferTimeoutMsg is sent when the sender does not respond in time.
+type TransferTimeoutMsg struct {
+	appevents.AppUIMessage
+}

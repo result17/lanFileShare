@@ -243,7 +243,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.responsiveLayout.Update(msg)
 		// Update status bar width
 		m.statusBar.SetWidth(msg.Width)
-		slog.Info("window size is ", msg)
 	}
 
 	// Handle mode-specific updates

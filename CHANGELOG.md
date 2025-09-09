@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **WebRTC Signaling Race Condition**: Resolved an issue where `SetRemoteDescription` would fail with a "no ice-ufrag" error.
+  - **Root Cause**: A race condition occurred where the SDP offer was sent before the asynchronous ICE gathering process had completed, resulting in an incomplete offer missing essential ICE credentials (`ice-ufrag`).
+  - **Scenario**:
+    - `CreateOffer` and `SetLocalDescription` were called in sequence.
+    - `SetLocalDescription` triggers an asynchronous process to gather ICE candidates and populate the local description.
+    - The application immediately sent the offer *before* this process could finish.
+    - The receiver would get an offer without an `ice-ufrag` and fail.
+  - **Solution**: Implemented `webrtc.GatheringCompletePromise` to block execution until ICE gathering is fully complete.
+  - **Method Fixed**: `pkg/webrtc/connection.go` -> `SenderConn.Establish()`
+  - **Impact**: Ensures that a complete and valid SDP offer is always sent, making the WebRTC connection establishment reliable and preventing signaling errors.
+
 - **Critical Deadlock Prevention**: Resolved potential deadlock in UnifiedTransferManager by establishing consistent mutex lock ordering
   - **Root Cause**: Inconsistent lock acquisition order between `statusMu` and `queueMu` across different methods created classic "deadly embrace" scenarios
   - **Deadlock Scenario**:
