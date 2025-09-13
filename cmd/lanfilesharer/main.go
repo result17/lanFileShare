@@ -17,7 +17,11 @@ import (
 func runWithUIMode(mode ui.Mode, cmd *cobra.Command) {
 	port, _ := cmd.Flags().GetInt("port")
 	outputDir, _ := cmd.Flags().GetString("output")
-	setLogOutput(mode)
+	loggerErr, f := setLogOutput(mode)
+
+	if loggerErr == nil {
+		defer f()
+	}
 
 	model := ui.InitialModel(mode, port, outputDir)
 	p := tea.NewProgram(model)
@@ -27,7 +31,7 @@ func runWithUIMode(mode ui.Mode, cmd *cobra.Command) {
 	}
 }
 
-func setLogOutput(mode ui.Mode) {
+func setLogOutput(mode ui.Mode) (error, func()) {
 	var outputFile string
 	switch mode {
 	case ui.Sender:
@@ -38,13 +42,20 @@ func setLogOutput(mode ui.Mode) {
 		outputFile = "debug.log"
 	}
 
-	f, _ := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer func() {
+	f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	
+	if err != nil {
+		fmt.Printf("Failed to set logger output path %s", err)
+		return err, nil
+	}
+	
+	log.SetOutput(f)
+
+	return nil, func() {
 		if err := f.Close(); err != nil {
 			slog.Warn("failed to close log file", "error", err)
 		}
-	}()
-	log.SetOutput(f)
+	}
 }
 
 func main() {
