@@ -17,6 +17,7 @@ import (
 func runWithUIMode(mode ui.Mode, cmd *cobra.Command) {
 	port, _ := cmd.Flags().GetInt("port")
 	outputDir, _ := cmd.Flags().GetString("output")
+	setLogOutput(mode)
 
 	model := ui.InitialModel(mode, port, outputDir)
 	p := tea.NewProgram(model)
@@ -26,23 +27,35 @@ func runWithUIMode(mode ui.Mode, cmd *cobra.Command) {
 	}
 }
 
-func main() {
-	f, _ := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func setLogOutput(mode ui.Mode) {
+	var outputFile string
+	switch mode {
+	case ui.Sender:
+		outputFile = "debug_sender.log"
+	case ui.Receiver:
+		outputFile = "debug_receiver.log"
+	default:
+		outputFile = "debug.log"
+	}
+
+	f, _ := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	defer func() {
 		if err := f.Close(); err != nil {
 			slog.Warn("failed to close log file", "error", err)
 		}
 	}()
 	log.SetOutput(f)
+}
 
+func main() {
 	cmd := &cobra.Command{
 		Use:   "lanFileSharer",
 		Short: "A file sharing application for local networks",
 	}
 
 	cmd.PersistentFlags().IntP("port", "p", 8080, "Port to listen on")
-	
-	cmd.PersistentFlags().StringP("output", "o", ".", "Output directory for received files")
+
+	cmd.PersistentFlags().StringP("output", "o", "./lanFileSharer", "Output directory for received files")
 
 	receiveCmd := &cobra.Command{
 		Use:   "receive",

@@ -21,7 +21,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/cmd/lanfilesharer",
-            "args": ["receive", "-p", "7120"],
+            "args": ["receive", "-p", "7120", "o", "./lanFileSharer"],
             "console": "integratedTerminal",
             "internalConsoleOptions": "neverOpen",
             "showLoadGoRuntimeMessage": true,

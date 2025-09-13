@@ -107,7 +107,7 @@ type SenderConn struct {
 	*Connection
 	signaler         Signaler // Used to send signals to the remote peer
 	serializer       transfer.MessageSerializer
-	progressSignaler ProgressSignaler // Optional progress signaler
+	progressSignaler ProgressSignaler    // Optional progress signaler
 	dataChannel      *webrtc.DataChannel // Store the data channel reference
 }
 
@@ -308,7 +308,7 @@ func (c *Connection) retrySetRemoteDescription(sd webrtc.SessionDescription, max
 // createOfferAndWaitForICE creates an offer and waits for ICE gathering with flexible validation
 func (c *SenderConn) createOfferAndWaitForICE(ctx context.Context) (*webrtc.SessionDescription, error) {
 	slog.Info("Creating initial offer")
-	
+
 	// IMPORTANT: Create data channel BEFORE creating the offer
 	// This ensures the offer includes the data channel in the SDP
 	var err error
@@ -318,8 +318,9 @@ func (c *SenderConn) createOfferAndWaitForICE(ctx context.Context) (*webrtc.Sess
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data channel before offer: %w", err)
 	}
+	slog.Info("Data channel created before offer", "label", "file-transfer")
 	slog.Info("Data channel created, now creating offer")
-	
+
 	// Create the offer (now it will include the data channel)
 	offer, err := c.Peer().CreateOffer(nil)
 	if err != nil {
@@ -438,6 +439,7 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 		}
 	}()
 
+	// TODO using app event to update app state
 	// Add progress listener if progress signaler is available
 	if c.progressSignaler != nil {
 		// Set the transfer manager reference in the progress signaler
@@ -466,7 +468,7 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 
 	dataChannel.OnOpen(func() {
 		slog.Info("Data channel opened for file transfer")
-		close(channelReady)
+		// Only signal readiness once to avoid double-close panics
 		channelReadyOnce.Do(func() { close(channelReady) })
 	})
 
@@ -475,6 +477,7 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 		case channelError <- err:
 		default:
 		}
+		// Ensure waiters are released even if an error happens before OnOpen
 		channelReadyOnce.Do(func() { close(channelReady) })
 	})
 
@@ -486,6 +489,9 @@ func (c *SenderConn) SendFiles(ctx context.Context, files []fileInfo.FileNode, s
 		// Clean up channels if they weren't closed
 		channelReadyOnce.Do(func() { close(channelReady) })
 	}()
+
+	// Initial channel state before waiting
+	slog.Info("Waiting for data channel to open", "ready_state", dataChannel.ReadyState().String(), "buffered_amount", dataChannel.BufferedAmount())
 
 	select {
 	case <-channelReady:
@@ -596,11 +602,13 @@ func (c *SenderConn) transferFileChunks(ctx context.Context, dataChannel *webrtc
 			}
 
 			// Send chunk
+			slog.Debug("Sending chunk over data channel", "file", fileNode.Path, "seq", chunk.SequenceNo, "offset", chunk.Offset, "size", len(chunk.Data), "buffered_amount", dataChannel.BufferedAmount())
 			if err := c.sendMessage(dataChannel, chunkMsg); err != nil {
 				return fmt.Errorf("failed to send chunk %d: %w", chunk.SequenceNo, err)
 			}
 
 			// Update progress
+			// TODO maybe add chunk size
 			totalBytesSent += int64(len(chunk.Data))
 			if err := utm.UpdateProgress(fileNode.Path, totalBytesSent); err != nil {
 				slog.Warn("Failed to update progress", "file", fileNode.Path, "error", err)
@@ -624,6 +632,7 @@ func (c *SenderConn) sendMessage(dataChannel *webrtc.DataChannel, msg *transfer.
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
+	slog.Info("DataChannel send", "bytes", len(data), "dataChannel label", dataChannel.Label())
 	return dataChannel.Send(data)
 }
 

@@ -97,6 +97,8 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 		}
 	}()
 	scanner := bufio.NewScanner(resp.Body)
+	// Increase the scanner buffer to safely handle large SDP/JSON payloads
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20) // up to 1MiB per token
 	var currentEvent string
 	var dataBuffer = &bytes.Buffer{}
 	var answerReceived, rejectionReceived bool
@@ -106,7 +108,7 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 
 		if line == "" { // Event boundary
 			if dataBuffer.Len() > 0 {
-				// Dispatch the buffered data
+				// Dispatch the buffered data for the current event
 				s.routeEvent(currentEvent, strings.TrimSuffix(dataBuffer.String(), "\n"))
 				dataBuffer.Reset()
 			}
@@ -116,8 +118,11 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 		if eventValue, found := strings.CutPrefix(line, "event:"); found {
 			currentEvent = strings.TrimSpace(eventValue)
 		} else if dataValue, found := strings.CutPrefix(line, "data:"); found {
-			dataBuffer.WriteString(strings.TrimSpace(dataValue))
-			dataBuffer.WriteString("\n")
+			data := strings.TrimSpace(dataValue)
+			if len(data) > 0 {
+				dataBuffer.WriteString(data)
+				dataBuffer.WriteString("\n")
+			}
 
 			switch currentEvent {
 			case "answer":
@@ -126,6 +131,12 @@ func (s *APISignaler) listenToSSEResponse(resp *http.Response) {
 				rejectionReceived = true
 			}
 		}
+	}
+
+	// If stream ended without a trailing blank line, flush the last buffered event
+	if dataBuffer.Len() > 0 && currentEvent != "" {
+		s.routeEvent(currentEvent, strings.TrimSuffix(dataBuffer.String(), "\n"))
+		dataBuffer.Reset()
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -146,6 +157,12 @@ func (s *APISignaler) routeEvent(event, data string) {
 		s.sendError(ErrTransferRejected)
 	case "candidates_done":
 		slog.Info("Receiver has finished sending candidates.")
+		// Signal end-of-candidates to the local PeerConnection. In Pion, an empty
+		// ICECandidateInit is treated as end-of-candidates for each media section.
+		if err := s.addIceCandidateFunc(webrtc.ICECandidateInit{}); err != nil {
+			slog.Warn("Failed to signal end-of-candidates", "error", err)
+		}
+		// TODO
 	default:
 		slog.Warn("Received unknown SSE event", "event", event)
 	}

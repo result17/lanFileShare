@@ -54,29 +54,7 @@ func NewApp(port int, outputPath string) *App {
 	dnssdlog.Info.SetOutput(io.Discard)
 	dnssdlog.Debug.SetOutput(io.Discard)
 
-	exists, isDir, err := util.CheckDirectory(outputPath)
-
-	var path string
-	if err != nil || !exists || !isDir {
-		if err != nil {
-			slog.Error("Failed to check output directory", "error", err)
-		} else if !exists {
-			slog.Error("Output directory does not exist", "path", outputPath)
-		} else if !isDir {
-			slog.Error("Output path exists but is not a directory", "path", outputPath)
-		}
-
-		// Fallback to current working directory
-		path, err = os.Getwd()
-		if err != nil {
-			slog.Error("Failed to get current working directory", "error", err)
-			return nil
-		}
-		slog.Info("Using current working directory as output path", "path", path)
-	} else {
-		path = outputPath
-		slog.Info("Using specified output directory", "path", path)
-	}
+	taragetPath := util.GetOrCreateDirByPath(outputPath)
 
 	return &App{
 		guard:                concurrency.NewConcurrencyGuard(),
@@ -88,7 +66,7 @@ func NewApp(port int, outputPath string) *App {
 		stateManager:         stateManager,
 		inboundCandidateChan: make(chan webrtc.ICECandidateInit, 10),
 		errChan:              make(chan error, 1),
-		outputPath:           path,
+		outputPath:           taragetPath,
 	}
 }
 
@@ -171,7 +149,8 @@ func (a *App) sendAndLogError(baseMessage string, err error) {
 //nolint:gocyclo // handleAcceptFileRequest contains the logic for setting up a WebRTC connection.
 func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 	slog.Info("User accepted file transfer. Preparing to receive...")
-	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// TODO test duration is longer
+	hctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	if err := a.stateManager.SetDecision(app.Accepted); err != nil {
@@ -231,11 +210,20 @@ func (a *App) handleAcceptFileRequest(ctx context.Context) error {
 		slog.Info("Data channel opened for file reception", "label", dc.Label())
 
 		dc.OnOpen(func() {
-			slog.Info("File transfer data channel opened")
+			slog.Info("File transfer data channel opened", dc.ID(), dc.Label())
 			a.uiMessages <- receiver.StatusUpdateMsg{Message: "Starting file reception..."}
 		})
 
+		// receive file chunk
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			// Debug log: message length and a short preview
+			previewLen := 32
+			if len(msg.Data) < previewLen {
+				previewLen = len(msg.Data)
+			}
+			preview := fmt.Sprintf("% x", msg.Data[:previewLen])
+			slog.Info("DataChannel message received", "label", dc.Label(), "len", len(msg.Data), "preview_hex", preview)
+
 			if err := a.handleFileChunk(msg.Data); err != nil {
 				slog.Error("Failed to handle file chunk", "error", err)
 				a.uiMessages <- receiver.StatusUpdateMsg{Message: fmt.Sprintf("Error receiving file: %v", err)}

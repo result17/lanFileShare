@@ -9,16 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **WebRTC Signaling Race Condition**: Resolved an issue where `SetRemoteDescription` would fail with a "no ice-ufrag" error.
-  - **Root Cause**: A race condition occurred where the SDP offer was sent before the asynchronous ICE gathering process had completed, resulting in an incomplete offer missing essential ICE credentials (`ice-ufrag`).
-  - **Scenario**:
-    - `CreateOffer` and `SetLocalDescription` were called in sequence.
-    - `SetLocalDescription` triggers an asynchronous process to gather ICE candidates and populate the local description.
-    - The application immediately sent the offer *before* this process could finish.
-    - The receiver would get an offer without an `ice-ufrag` and fail.
-  - **Solution**: Implemented `webrtc.GatheringCompletePromise` to block execution until ICE gathering is fully complete.
-  - **Method Fixed**: `pkg/webrtc/connection.go` -> `SenderConn.Establish()`
-  - **Impact**: Ensures that a complete and valid SDP offer is always sent, making the WebRTC connection establishment reliable and preventing signaling errors.
+- WebRTC: Offer SDP missing ICE credentials (ice-ufrag / ice-pwd) and media sections
+  - Ensure a DataChannel is created before creating the offer so the SDP contains an m=application section.
+  - Wait for ICE gathering completion (with timeout and logging) before sending the offer, so `a=ice-ufrag`/`a=ice-pwd` are present.
+  - Add explicit SDP validation (checks for ice-ufrag, ice-pwd, and candidate count) and clearer error logs.
+  - Avoid invalid signaling transitions by not calling SetLocalDescription repeatedly while in `have-local-offer`.
+  - Files: `pkg/webrtc/connection.go` (offer creation timing, ICE waiting, validation, logging).
+
+- SSE answer handling could fail for large payloads or when the stream ends without a trailing blank line
+  - Increase bufio.Scanner buffer to handle large SDP/JSON payloads (up to 1MiB per token).
+  - Flush the last buffered event on EOF if the server closes the stream without a final blank line.
+  - Add minor robustness improvements when appending data lines.
+  - File: `api/signaler.go` (listenToSSEResponse).
+
+- More resilient setting of remote descriptions
+  - Add retry wrapper around SetRemoteDescription to handle transient timing issues.
+  - File: `pkg/webrtc/connection.go`.
+
+### Changed
+
+- Improve default WebRTC configuration for reliability
+  - Add multiple STUN servers by default: `stun.l.google.com:19302`, `stun1.l.google.com:19302`, `stun2.l.google.com:19302`.
+  - Set conservative ICE timeouts and add richer connection-state logging.
+  - File: `pkg/webrtc/connection.go`.
+
+### Added
+
+- Detailed debugging logs for ICE gathering, signaling state, and SDP previews to aid troubleshooting.
+  - Files: `pkg/webrtc/connection.go` and `api/signaler.go`.
 
 - **Critical Deadlock Prevention**: Resolved potential deadlock in UnifiedTransferManager by establishing consistent mutex lock ordering
   - **Root Cause**: Inconsistent lock acquisition order between `statusMu` and `queueMu` across different methods created classic "deadly embrace" scenarios
