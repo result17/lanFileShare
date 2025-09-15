@@ -222,6 +222,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle theme selector if visible
+		if m.themeSelector != nil && m.themeSelector.IsVisible() {
+			if m.themeSelector.Navigate(action) {
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Handle retry dialog if visible
 		if m.retryDialog.IsVisible() {
 			switch action {
