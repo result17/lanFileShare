@@ -80,7 +80,7 @@ func InitialModel(m Mode, port int, outputPath string) model {
 	performanceOptimizer := components.NewPerformanceOptimizer()
 	performancePanel := components.NewPerformancePanel(performanceOptimizer)
 	contextMenu := components.NewContextualMenu("Actions")
-	helpPanel := components.NewHelpPanel()
+	helpPanel := components.NewHelpPanelWithKeyboard(keyboardManager)
 	quickTip := components.NewQuickTip()
 	errorHandler := components.NewErrorHandler(3, true, 5*time.Second)
 	retryDialog := components.NewRetryDialog(errorHandler)
@@ -271,29 +271,35 @@ func (m *model) handleRefresh() tea.Cmd {
 }
 
 func (m model) handleGlobalAction(action components.KeyAction) (model, tea.Cmd, bool) {
+	// Use keyboard manager to handle the action with better cohesion
+	return m.handleAction(action)
+}
+
+// handleAction provides a more cohesive way to handle keyboard actions
+func (m *model) handleAction(action components.KeyAction) (model, tea.Cmd, bool) {
 	switch action {
 	case components.KeyActionQuit:
-		return m, tea.Quit, true
+		return *m, tea.Quit, true
 	case components.KeyActionHelp:
 		m.helpPanel.Toggle()
-		return m, nil, true
+		return *m, nil, true
 	case components.KeyActionRefresh:
-		return m, m.handleRefresh(), true
+		return *m, m.handleRefresh(), true
 	case components.KeyActionTheme:
 		if m.themeSelector != nil {
 			m.themeSelector.Show()
 			m.keyboardManager.SetContext("theme_selector")
 		}
-		return m, nil, true
+		return *m, nil, true
 	case components.KeyActionShowPerformance:
 		if m.sender.state != sendingFiles && m.sender.state != transferPaused {
 			if m.performancePanel != nil {
 				m.performancePanel.Show()
 			}
-			return m, nil, true
+			return *m, nil, true
 		}
 	}
-	return m, nil, false
+	return *m, nil, false
 }
 
 // listenForAppMessages is a command that listens for messages from the app controller.
@@ -326,15 +332,7 @@ func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model,
 
 	// Handle retry dialog if visible
 	if m.retryDialog.IsVisible() {
-		switch action {
-		case components.KeyActionRetry:
-			if m.errorHandler.CanRetry() {
-				m.errorHandler.IncrementRetry()
-				m.retryDialog.Hide()
-				return m, m.retryLastOperation()
-			}
-		case components.KeyActionCancel:
-			m.retryDialog.Hide()
+		if m.handleRetryAction(action) {
 			return m, nil
 		}
 		return m, nil
@@ -342,8 +340,56 @@ func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model,
 	return m, nil
 }
 
+// handleRetryAction handles retry dialog actions with better cohesion
+func (m *model) handleRetryAction(action components.KeyAction) bool {
+	switch action {
+	case components.KeyActionRetry:
+		if m.errorHandler.CanRetry() {
+			m.errorHandler.IncrementRetry()
+			m.retryDialog.Hide()
+			return true
+		}
+	case components.KeyActionCancel:
+		m.retryDialog.Hide()
+		return true
+	}
+	return false
+}
+
 
 func (m *model) renderFatalErr(err error) {
 	m.errorHandler.AddError(components.ErrorTypeUnknown, "Application Error", err.Error(), true)
 	m.mode = FatalError
+}
+
+// updateHelpContext updates the help panel context based on current state
+func (m *model) updateHelpContext() {
+	var context components.HelpContext
+	
+	switch m.mode {
+	case Sender:
+		switch m.sender.state {
+		case findingReceivers:
+			context = components.HelpContextSenderDiscovery
+		case selectingReceiver:
+			context = components.HelpContextSenderSelection
+		case selectingFiles:
+			context = components.HelpContextFileSelection
+		case sendingFiles, transferPaused:
+			context = components.HelpContextTransfer
+		case transferComplete:
+			// Keep current context for completion
+		case transferFailed:
+			context = components.HelpContextError
+		}
+	case Receiver:
+		// TODO: Set appropriate receiver contexts
+		context = components.HelpContextReceiver
+	case FatalError:
+		context = components.HelpContextError
+	default:
+		context = components.HelpContextMain
+	}
+	
+	m.helpPanel.SetContext(context)
 }

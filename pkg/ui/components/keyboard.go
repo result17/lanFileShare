@@ -50,6 +50,7 @@ type KeyBinding struct {
 	Context     string
 	Enabled     bool
 	Global      bool // Whether this binding works in all contexts
+	Important   bool // Whether this binding is important for hints
 }
 
 // KeyboardManager manages keyboard shortcuts and navigation
@@ -85,67 +86,67 @@ func NewKeyboardManager() *KeyboardManager {
 func (km *KeyboardManager) initializeDefaultBindings() {
 	// Global bindings (work in all contexts)
 	globalBindings := []KeyBinding{
-		{[]string{"q", "ctrl+c"}, KeyActionQuit, "🚪 Quit application", "global", true, true},
-		{[]string{"?"}, KeyActionHelp, "❓ Toggle help", "global", true, true},
-		{[]string{"f11"}, KeyActionFullscreen, "🖥️ Toggle fullscreen", "global", true, true},
-		{[]string{"ctrl+r"}, KeyActionRefresh, "🔄 Refresh", "global", true, true},
-		{[]string{"t", "T"}, KeyActionTheme, "🎨 Switch theme", "global", true, true},
-		{[]string{"p", "P"}, KeyActionShowPerformance, "📊 Show performance", "global", true, true},
+		{[]string{"q", "ctrl+c"}, KeyActionQuit, "🚪 Quit application", "global", true, true, true},
+		{[]string{"?"}, KeyActionHelp, "❓ Toggle help", "global", true, true, true},
+		{[]string{"f11"}, KeyActionFullscreen, "🖥️ Toggle fullscreen", "global", true, true, true},
+		{[]string{"ctrl+r"}, KeyActionRefresh, "🔄 Refresh", "global", true, true, true},
+		{[]string{"t", "T"}, KeyActionTheme, "🎨 Switch theme", "global", true, true, true},
+		{[]string{"p", "P"}, KeyActionShowPerformance, "📊 Show performance", "global", true, true, true},
 	}
 
 	// Context-specific bindings
 	contextBindings := map[string][]KeyBinding{
 		"discovery": {
-			{[]string{"r"}, KeyActionRefresh, "🔄 Refresh discovery", "discovery", true, false},
-			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "discovery", true, false},
+			{[]string{"r"}, KeyActionRefresh, "🔄 Refresh discovery", "discovery", true, false, false},
+			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "discovery", true, false, false},
 		},
 		"selection": {
-			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "selection", true, false},
-			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "selection", true, false},
-			{[]string{"enter", "space"}, KeyActionSelect, "✅ Select item", "selection", true, false},
-			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "selection", true, false},
+			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "selection", true, false, true},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "selection", true, false, true},
+			{[]string{"enter", "space"}, KeyActionSelect, "✅ Select item", "selection", true, false, true},
+			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "selection", true, false, false},
 		},
 		"file_selection": {
-			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "file_selection", true, false},
-			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "file_selection", true, false},
-			{[]string{"left", "h"}, KeyActionNavigateLeft, "⬅️ Go back/collapse", "file_selection", true, false},
-			{[]string{"right", "l"}, KeyActionNavigateRight, "➡️ Enter/expand", "file_selection", true, false},
-			{[]string{"space"}, KeyActionSelect, "✅ Toggle selection", "file_selection", true, false},
-			{[]string{"enter", "tab"}, KeyActionConfirm, "📋 Confirm selection", "file_selection", true, false},
-			{[]string{"esc"}, KeyActionBack, "❌ Cancel", "file_selection", true, false},
-			{[]string{"a"}, KeyActionSelect, "📋 Select all", "file_selection", true, false},
-			{[]string{"ctrl+a"}, KeyActionSelect, "📋 Select all", "file_selection", true, false},
+			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "file_selection", true, false, true},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "file_selection", true, false, true},
+			{[]string{"left", "h"}, KeyActionNavigateLeft, "⬅️ Go back/collapse", "file_selection", true, false, false},
+			{[]string{"right", "l"}, KeyActionNavigateRight, "➡️ Enter/expand", "file_selection", true, false, false},
+			{[]string{"space"}, KeyActionSelect, "✅ Toggle selection", "file_selection", true, false, true},
+			{[]string{"enter", "tab"}, KeyActionConfirm, "📋 Confirm selection", "file_selection", true, false, true},
+			{[]string{"esc"}, KeyActionBack, "❌ Cancel", "file_selection", true, false, false},
+			{[]string{"a"}, KeyActionSelect, "📋 Select all", "file_selection", true, false, false},
+			{[]string{"ctrl+a"}, KeyActionSelect, "📋 Select all", "file_selection", true, false, false},
 		},
 		"transfer": {
-			{[]string{"p"}, KeyActionPause, "⏸️ Pause transfer", "transfer", true, false},
-			{[]string{"r"}, KeyActionResume, "▶️ Resume transfer", "transfer", true, false},
-			{[]string{"c"}, KeyActionCancel, "❌ Cancel transfer", "transfer", true, false},
-			{[]string{"1"}, KeyActionStatsOverview, "📊 Overview stats", "transfer", true, false},
-			{[]string{"2"}, KeyActionStatsDetailed, "📈 Detailed stats", "transfer", true, false},
-			{[]string{"3"}, KeyActionStatsFiles, "📁 File stats", "transfer", true, false},
-			{[]string{"4"}, KeyActionStatsNetwork, "🌐 Network stats", "transfer", true, false},
-			{[]string{"5"}, KeyActionStatsEfficiency, "⚡ Efficiency metrics", "transfer", true, false},
-			{[]string{"+"}, KeyActionSpeedUp, "⬆️ Increase priority", "transfer", true, false},
-			{[]string{"-"}, KeyActionSlowDown, "⬇️ Decrease priority", "transfer", true, false},
+			{[]string{"p"}, KeyActionPause, "⏸️ Pause transfer", "transfer", true, false, true},
+			{[]string{"r"}, KeyActionResume, "▶️ Resume transfer", "transfer", true, false, true},
+			{[]string{"c"}, KeyActionCancel, "❌ Cancel transfer", "transfer", true, false, true},
+			{[]string{"1"}, KeyActionStatsOverview, "📊 Overview stats", "transfer", true, false, false},
+			{[]string{"2"}, KeyActionStatsDetailed, "📈 Detailed stats", "transfer", true, false, false},
+			{[]string{"3"}, KeyActionStatsFiles, "📁 File stats", "transfer", true, false, false},
+			{[]string{"4"}, KeyActionStatsNetwork, "🌐 Network stats", "transfer", true, false, false},
+			{[]string{"5"}, KeyActionStatsEfficiency, "⚡ Efficiency metrics", "transfer", true, false, false},
+			{[]string{"+"}, KeyActionSpeedUp, "⬆️ Increase priority", "transfer", true, false, false},
+			{[]string{"-"}, KeyActionSlowDown, "⬇️ Decrease priority", "transfer", true, false, false},
 		},
 		"paused": {
-			{[]string{"r", "space"}, KeyActionResume, "▶️ Resume transfer", "paused", true, false},
-			{[]string{"c"}, KeyActionCancel, "❌ Cancel transfer", "paused", true, false},
+			{[]string{"r", "space"}, KeyActionResume, "▶️ Resume transfer", "paused", true, false, true},
+			{[]string{"c"}, KeyActionCancel, "❌ Cancel transfer", "paused", true, false, true},
 		},
 		"error": {
-			{[]string{"r", "enter"}, KeyActionRetry, "🔄 Retry operation", "error", true, false},
-			{[]string{"c", "esc"}, KeyActionCancel, "❌ Cancel", "error", true, false},
+			{[]string{"r", "enter"}, KeyActionRetry, "🔄 Retry operation", "error", true, false, true},
+			{[]string{"c", "esc"}, KeyActionCancel, "❌ Cancel", "error", true, false, false},
 		},
 		"complete": {
-			{[]string{"enter"}, KeyActionConfirm, "✅ Continue", "complete", true, false},
-			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "complete", true, false},
+			{[]string{"enter"}, KeyActionConfirm, "✅ Continue", "complete", true, false, true},
+			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "complete", true, false, false},
 		},
 		"theme_selector": {
-			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "theme_selector", true, false},
-			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "theme_selector", true, false},
-			{[]string{"enter"}, KeyActionSelect, "✅ Select theme", "theme_selector", true, false},
-			{[]string{"space"}, KeyActionToggleMode, "🔄 Toggle preview mode", "theme_selector", true, false},
-			{[]string{"esc"}, KeyActionCancel, "❌ Cancel", "theme_selector", true, false},
+			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "theme_selector", true, false, false},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "theme_selector", true, false, false},
+			{[]string{"enter"}, KeyActionSelect, "✅ Select theme", "theme_selector", true, false, false},
+			{[]string{"space"}, KeyActionToggleMode, "🔄 Toggle preview mode", "theme_selector", true, false, false},
+			{[]string{"esc"}, KeyActionCancel, "❌ Cancel", "theme_selector", true, false, false},
 		},
 	}
 
@@ -275,6 +276,95 @@ func (km *KeyboardManager) GetActiveBindings() []KeyBinding {
 	}
 
 	return active
+}
+
+// GetKeysForAction returns the keyboard keys for a given action in the current context
+func (km *KeyboardManager) GetKeysForAction(action KeyAction) []string {
+	// Check context-specific bindings first
+	if contextBindings, exists := km.contextBindings[km.currentContext]; exists {
+		for _, binding := range contextBindings {
+			if binding.Enabled && binding.Action == action {
+				return binding.Keys
+			}
+		}
+	}
+
+	// Check global bindings
+	for _, binding := range km.globalBindings {
+		if binding.Enabled && binding.Action == action {
+			return binding.Keys
+		}
+	}
+
+	return []string{}
+}
+
+// GetActionDescription returns the description for a given action
+func (km *KeyboardManager) GetActionDescription(action KeyAction) string {
+	// Check context-specific bindings first
+	if contextBindings, exists := km.contextBindings[km.currentContext]; exists {
+		for _, binding := range contextBindings {
+			if binding.Enabled && binding.Action == action {
+				return binding.Description
+			}
+		}
+	}
+
+	// Check global bindings
+	for _, binding := range km.globalBindings {
+		if binding.Enabled && binding.Action == action {
+			return binding.Description
+		}
+	}
+
+	return "Unknown action"
+}
+
+// IsActionImportant returns whether an action is marked as important
+func (km *KeyboardManager) IsActionImportant(action KeyAction) bool {
+	// Check context-specific bindings first
+	if contextBindings, exists := km.contextBindings[km.currentContext]; exists {
+		for _, binding := range contextBindings {
+			if binding.Enabled && binding.Action == action {
+				return binding.Important
+			}
+		}
+	}
+
+	// Check global bindings
+	for _, binding := range km.globalBindings {
+		if binding.Enabled && binding.Action == action {
+			return binding.Important
+		}
+	}
+
+	return false
+}
+
+// GetAvailableActions returns all available actions for the current context
+func (km *KeyboardManager) GetAvailableActions() []KeyAction {
+	var actions []KeyAction
+	seen := make(map[KeyAction]bool)
+
+	// Add global bindings
+	for _, binding := range km.globalBindings {
+		if binding.Enabled && !seen[binding.Action] {
+			actions = append(actions, binding.Action)
+			seen[binding.Action] = true
+		}
+	}
+
+	// Add context-specific bindings
+	if contextBindings, exists := km.contextBindings[km.currentContext]; exists {
+		for _, binding := range contextBindings {
+			if binding.Enabled && !seen[binding.Action] {
+				actions = append(actions, binding.Action)
+				seen[binding.Action] = true
+			}
+		}
+	}
+
+	return actions
 }
 
 // EnableBinding enables or disables a specific binding

@@ -23,17 +23,18 @@ const (
 
 // HelpItem represents a single help item
 type HelpItem struct {
-	Key         string
+	Action      KeyAction
 	Description string
 	Important   bool
 }
 
 // HelpPanel provides context-sensitive help and keyboard shortcuts
 type HelpPanel struct {
-	context     HelpContext
-	visible     bool
-	compact     bool
-	customItems []HelpItem
+	context        HelpContext
+	visible        bool
+	compact        bool
+	customItems    []HelpItem
+	keyboardManager *KeyboardManager // Reference to keyboard manager
 }
 
 // NewHelpPanel creates a new help panel
@@ -44,6 +45,22 @@ func NewHelpPanel() *HelpPanel {
 		compact:     true,
 		customItems: make([]HelpItem, 0),
 	}
+}
+
+// NewHelpPanelWithKeyboard creates a new help panel with keyboard manager reference
+func NewHelpPanelWithKeyboard(km *KeyboardManager) *HelpPanel {
+	return &HelpPanel{
+		context:        HelpContextMain,
+		visible:        false,
+		compact:        true,
+		customItems:    make([]HelpItem, 0),
+		keyboardManager: km,
+	}
+}
+
+// SetKeyboardManager sets the keyboard manager reference
+func (hp *HelpPanel) SetKeyboardManager(km *KeyboardManager) {
+	hp.keyboardManager = km
 }
 
 // SetContext sets the current help context
@@ -62,9 +79,9 @@ func (hp *HelpPanel) SetCompact(compact bool) {
 }
 
 // AddCustomItem adds a custom help item
-func (hp *HelpPanel) AddCustomItem(key, description string, important bool) {
+func (hp *HelpPanel) AddCustomItem(action KeyAction, description string, important bool) {
 	hp.customItems = append(hp.customItems, HelpItem{
-		Key:         key,
+		Action:      action,
 		Description: description,
 		Important:   important,
 	})
@@ -134,8 +151,10 @@ func (hp *HelpPanel) renderCompact() string {
 		if i > 0 {
 			result.WriteString(" | ")
 		}
+		keys := hp.getActionKeys(item.Action)
+		keyDisplay := hp.formatKeyDisplay(keys)
 		result.WriteString(fmt.Sprintf("%s=%s",
-			style.HighlightFontStyle.Render(item.Key),
+			style.HighlightFontStyle.Render(keyDisplay),
 			item.Description))
 	}
 
@@ -171,8 +190,10 @@ func (hp *HelpPanel) renderFull() string {
 			keyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 		}
 
+		keys := hp.getActionKeys(item.Action)
+		keyDisplay := hp.formatKeyDisplay(keys)
 		result.WriteString(fmt.Sprintf("│ %s %s\n",
-			keyStyle.Render(fmt.Sprintf("%-12s", item.Key)),
+			keyStyle.Render(fmt.Sprintf("%-12s", keyDisplay)),
 			item.Description))
 	}
 
@@ -208,80 +229,149 @@ func (hp *HelpPanel) getContextTitle() string {
 func (hp *HelpPanel) getHelpItems() []HelpItem {
 	var items []HelpItem
 
-	// Add context-specific items
-	switch hp.context {
-	case HelpContextSenderDiscovery:
-		items = []HelpItem{
-			{"Ctrl+C", "🚪 Quit application", true},
-			{"R", "🔄 Refresh/restart discovery", false},
-			{"?", "Toggle help", false},
+	// Use keyboard manager if available to get dynamic help items
+	if hp.keyboardManager != nil {
+		availableActions := hp.keyboardManager.GetAvailableActions()
+		for _, action := range availableActions {
+			// Filter actions based on context for better relevance
+			if hp.isActionRelevantToContext(action) {
+				description := hp.keyboardManager.GetActionDescription(action)
+				important := hp.keyboardManager.IsActionImportant(action)
+				items = append(items, HelpItem{
+					Action:      action,
+					Description: description,
+					Important:   important,
+				})
+			}
 		}
-
-	case HelpContextSenderSelection:
-		items = []HelpItem{
-			{"↑/↓", "⬆️⬇️ Navigate receivers", true},
-			{"Enter", "✅ Select receiver", true},
-			{"R", "🔄 Refresh receiver list", false},
-			{"Ctrl+C", "🚪 Quit application", false},
-			{"?", "Toggle help", false},
-		}
-
-	case HelpContextFileSelection:
-		items = []HelpItem{
-			{"↑/↓", "⬆️⬇️ Navigate files/folders", true},
-			{"Enter", "✅ Select/deselect file", true},
-			{"Space", "✅ Select/deselect file", true},
-			{"→", "➡️ Enter folder", false},
-			{"←", "⬅️ Go back", false},
-			{"Tab", "📋 Confirm selection", true},
-			{"Esc", "❌ Cancel", false},
-			{"?", "Toggle help", false},
-		}
-
-	case HelpContextTransfer:
-		items = []HelpItem{
-			{"P", "⏸️ Pause transfer", true},
-			{"R", "▶️ Resume transfer (if paused)", true},
-			{"C", "❌ Cancel transfer", true},
-			{"1", "📊 Overview statistics", false},
-			{"2", "📈 Detailed statistics", false},
-			{"3", "📁 File statistics", false},
-			{"4", "🌐 Network statistics", false},
-			{"5", "⚡ Efficiency metrics", false},
-			{"Ctrl+C", "🚪 Quit application", false},
-			{"?", "Toggle help", false},
-		}
-
-	case HelpContextReceiver:
-		items = []HelpItem{
-			{"Y", "✅ Accept incoming transfer", true},
-			{"N", "❌ Reject incoming transfer", true},
-			{"Ctrl+C", "🚪 Quit application", false},
-			{"?", "Toggle help", false},
-		}
-
-	case HelpContextError:
-		items = []HelpItem{
-			{"R", "🔄 Retry operation", true},
-			{"Enter", "🔄 Try again", true},
-			{"C", "❌ Cancel", false},
-			{"Q", "🚪 Quit application", false},
-			{"?", "Toggle help", false},
-		}
-
-	default: // HelpContextMain
-		items = []HelpItem{
-			{"S", "📤 Start as sender", true},
-			{"R", "📥 Start as receiver", true},
-			{"Q", "🚪 Quit application", true},
-			{"?", "Toggle help", false},
-		}
+	} else {
+		// Fallback to static items if no keyboard manager
+		items = hp.getStaticHelpItems()
 	}
 
 	// Add custom items
 	items = append(items, hp.customItems...)
 
 	return items
+}
+
+// getStaticHelpItems returns static help items as fallback
+func (hp *HelpPanel) getStaticHelpItems() []HelpItem {
+	// Add context-specific items based on KeyAction
+	switch hp.context {
+	case HelpContextSenderDiscovery:
+		return []HelpItem{
+			{KeyActionQuit, "🚪 Quit application", true},
+			{KeyActionRefresh, "🔄 Refresh/restart discovery", false},
+			{KeyActionHelp, "Toggle help", false},
+		}
+
+	case HelpContextSenderSelection:
+		return []HelpItem{
+			{KeyActionNavigateUp, "⬆️⬇️ Navigate receivers", true},
+			{KeyActionSelect, "✅ Select receiver", true},
+			{KeyActionRefresh, "🔄 Refresh receiver list", false},
+			{KeyActionQuit, "🚪 Quit application", false},
+			{KeyActionHelp, "Toggle help", false},
+		}
+
+	case HelpContextFileSelection:
+		return []HelpItem{
+			{KeyActionNavigateUp, "⬆️⬇️ Navigate files/folders", true},
+			{KeyActionSelect, "✅ Select/deselect file", true},
+			{KeyActionSelect, "✅ Select/deselect file", true},
+			{KeyActionNavigateRight, "➡️ Enter folder", false},
+			{KeyActionNavigateLeft, "⬅️ Go back", false},
+			{KeyActionConfirm, "📋 Confirm selection", true},
+			{KeyActionBack, "❌ Cancel", false},
+			{KeyActionHelp, "Toggle help", false},
+		}
+
+	case HelpContextTransfer:
+		return []HelpItem{
+			{KeyActionPause, "⏸️ Pause transfer", true},
+			{KeyActionResume, "▶️ Resume transfer (if paused)", true},
+			{KeyActionCancel, "❌ Cancel transfer", true},
+			{KeyActionStatsOverview, "📊 Overview statistics", false},
+			{KeyActionStatsDetailed, "📈 Detailed statistics", false},
+			{KeyActionStatsFiles, "📁 File statistics", false},
+			{KeyActionStatsNetwork, "🌐 Network statistics", false},
+			{KeyActionStatsEfficiency, "⚡ Efficiency metrics", false},
+			{KeyActionQuit, "🚪 Quit application", false},
+			{KeyActionHelp, "Toggle help", false},
+		}
+
+	case HelpContextReceiver:
+		return []HelpItem{
+			{KeyActionSelect, "✅ Accept incoming transfer", true},
+			{KeyActionCancel, "❌ Reject incoming transfer", true},
+			{KeyActionQuit, "🚪 Quit application", false},
+			{KeyActionHelp, "Toggle help", false},
+		}
+
+	case HelpContextError:
+		return []HelpItem{
+			{KeyActionRetry, "🔄 Retry operation", true},
+			{KeyActionRetry, "🔄 Try again", true},
+			{KeyActionCancel, "❌ Cancel", false},
+			{KeyActionQuit, "🚪 Quit application", false},
+			{KeyActionHelp, "Toggle help", false},
+		}
+
+	default: // HelpContextMain
+		return []HelpItem{
+			{KeyActionQuit, "🚪 Quit application", true},
+			{KeyActionHelp, "Toggle help", false},
+		}
+	}
+}
+
+// isActionRelevantToContext checks if an action is relevant to the current context
+func (hp *HelpPanel) isActionRelevantToContext(action KeyAction) bool {
+	// Global actions are always relevant
+	globalActions := []KeyAction{
+		KeyActionQuit,
+		KeyActionHelp,
+		KeyActionTheme,
+		KeyActionShowPerformance,
+		KeyActionFullscreen,
+	}
+	
+	for _, globalAction := range globalActions {
+		if action == globalAction {
+			return true
+		}
+	}
+	
+	// Context-specific relevance
+	switch hp.context {
+	case HelpContextSenderDiscovery:
+		return action == KeyActionRefresh
+		
+	case HelpContextSenderSelection:
+		return action == KeyActionNavigateUp || action == KeyActionNavigateDown || 
+		       action == KeyActionSelect || action == KeyActionRefresh
+		       
+	case HelpContextFileSelection:
+		return action == KeyActionNavigateUp || action == KeyActionNavigateDown ||
+		       action == KeyActionNavigateLeft || action == KeyActionNavigateRight ||
+		       action == KeyActionSelect || action == KeyActionConfirm || action == KeyActionBack
+		       
+	case HelpContextTransfer:
+		return action == KeyActionPause || action == KeyActionResume || action == KeyActionCancel ||
+		       action == KeyActionStatsOverview || action == KeyActionStatsDetailed ||
+		       action == KeyActionStatsFiles || action == KeyActionStatsNetwork || 
+		       action == KeyActionStatsEfficiency
+		       
+	case HelpContextReceiver:
+		return action == KeyActionSelect || action == KeyActionCancel
+		
+	case HelpContextError:
+		return action == KeyActionRetry || action == KeyActionCancel
+		
+	default:
+		return true
+	}
 }
 
 // QuickTip represents a contextual tip or hint
@@ -478,4 +568,77 @@ func (t *Tutorial) Render() string {
 	result.WriteString("└─────────────────────────────────────────────────────────────────────────────────┘")
 
 	return result.String()
+}
+
+// getActionKeys returns the keyboard keys for a given action
+func (hp *HelpPanel) getActionKeys(action KeyAction) []string {
+	// Use keyboard manager if available
+	if hp.keyboardManager != nil {
+		return hp.keyboardManager.GetKeysForAction(action)
+	}
+	
+	// Fallback to basic mapping if no keyboard manager
+	switch action {
+	case KeyActionQuit:
+		return []string{"q", "ctrl+c"}
+	case KeyActionHelp:
+		return []string{"?"}
+	case KeyActionRefresh:
+		return []string{"r", "ctrl+r"}
+	case KeyActionNavigateUp:
+		return []string{"up", "k"}
+	case KeyActionNavigateDown:
+		return []string{"down", "j"}
+	case KeyActionNavigateLeft:
+		return []string{"left", "h"}
+	case KeyActionNavigateRight:
+		return []string{"right", "l"}
+	case KeyActionSelect:
+		return []string{"enter", "space"}
+	case KeyActionConfirm:
+		return []string{"enter", "tab"}
+	case KeyActionBack:
+		return []string{"esc"}
+	case KeyActionCancel:
+		return []string{"c", "esc"}
+	case KeyActionPause:
+		return []string{"p"}
+	case KeyActionResume:
+		return []string{"r", "space"}
+	case KeyActionRetry:
+		return []string{"r", "enter"}
+	case KeyActionStatsOverview:
+		return []string{"1"}
+	case KeyActionStatsDetailed:
+		return []string{"2"}
+	case KeyActionStatsFiles:
+		return []string{"3"}
+	case KeyActionStatsNetwork:
+		return []string{"4"}
+	case KeyActionStatsEfficiency:
+		return []string{"5"}
+	case KeyActionTheme:
+		return []string{"t", "T"}
+	case KeyActionShowPerformance:
+		return []string{"p", "P"}
+	case KeyActionFullscreen:
+		return []string{"f11"}
+	default:
+		return []string{"unknown"}
+	}
+}
+
+// formatKeyDisplay formats the key display for help
+func (hp *HelpPanel) formatKeyDisplay(keys []string) string {
+	if len(keys) == 0 {
+		return "unknown"
+	}
+	
+	// For display, we'll show the first key or a combination
+	if len(keys) == 1 {
+		return keys[0]
+	}
+	
+	// For multiple keys, show them separated by /
+	return strings.Join(keys, "/")
 }
