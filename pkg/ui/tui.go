@@ -74,6 +74,8 @@ func InitialModel(m Mode, port int, outputPath string) model {
 
 	// init global components
 	themeManager := components.NewThemeManager("")
+	keyboardManager := components.NewKeyboardManager()
+	keyboardManager.SetContext("discovery")
 	themeSelector := components.NewThemeSelector(themeManager)
 	performanceOptimizer := components.NewPerformanceOptimizer()
 	performancePanel := components.NewPerformancePanel(performanceOptimizer)
@@ -84,10 +86,10 @@ func InitialModel(m Mode, port int, outputPath string) model {
 	retryDialog := components.NewRetryDialog(errorHandler)
 	statusBar := components.NewStatusBar(80)
 	breadcrumb := components.NewBreadcrumb(5)
-	keyboardManager := components.NewKeyboardManager()
-	keyboardManager.SetContext("discovery")
 	responsiveLayout := components.NewResponsiveLayout(themeManager)
 	statusIndicator := components.NewStatusIndicator(5, true) // Keep 5 messages, show timestamps
+
+	themeSelector.SetOnHidden(keyboardManager.RestoreLastContext)
 
 	// start performance collection
 	go func() {
@@ -184,7 +186,7 @@ func (m model) View() string {
 	if m.contextMenu != nil && m.contextMenu.IsVisible() {
 		s += "\n" + m.contextMenu.Render() + "\n"
 	}
-	s += "\nPress ctrl + c to quit"
+
 	return s
 }
 
@@ -211,40 +213,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return newModel, cmd
 		}
 
-		// Handle context menu if visible
-		if m.contextMenu != nil && m.contextMenu.IsVisible() {
-			if m.contextMenu.Navigate(action) {
-				selectedItem := m.contextMenu.GetSelectedItem()
-				if selectedItem != nil {
-					return m, m.handleMenuAction(selectedItem.Action)
-				}
-			}
-			return m, nil
-		}
-
-		// Handle theme selector if visible
-		if m.themeSelector != nil && m.themeSelector.IsVisible() {
-			if m.themeSelector.Navigate(action) {
-				return m, nil
-			}
-			return m, nil
-		}
-
-		// Handle retry dialog if visible
-		if m.retryDialog.IsVisible() {
-			switch action {
-			case components.KeyActionRetry:
-				if m.errorHandler.CanRetry() {
-					m.errorHandler.IncrementRetry()
-					m.retryDialog.Hide()
-					return m, m.retryLastOperation()
-				}
-			case components.KeyActionCancel:
-				m.retryDialog.Hide()
-				return m, nil
-			}
-			return m, nil
-		}
+		// Handle overlay components (theme selector, context menu, retry dialog)
+		return m.handleOverlayComponents(action)
 
 	case tea.WindowSizeMsg:
 		// Update responsive layout
@@ -312,6 +282,7 @@ func (m model) handleGlobalAction(action components.KeyAction) (model, tea.Cmd, 
 	case components.KeyActionTheme:
 		if m.themeSelector != nil {
 			m.themeSelector.Show()
+			m.keyboardManager.SetContext("theme_selector")
 		}
 		return m, nil, true
 	case components.KeyActionShowPerformance:
@@ -331,6 +302,46 @@ func (m *model) listenForAppMessages() tea.Cmd {
 		return <-m.appController.UIMessages()
 	}
 }
+
+// handleOverlayComponents handles all overlay components (theme selector, context menu, retry dialog)
+func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model, tea.Cmd) {
+	// Handle theme selector if visible
+	if m.themeSelector != nil && m.themeSelector.IsVisible() {
+		if m.keyboardManager.GetContext() == "theme_selector" && m.themeSelector.Navigate(action) {
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Handle context menu if visible
+	if m.contextMenu != nil && m.contextMenu.IsVisible() {
+		if m.contextMenu.Navigate(action) {
+			selectedItem := m.contextMenu.GetSelectedItem()
+			if selectedItem != nil {
+				return m, m.handleMenuAction(selectedItem.Action)
+			}
+		}
+		return m, nil
+	}
+
+	// Handle retry dialog if visible
+	if m.retryDialog.IsVisible() {
+		switch action {
+		case components.KeyActionRetry:
+			if m.errorHandler.CanRetry() {
+				m.errorHandler.IncrementRetry()
+				m.retryDialog.Hide()
+				return m, m.retryLastOperation()
+			}
+		case components.KeyActionCancel:
+			m.retryDialog.Hide()
+			return m, nil
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 
 func (m *model) renderFatalErr(err error) {
 	m.errorHandler.AddError(components.ErrorTypeUnknown, "Application Error", err.Error(), true)

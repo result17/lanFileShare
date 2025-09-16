@@ -57,6 +57,7 @@ type KeyboardManager struct {
 	contextBindings map[string][]KeyBinding
 	globalBindings  []KeyBinding
 	currentContext  string
+	lastCurrent     string
 	enabled         bool
 	showHints       bool
 	lastKeyTime     time.Time
@@ -139,6 +140,13 @@ func (km *KeyboardManager) initializeDefaultBindings() {
 			{[]string{"enter"}, KeyActionConfirm, "Continue", "complete", true, false},
 			{[]string{"esc"}, KeyActionBack, "Go back", "complete", true, false},
 		},
+		"theme_selector": {
+			{[]string{"up", "k"}, KeyActionNavigateUp, "Navigate up", "theme_selector", true, false},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "Navigate down", "theme_selector", true, false},
+			{[]string{"enter"}, KeyActionSelect, "Select theme", "theme_selector", true, false},
+			{[]string{"space"}, KeyActionToggleMode, "Toggle preview mode", "theme_selector", true, false},
+			{[]string{"esc"}, KeyActionCancel, "Cancel", "theme_selector", true, false},
+		},
 	}
 
 	// Register all bindings
@@ -169,12 +177,26 @@ func (km *KeyboardManager) AddContextBinding(context string, binding KeyBinding)
 
 // SetContext sets the current context for key bindings
 func (km *KeyboardManager) SetContext(context string) {
+	km.lastCurrent = km.currentContext
 	km.currentContext = context
 }
 
 // GetContext returns the current context
 func (km *KeyboardManager) GetContext() string {
 	return km.currentContext
+}
+
+// GetLastContext returns the last context
+func (km *KeyboardManager) GetLastContext() string {
+	return km.lastCurrent
+}
+
+// RestoreLastContext restores the keyboard context to the last context
+func (km *KeyboardManager) RestoreLastContext() {
+	if km.lastCurrent != "" {
+		km.currentContext = km.lastCurrent
+		km.lastCurrent = ""
+	}
 }
 
 // ProcessKey processes a key press and returns the corresponding action

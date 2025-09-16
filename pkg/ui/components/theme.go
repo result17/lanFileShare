@@ -509,6 +509,7 @@ type ThemeSelector struct {
 	visible       bool
 	previewMode   bool
 	originalTheme string
+	onHidden func()
 }
 
 // NewThemeSelector creates a new theme selector
@@ -554,11 +555,20 @@ func (ts *ThemeSelector) Hide() {
 		ts.themeManager.SetTheme(ts.originalTheme)
 		ts.previewMode = false
 	}
+	// Call onHidden callback if set
+	if ts.onHidden != nil {
+		ts.onHidden()
+	}
 }
 
 // IsVisible returns whether the theme selector is visible
 func (ts *ThemeSelector) IsVisible() bool {
 	return ts.visible
+}
+
+// SetOnHidden sets the callback function to be called when the theme selector is hidden
+func (ts *ThemeSelector) SetOnHidden(callback func()) {
+	ts.onHidden = callback
 }
 
 // Navigate handles navigation within the theme selector
