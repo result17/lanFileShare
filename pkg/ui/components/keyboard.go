@@ -85,67 +85,67 @@ func NewKeyboardManager() *KeyboardManager {
 func (km *KeyboardManager) initializeDefaultBindings() {
 	// Global bindings (work in all contexts)
 	globalBindings := []KeyBinding{
-		{[]string{"q", "ctrl+c"}, KeyActionQuit, "Quit application", "global", true, true},
-		{[]string{"?"}, KeyActionHelp, "Toggle help", "global", true, true},
-		{[]string{"f11"}, KeyActionFullscreen, "Toggle fullscreen", "global", true, true},
-		{[]string{"ctrl+r"}, KeyActionRefresh, "Refresh", "global", true, true},
-		{[]string{"t", "T"}, KeyActionTheme, "Switch theme", "global", true, true},
-		{[]string{"p", "P"}, KeyActionShowPerformance, "Show performance", "global", true, true},
+		{[]string{"q", "ctrl+c"}, KeyActionQuit, "🚪 Quit application", "global", true, true},
+		{[]string{"?"}, KeyActionHelp, "❓ Toggle help", "global", true, true},
+		{[]string{"f11"}, KeyActionFullscreen, "🖥️ Toggle fullscreen", "global", true, true},
+		{[]string{"ctrl+r"}, KeyActionRefresh, "🔄 Refresh", "global", true, true},
+		{[]string{"t", "T"}, KeyActionTheme, "🎨 Switch theme", "global", true, true},
+		{[]string{"p", "P"}, KeyActionShowPerformance, "📊 Show performance", "global", true, true},
 	}
 
 	// Context-specific bindings
 	contextBindings := map[string][]KeyBinding{
 		"discovery": {
-			{[]string{"r"}, KeyActionRefresh, "Refresh discovery", "discovery", true, false},
-			{[]string{"esc"}, KeyActionBack, "Go back", "discovery", true, false},
+			{[]string{"r"}, KeyActionRefresh, "🔄 Refresh discovery", "discovery", true, false},
+			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "discovery", true, false},
 		},
 		"selection": {
-			{[]string{"up", "k"}, KeyActionNavigateUp, "Navigate up", "selection", true, false},
-			{[]string{"down", "j"}, KeyActionNavigateDown, "Navigate down", "selection", true, false},
-			{[]string{"enter", "space"}, KeyActionSelect, "Select item", "selection", true, false},
-			{[]string{"esc"}, KeyActionBack, "Go back", "selection", true, false},
+			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "selection", true, false},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "selection", true, false},
+			{[]string{"enter", "space"}, KeyActionSelect, "✅ Select item", "selection", true, false},
+			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "selection", true, false},
 		},
 		"file_selection": {
-			{[]string{"up", "k"}, KeyActionNavigateUp, "Navigate up", "file_selection", true, false},
-			{[]string{"down", "j"}, KeyActionNavigateDown, "Navigate down", "file_selection", true, false},
-			{[]string{"left", "h"}, KeyActionNavigateLeft, "Go back/collapse", "file_selection", true, false},
-			{[]string{"right", "l"}, KeyActionNavigateRight, "Enter/expand", "file_selection", true, false},
-			{[]string{"space"}, KeyActionSelect, "Toggle selection", "file_selection", true, false},
-			{[]string{"enter", "tab"}, KeyActionConfirm, "Confirm selection", "file_selection", true, false},
-			{[]string{"esc"}, KeyActionBack, "Cancel", "file_selection", true, false},
-			{[]string{"a"}, KeyActionSelect, "Select all", "file_selection", true, false},
-			{[]string{"ctrl+a"}, KeyActionSelect, "Select all", "file_selection", true, false},
+			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "file_selection", true, false},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "file_selection", true, false},
+			{[]string{"left", "h"}, KeyActionNavigateLeft, "⬅️ Go back/collapse", "file_selection", true, false},
+			{[]string{"right", "l"}, KeyActionNavigateRight, "➡️ Enter/expand", "file_selection", true, false},
+			{[]string{"space"}, KeyActionSelect, "✅ Toggle selection", "file_selection", true, false},
+			{[]string{"enter", "tab"}, KeyActionConfirm, "📋 Confirm selection", "file_selection", true, false},
+			{[]string{"esc"}, KeyActionBack, "❌ Cancel", "file_selection", true, false},
+			{[]string{"a"}, KeyActionSelect, "📋 Select all", "file_selection", true, false},
+			{[]string{"ctrl+a"}, KeyActionSelect, "📋 Select all", "file_selection", true, false},
 		},
 		"transfer": {
-			{[]string{"p"}, KeyActionPause, "Pause transfer", "transfer", true, false},
-			{[]string{"r"}, KeyActionResume, "Resume transfer", "transfer", true, false},
-			{[]string{"c"}, KeyActionCancel, "Cancel transfer", "transfer", true, false},
-			{[]string{"1"}, KeyActionStatsOverview, "Overview stats", "transfer", true, false},
-			{[]string{"2"}, KeyActionStatsDetailed, "Detailed stats", "transfer", true, false},
-			{[]string{"3"}, KeyActionStatsFiles, "File stats", "transfer", true, false},
-			{[]string{"4"}, KeyActionStatsNetwork, "Network stats", "transfer", true, false},
-			{[]string{"5"}, KeyActionStatsEfficiency, "Efficiency stats", "transfer", true, false},
-			{[]string{"+"}, KeyActionSpeedUp, "Increase priority", "transfer", true, false},
-			{[]string{"-"}, KeyActionSlowDown, "Decrease priority", "transfer", true, false},
+			{[]string{"p"}, KeyActionPause, "⏸️ Pause transfer", "transfer", true, false},
+			{[]string{"r"}, KeyActionResume, "▶️ Resume transfer", "transfer", true, false},
+			{[]string{"c"}, KeyActionCancel, "❌ Cancel transfer", "transfer", true, false},
+			{[]string{"1"}, KeyActionStatsOverview, "📊 Overview stats", "transfer", true, false},
+			{[]string{"2"}, KeyActionStatsDetailed, "📈 Detailed stats", "transfer", true, false},
+			{[]string{"3"}, KeyActionStatsFiles, "📁 File stats", "transfer", true, false},
+			{[]string{"4"}, KeyActionStatsNetwork, "🌐 Network stats", "transfer", true, false},
+			{[]string{"5"}, KeyActionStatsEfficiency, "⚡ Efficiency metrics", "transfer", true, false},
+			{[]string{"+"}, KeyActionSpeedUp, "⬆️ Increase priority", "transfer", true, false},
+			{[]string{"-"}, KeyActionSlowDown, "⬇️ Decrease priority", "transfer", true, false},
 		},
 		"paused": {
-			{[]string{"r", "space"}, KeyActionResume, "Resume transfer", "paused", true, false},
-			{[]string{"c"}, KeyActionCancel, "Cancel transfer", "paused", true, false},
+			{[]string{"r", "space"}, KeyActionResume, "▶️ Resume transfer", "paused", true, false},
+			{[]string{"c"}, KeyActionCancel, "❌ Cancel transfer", "paused", true, false},
 		},
 		"error": {
-			{[]string{"r", "enter"}, KeyActionRetry, "Retry operation", "error", true, false},
-			{[]string{"c", "esc"}, KeyActionCancel, "Cancel", "error", true, false},
+			{[]string{"r", "enter"}, KeyActionRetry, "🔄 Retry operation", "error", true, false},
+			{[]string{"c", "esc"}, KeyActionCancel, "❌ Cancel", "error", true, false},
 		},
 		"complete": {
-			{[]string{"enter"}, KeyActionConfirm, "Continue", "complete", true, false},
-			{[]string{"esc"}, KeyActionBack, "Go back", "complete", true, false},
+			{[]string{"enter"}, KeyActionConfirm, "✅ Continue", "complete", true, false},
+			{[]string{"esc"}, KeyActionBack, "⬅️ Go back", "complete", true, false},
 		},
 		"theme_selector": {
-			{[]string{"up", "k"}, KeyActionNavigateUp, "Navigate up", "theme_selector", true, false},
-			{[]string{"down", "j"}, KeyActionNavigateDown, "Navigate down", "theme_selector", true, false},
-			{[]string{"enter"}, KeyActionSelect, "Select theme", "theme_selector", true, false},
-			{[]string{"space"}, KeyActionToggleMode, "Toggle preview mode", "theme_selector", true, false},
-			{[]string{"esc"}, KeyActionCancel, "Cancel", "theme_selector", true, false},
+			{[]string{"up", "k"}, KeyActionNavigateUp, "⬆️ Navigate up", "theme_selector", true, false},
+			{[]string{"down", "j"}, KeyActionNavigateDown, "⬇️ Navigate down", "theme_selector", true, false},
+			{[]string{"enter"}, KeyActionSelect, "✅ Select theme", "theme_selector", true, false},
+			{[]string{"space"}, KeyActionToggleMode, "🔄 Toggle preview mode", "theme_selector", true, false},
+			{[]string{"esc"}, KeyActionCancel, "❌ Cancel", "theme_selector", true, false},
 		},
 	}
 
@@ -347,7 +347,8 @@ func (km *KeyboardManager) RenderHints() string {
 			binding.Action == KeyActionSelect ||
 			binding.Action == KeyActionConfirm ||
 			binding.Action == KeyActionPause ||
-			binding.Action == KeyActionResume {
+			binding.Action == KeyActionResume ||
+			binding.Action == KeyActionHelp {
 			important = append(important, binding)
 		} else {
 			normal = append(normal, binding)

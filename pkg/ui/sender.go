@@ -413,11 +413,9 @@ func (m *model) senderView() string {
 		result.WriteString("\n")
 	}
 
-	// Show help panel (if layout allows)
-	if !m.responsiveLayout.IsCompactMode() {
-		result.WriteString("\n")
-		result.WriteString(m.helpPanel.Render())
-	}
+	// Show help panel (always show, but adapt to layout)
+	result.WriteString("\n")
+	result.WriteString(m.helpPanel.Render())
 
 	// Status bar at the bottom (if layout allows)
 	if m.responsiveLayout.GetConfig().ShowStatusBar {
@@ -439,9 +437,9 @@ func (m *model) senderView() string {
 
 	// Add theme switch and performance hints
 	if !m.responsiveLayout.IsCompactMode() {
-		result.WriteString(" | T=Theme")
+		result.WriteString(" | T=🎨Theme")
 		if m.sender.state != sendingFiles && m.sender.state != transferPaused {
-			result.WriteString(" | P=Performance")
+			result.WriteString(" | P=📊Performance")
 		}
 	}
 
@@ -530,7 +528,7 @@ func (m *model) renderTransferProgress() string {
 	// Status messages will be handled by the main model
 
 	// Control hints
-	result.WriteString(style.FileStyle.Render("Controls: P=Pause | C=Cancel | 1-5=Stats Views | ?=Help"))
+	result.WriteString(style.FileStyle.Render("Controls: P=⏸️Pause | C=❌Cancel | 1-5=📊Stats | ?=Help"))
 
 	return result.String()
 }
@@ -581,7 +579,7 @@ func (m *model) renderTransferPaused() string {
 	}
 
 	// Control hints for paused state
-	result.WriteString(style.FileStyle.Render("Controls: R/Space=Resume | C=Cancel | Ctrl+C=Quit"))
+	result.WriteString(style.FileStyle.Render("Controls: R/Space=▶️Resume | C=❌Cancel | Ctrl+C=🚪Quit"))
 
 	return result.String()
 }
@@ -668,7 +666,7 @@ func (m *model) renderTransferComplete() string {
 	}
 
 	// Control hints for completion
-	result.WriteString(style.FileStyle.Render("Controls: Enter=Send More Files | Q=Quit"))
+	result.WriteString(style.FileStyle.Render("Controls: Enter=📤Send More Files | Q=🚪Quit"))
 
 	return result.String()
 }
@@ -712,7 +710,7 @@ func (m *model) renderTransferFailed() string {
 	}
 
 	// Control hints for failure
-	result.WriteString(style.FileStyle.Render("Controls: Enter=Try Again | Q=Quit"))
+	result.WriteString(style.FileStyle.Render("Controls: Enter=🔄Retry | Q=🚪Quit"))
 
 	return result.String()
 }

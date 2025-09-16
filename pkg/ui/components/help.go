@@ -99,7 +99,7 @@ func (hp *HelpPanel) Render() string {
 
 // renderCompactHint renders a small hint when help is not visible
 func (hp *HelpPanel) renderCompactHint() string {
-	return style.FileStyle.Render("Press '?' for help")
+	return style.FileStyle.Render("❓ Press '?' for help")
 }
 
 // renderCompact renders a compact help display
@@ -188,19 +188,19 @@ func (hp *HelpPanel) renderFull() string {
 func (hp *HelpPanel) getContextTitle() string {
 	switch hp.context {
 	case HelpContextSenderDiscovery:
-		return "Finding Receivers"
+		return "🔍 Finding Receivers"
 	case HelpContextSenderSelection:
-		return "Select Receiver"
+		return "📡 Select Receiver"
 	case HelpContextFileSelection:
-		return "Select Files to Send"
+		return "📁 Select Files to Send"
 	case HelpContextTransfer:
-		return "File Transfer in Progress"
+		return "🚀 File Transfer in Progress"
 	case HelpContextReceiver:
-		return "Receiving Files"
+		return "📥 Receiving Files"
 	case HelpContextError:
-		return "Error Recovery"
+		return "❌ Error Recovery"
 	default:
-		return "General"
+		return "🏠 General"
 	}
 }
 
@@ -212,68 +212,68 @@ func (hp *HelpPanel) getHelpItems() []HelpItem {
 	switch hp.context {
 	case HelpContextSenderDiscovery:
 		items = []HelpItem{
-			{"Ctrl+C", "Quit application", true},
-			{"R", "Refresh/restart discovery", false},
+			{"Ctrl+C", "🚪 Quit application", true},
+			{"R", "🔄 Refresh/restart discovery", false},
 			{"?", "Toggle help", false},
 		}
 
 	case HelpContextSenderSelection:
 		items = []HelpItem{
-			{"↑/↓", "Navigate receivers", true},
-			{"Enter", "Select receiver", true},
-			{"R", "Refresh receiver list", false},
-			{"Ctrl+C", "Quit application", false},
+			{"↑/↓", "⬆️⬇️ Navigate receivers", true},
+			{"Enter", "✅ Select receiver", true},
+			{"R", "🔄 Refresh receiver list", false},
+			{"Ctrl+C", "🚪 Quit application", false},
 			{"?", "Toggle help", false},
 		}
 
 	case HelpContextFileSelection:
 		items = []HelpItem{
-			{"↑/↓", "Navigate files/folders", true},
-			{"Enter", "Select/deselect file", true},
-			{"Space", "Select/deselect file", true},
-			{"→", "Enter folder", false},
-			{"←", "Go back", false},
-			{"Tab", "Confirm selection", true},
-			{"Esc", "Cancel", false},
+			{"↑/↓", "⬆️⬇️ Navigate files/folders", true},
+			{"Enter", "✅ Select/deselect file", true},
+			{"Space", "✅ Select/deselect file", true},
+			{"→", "➡️ Enter folder", false},
+			{"←", "⬅️ Go back", false},
+			{"Tab", "📋 Confirm selection", true},
+			{"Esc", "❌ Cancel", false},
 			{"?", "Toggle help", false},
 		}
 
 	case HelpContextTransfer:
 		items = []HelpItem{
-			{"P", "Pause transfer", true},
-			{"R", "Resume transfer (if paused)", true},
-			{"C", "Cancel transfer", true},
-			{"1", "Overview statistics", false},
-			{"2", "Detailed statistics", false},
-			{"3", "File statistics", false},
-			{"4", "Network statistics", false},
-			{"5", "Efficiency metrics", false},
-			{"Ctrl+C", "Quit application", false},
+			{"P", "⏸️ Pause transfer", true},
+			{"R", "▶️ Resume transfer (if paused)", true},
+			{"C", "❌ Cancel transfer", true},
+			{"1", "📊 Overview statistics", false},
+			{"2", "📈 Detailed statistics", false},
+			{"3", "📁 File statistics", false},
+			{"4", "🌐 Network statistics", false},
+			{"5", "⚡ Efficiency metrics", false},
+			{"Ctrl+C", "🚪 Quit application", false},
 			{"?", "Toggle help", false},
 		}
 
 	case HelpContextReceiver:
 		items = []HelpItem{
-			{"Y", "Accept incoming transfer", true},
-			{"N", "Reject incoming transfer", true},
-			{"Ctrl+C", "Quit application", false},
+			{"Y", "✅ Accept incoming transfer", true},
+			{"N", "❌ Reject incoming transfer", true},
+			{"Ctrl+C", "🚪 Quit application", false},
 			{"?", "Toggle help", false},
 		}
 
 	case HelpContextError:
 		items = []HelpItem{
-			{"R", "Retry operation", true},
-			{"Enter", "Try again", true},
-			{"C", "Cancel", false},
-			{"Q", "Quit application", false},
+			{"R", "🔄 Retry operation", true},
+			{"Enter", "🔄 Try again", true},
+			{"C", "❌ Cancel", false},
+			{"Q", "🚪 Quit application", false},
 			{"?", "Toggle help", false},
 		}
 
 	default: // HelpContextMain
 		items = []HelpItem{
-			{"S", "Start as sender", true},
-			{"R", "Start as receiver", true},
-			{"Q", "Quit application", true},
+			{"S", "📤 Start as sender", true},
+			{"R", "📥 Start as receiver", true},
+			{"Q", "🚪 Quit application", true},
 			{"?", "Toggle help", false},
 		}
 	}
