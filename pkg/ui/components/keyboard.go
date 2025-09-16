@@ -481,7 +481,8 @@ func (km *KeyboardManager) RenderHints() string {
 		}
 	}
 
-	return style.FileStyle.Render(result.String())
+	// Return the result without additional styling to avoid background color issues
+	return result.String()
 }
 
 // RenderFullHelp renders the complete help for the current context

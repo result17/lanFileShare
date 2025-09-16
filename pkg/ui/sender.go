@@ -396,9 +396,7 @@ func (m *model) senderView() string {
 	// Wrap main content in adaptive container
 	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, ""))
 
-	// Add enhanced UI components
-	result.WriteString("\n")
-
+	// Add enhanced UI components - remove extra newline for compact layout
 	// Show retry dialog if visible
 	if m.retryDialog.IsVisible() {
 		result.WriteString("\n")
@@ -413,34 +411,11 @@ func (m *model) senderView() string {
 		result.WriteString("\n")
 	}
 
-	// Show help panel (always show, but adapt to layout)
-	result.WriteString("\n")
-	result.WriteString(m.helpPanel.Render())
-
 	// Status bar at the bottom (if layout allows)
-	if m.responsiveLayout.GetConfig().ShowStatusBar {
+	// Remove extra newline to achieve compact layout with help panel
+	if m.responsiveLayout.GetConfig().ShowStatusBar && m.statusBar != nil {
 		result.WriteString("\n")
-		if m.statusBar != nil {
-			result.WriteString(m.statusBar.Render())
-		}
-	}
-
-	// Keyboard hints at the very bottom (always show but adapt to layout)
-	result.WriteString("\n")
-	hints := m.keyboardManager.RenderHints()
-	if m.responsiveLayout.IsCompactMode() {
-		// Truncate hints for compact mode
-		maxWidth := m.responsiveLayout.GetContentWidth()
-		hints = m.responsiveLayout.FormatText(hints, maxWidth)
-	}
-	result.WriteString(hints)
-
-	// Add theme switch and performance hints
-	if !m.responsiveLayout.IsCompactMode() {
-		result.WriteString(" | T=🎨Theme")
-		if m.sender.state != sendingFiles && m.sender.state != transferPaused {
-			result.WriteString(" | P=📊Performance")
-		}
+		result.WriteString(m.statusBar.Render())
 	}
 
 	return result.String()
@@ -528,7 +503,7 @@ func (m *model) renderTransferProgress() string {
 	// Status messages will be handled by the main model
 
 	// Control hints
-	result.WriteString(style.FileStyle.Render("Controls: P=⏸️Pause | C=❌Cancel | 1-5=📊Stats | ?=Help"))
+	result.WriteString(style.FileStyle.Render("Controls: P=⏸️Pause | C=❌Cancel | 1-5=📊Stats"))
 
 	return result.String()
 }

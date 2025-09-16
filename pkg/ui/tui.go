@@ -91,6 +91,8 @@ func InitialModel(m Mode, port int, outputPath string) model {
 
 	themeSelector.SetOnHidden(keyboardManager.RestoreLastContext)
 
+	helpPanel.SetCompact(true)
+
 	// start performance collection
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -184,7 +186,14 @@ func (m model) View() string {
 	}
 
 	if m.contextMenu != nil && m.contextMenu.IsVisible() {
-		s += "\n" + m.contextMenu.Render() + "\n"
+		s += "\n" + m.contextMenu.Render()
+	}
+
+	// Add help panel (context-sensitive help system)
+	// Remove extra newlines to achieve compact layout with senderView
+	helpContent := m.helpPanel.Render()
+	if helpContent != "" {
+		s += m.responsiveLayout.AdaptiveContainer(helpContent, "")
 	}
 
 	return s
@@ -356,40 +365,7 @@ func (m *model) handleRetryAction(action components.KeyAction) bool {
 	return false
 }
 
-
 func (m *model) renderFatalErr(err error) {
 	m.errorHandler.AddError(components.ErrorTypeUnknown, "Application Error", err.Error(), true)
 	m.mode = FatalError
-}
-
-// updateHelpContext updates the help panel context based on current state
-func (m *model) updateHelpContext() {
-	var context components.HelpContext
-	
-	switch m.mode {
-	case Sender:
-		switch m.sender.state {
-		case findingReceivers:
-			context = components.HelpContextSenderDiscovery
-		case selectingReceiver:
-			context = components.HelpContextSenderSelection
-		case selectingFiles:
-			context = components.HelpContextFileSelection
-		case sendingFiles, transferPaused:
-			context = components.HelpContextTransfer
-		case transferComplete:
-			// Keep current context for completion
-		case transferFailed:
-			context = components.HelpContextError
-		}
-	case Receiver:
-		// TODO: Set appropriate receiver contexts
-		context = components.HelpContextReceiver
-	case FatalError:
-		context = components.HelpContextError
-	default:
-		context = components.HelpContextMain
-	}
-	
-	m.helpPanel.SetContext(context)
 }

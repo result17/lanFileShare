@@ -30,10 +30,10 @@ type HelpItem struct {
 
 // HelpPanel provides context-sensitive help and keyboard shortcuts
 type HelpPanel struct {
-	context        HelpContext
-	visible        bool
-	compact        bool
-	customItems    []HelpItem
+	context         HelpContext
+	visible         bool
+	compact         bool
+	customItems     []HelpItem
 	keyboardManager *KeyboardManager // Reference to keyboard manager
 }
 
@@ -50,10 +50,10 @@ func NewHelpPanel() *HelpPanel {
 // NewHelpPanelWithKeyboard creates a new help panel with keyboard manager reference
 func NewHelpPanelWithKeyboard(km *KeyboardManager) *HelpPanel {
 	return &HelpPanel{
-		context:        HelpContextMain,
-		visible:        false,
-		compact:        true,
-		customItems:    make([]HelpItem, 0),
+		context:         HelpContextMain,
+		visible:         true,
+		compact:         true,
+		customItems:     make([]HelpItem, 0),
 		keyboardManager: km,
 	}
 }
@@ -158,8 +158,8 @@ func (hp *HelpPanel) renderCompact() string {
 			item.Description))
 	}
 
-	result.WriteString(" | ?=Help")
-	return style.FileStyle.Render(result.String())
+	// Return the result without additional styling to avoid background color issues
+	return result.String()
 }
 
 // renderFull renders the full help panel
@@ -336,39 +336,39 @@ func (hp *HelpPanel) isActionRelevantToContext(action KeyAction) bool {
 		KeyActionShowPerformance,
 		KeyActionFullscreen,
 	}
-	
+
 	for _, globalAction := range globalActions {
 		if action == globalAction {
 			return true
 		}
 	}
-	
+
 	// Context-specific relevance
 	switch hp.context {
 	case HelpContextSenderDiscovery:
 		return action == KeyActionRefresh
-		
+
 	case HelpContextSenderSelection:
-		return action == KeyActionNavigateUp || action == KeyActionNavigateDown || 
-		       action == KeyActionSelect || action == KeyActionRefresh
-		       
+		return action == KeyActionNavigateUp || action == KeyActionNavigateDown ||
+			action == KeyActionSelect || action == KeyActionRefresh
+
 	case HelpContextFileSelection:
 		return action == KeyActionNavigateUp || action == KeyActionNavigateDown ||
-		       action == KeyActionNavigateLeft || action == KeyActionNavigateRight ||
-		       action == KeyActionSelect || action == KeyActionConfirm || action == KeyActionBack
-		       
+			action == KeyActionNavigateLeft || action == KeyActionNavigateRight ||
+			action == KeyActionSelect || action == KeyActionConfirm || action == KeyActionBack
+
 	case HelpContextTransfer:
 		return action == KeyActionPause || action == KeyActionResume || action == KeyActionCancel ||
-		       action == KeyActionStatsOverview || action == KeyActionStatsDetailed ||
-		       action == KeyActionStatsFiles || action == KeyActionStatsNetwork || 
-		       action == KeyActionStatsEfficiency
-		       
+			action == KeyActionStatsOverview || action == KeyActionStatsDetailed ||
+			action == KeyActionStatsFiles || action == KeyActionStatsNetwork ||
+			action == KeyActionStatsEfficiency
+
 	case HelpContextReceiver:
 		return action == KeyActionSelect || action == KeyActionCancel
-		
+
 	case HelpContextError:
 		return action == KeyActionRetry || action == KeyActionCancel
-		
+
 	default:
 		return true
 	}
@@ -576,7 +576,7 @@ func (hp *HelpPanel) getActionKeys(action KeyAction) []string {
 	if hp.keyboardManager != nil {
 		return hp.keyboardManager.GetKeysForAction(action)
 	}
-	
+
 	// Fallback to basic mapping if no keyboard manager
 	switch action {
 	case KeyActionQuit:
@@ -633,12 +633,12 @@ func (hp *HelpPanel) formatKeyDisplay(keys []string) string {
 	if len(keys) == 0 {
 		return "unknown"
 	}
-	
+
 	// For display, we'll show the first key or a combination
 	if len(keys) == 1 {
 		return keys[0]
 	}
-	
+
 	// For multiple keys, show them separated by /
 	return strings.Join(keys, "/")
 }

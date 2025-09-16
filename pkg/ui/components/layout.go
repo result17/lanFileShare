@@ -439,8 +439,8 @@ func (rl *ResponsiveLayout) AdaptiveContainer(content string, title string) stri
 		containerStyle = containerStyle.Padding(0).Margin(0)
 	} else {
 		containerStyle = containerStyle.
-			Padding(rl.config.Padding).
-			Margin(rl.config.Margin)
+			Padding(rl.config.Padding). // Restore padding
+			Margin(0)  // Remove margin to reduce extra spacing
 	}
 
 	// Set width

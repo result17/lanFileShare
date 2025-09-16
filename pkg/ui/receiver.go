@@ -25,11 +25,11 @@ const (
 
 type receiverModel struct {
 	appController AppController
-	state     receiverState
-	spinner   spinner.Model
-	port      int
-	fileTree  fileTree.Model
-	lastError error
+	state         receiverState
+	spinner       spinner.Model
+	port          int
+	fileTree      fileTree.Model
+	lastError     error
 }
 
 type KeyMap struct {
