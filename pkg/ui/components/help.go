@@ -154,12 +154,33 @@ func (hp *HelpPanel) renderCompact() string {
 		keys := hp.getActionKeys(item.Action)
 		keyDisplay := hp.formatKeyDisplay(keys)
 		result.WriteString(fmt.Sprintf("%s=%s",
-			style.HighlightFontStyle.Render(keyDisplay),
+			hp.renderWithSafeReset(style.HighlightFontStyle, keyDisplay),
 			item.Description))
 	}
 
-	// Return the result without additional styling to avoid background color issues
 	return result.String()
+}
+
+// renderWithSafeReset renders text with a style but uses a safe reset that preserves background color
+func (hp *HelpPanel) renderWithSafeReset(style lipgloss.Style, text string) string {
+	// Get the styled text
+	styled := style.Render(text)
+	
+	// Replace the full reset \x1b[0m with a selective reset that preserves background
+	// \x1b[39m resets foreground color to default
+	// \x1b[22m resets bold/faint
+	// \x1b[23m resets italic
+	// \x1b[24m resets underline
+	// \x1b[25m resets blink
+	// \x1b[27m resets reverse
+	// \x1b[28m resets hidden
+	// \x1b[29m resets strikethrough
+	safeReset := "\x1b[39m\x1b[22m\x1b[23m\x1b[24m\x1b[25m\x1b[27m\x1b[28m\x1b[29m"
+	
+	// Replace all occurrences of the full reset with safe reset
+	result := strings.ReplaceAll(styled, "\x1b[0m", safeReset)
+	
+	return result
 }
 
 // renderFull renders the full help panel
