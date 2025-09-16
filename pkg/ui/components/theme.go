@@ -509,7 +509,7 @@ type ThemeSelector struct {
 	visible       bool
 	previewMode   bool
 	originalTheme string
-	onHidden func()
+	onHidden      func()
 }
 
 // NewThemeSelector creates a new theme selector
