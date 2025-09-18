@@ -102,7 +102,7 @@ func InitialModel() Model {
 	ti.CharLimit = 128
 	ti.Width = 80
 
-	ti.Cursor.Style = style.HighlightFontStyle
+	ti.Cursor.Style = style.CreateSafeCursorStyle()
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -489,7 +489,16 @@ func (m Model) View() string {
 
 	// Header
 	s.WriteString("Enter a path to browse, or select files below. " + m.helpView() + "\n \n")
-	s.WriteString(m.input.View())
+	
+	// Use safe rendering for textinput if you have a background color
+	// If you don't have a background color for the textinput, just use the original
+	textInputView := m.input.View()
+	// If textinput has a background color, use safe rendering:
+	// textInputView = style.RenderTextInputWithSafeBackground(textInputView, lipgloss.Color("your-bg-color"))
+	// For now, just use the safe reset function:
+	textInputView = style.RenderWithSafeReset(lipgloss.NewStyle(), textInputView)
+	s.WriteString(textInputView)
+	
 	if m.inputErr != nil {
 		s.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.inputErr.Error()))
 	}

@@ -85,3 +85,12 @@ func RenderWithSafeReset(style lipgloss.Style, text string) string {
 	return result
 }
 // SafeRenderStyle is a wrapper around lipgloss.Style that provides safe rendering
+
+// CreateSafeCursorStyle creates a cursor style that won't reset background colors
+// This is specifically designed for textinput components with background colors
+func CreateSafeCursorStyle() lipgloss.Style {
+	// Create a style that only sets foreground color, avoiding any reset sequences
+	return lipgloss.NewStyle().
+		Foreground(colorCyan).
+		Inline(true) // This helps prevent unwanted resets
+}
