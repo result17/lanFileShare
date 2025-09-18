@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/rescp17/lanFileSharer/internal/style"
 )
 
@@ -458,7 +457,7 @@ func (km *KeyboardManager) RenderHints() string {
 			// Use the first key as the display key
 			displayKey := binding.Keys[0]
 			result.WriteString(fmt.Sprintf("%s=%s",
-				km.renderWithSafeReset(style.HighlightFontStyle, displayKey),
+				style.RenderWithSafeReset(style.HighlightFontStyle, displayKey),
 				binding.Description))
 		}
 	}
@@ -477,7 +476,7 @@ func (km *KeyboardManager) RenderHints() string {
 
 			displayKey := normal[i].Keys[0]
 			result.WriteString(fmt.Sprintf("%s=%s",
-				km.renderWithSafeReset(style.FileStyle, displayKey),
+				style.RenderWithSafeReset(style.FileStyle, displayKey),
 				normal[i].Description))
 		}
 	}
@@ -485,27 +484,6 @@ func (km *KeyboardManager) RenderHints() string {
 	return result.String()
 }
 
-// renderWithSafeReset renders text with a style but uses a safe reset that preserves background color
-func (km *KeyboardManager) renderWithSafeReset(style lipgloss.Style, text string) string {
-	// Get the styled text
-	styled := style.Render(text)
-	
-	// Replace the full reset \x1b[0m with a selective reset that preserves background
-	// \x1b[39m resets foreground color to default
-	// \x1b[22m resets bold/faint
-	// \x1b[23m resets italic
-	// \x1b[24m resets underline
-	// \x1b[25m resets blink
-	// \x1b[27m resets reverse
-	// \x1b[28m resets hidden
-	// \x1b[29m resets strikethrough
-	safeReset := "\x1b[39m\x1b[22m\x1b[23m\x1b[24m\x1b[25m\x1b[27m\x1b[28m\x1b[29m"
-	
-	// Replace all occurrences of the full reset with safe reset
-	result := strings.ReplaceAll(styled, "\x1b[0m", safeReset)
-	
-	return result
-}
 
 // RenderFullHelp renders the complete help for the current context
 func (km *KeyboardManager) RenderFullHelp() string {

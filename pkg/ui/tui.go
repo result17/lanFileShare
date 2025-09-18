@@ -222,8 +222,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return newModel, cmd
 		}
 
-		// Handle overlay components (theme selector, context menu, retry dialog)
-		return m.handleOverlayComponents(action)
+	// Handle overlay components (theme selector, context menu, retry dialog)
+	if newModel, cmd, handled := m.handleOverlayComponents(action); handled {
+		return newModel, cmd
+	}
 
 	case tea.WindowSizeMsg:
 		// Update responsive layout
@@ -319,13 +321,14 @@ func (m *model) listenForAppMessages() tea.Cmd {
 }
 
 // handleOverlayComponents handles all overlay components (theme selector, context menu, retry dialog)
-func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model, tea.Cmd) {
+func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model, tea.Cmd, bool) {
 	// Handle theme selector if visible
 	if m.themeSelector != nil && m.themeSelector.IsVisible() {
 		if m.keyboardManager.GetContext() == "theme_selector" && m.themeSelector.Navigate(action) {
-			return m, nil
+			return m, nil, true
 		}
-		return m, nil
+		// Theme selector is visible but didn't handle this action
+		return m, nil, true
 	}
 
 	// Handle context menu if visible
@@ -333,20 +336,24 @@ func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model,
 		if m.contextMenu.Navigate(action) {
 			selectedItem := m.contextMenu.GetSelectedItem()
 			if selectedItem != nil {
-				return m, m.handleMenuAction(selectedItem.Action)
+				return m, m.handleMenuAction(selectedItem.Action), true
 			}
 		}
-		return m, nil
+		// Context menu is visible but didn't handle this action
+		return m, nil, true
 	}
 
 	// Handle retry dialog if visible
 	if m.retryDialog.IsVisible() {
 		if m.handleRetryAction(action) {
-			return m, nil
+			return m, nil, true
 		}
-		return m, nil
+		// Retry dialog is visible but didn't handle this action
+		return m, nil, true
 	}
-	return m, nil
+	
+	// No overlay components are visible, don't handle the action
+	return m, nil, false
 }
 
 // handleRetryAction handles retry dialog actions with better cohesion

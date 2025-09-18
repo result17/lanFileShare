@@ -2,7 +2,6 @@ package multiFilePicker
 
 import (
 	"fmt"
-	"io/fs"
 	"log"
 	"log/slog"
 	"os"
@@ -16,9 +15,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/rescp17/lanFileSharer/internal/util"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
-
 
 type mode int
 type sortType int
@@ -58,50 +57,40 @@ type KeyMap struct {
 }
 
 var DefaultKeyMap = KeyMap{
-	Up:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move up")),
-	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move down")),
-	Left:          key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "page up")),
-	Right:         key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "page down")),
-	ToggleSelect:  key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
-	ToggleInput:   key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
-	Confirm:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm/navigate")),
-	Quit:          key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc/ctrl+c", "quit/back")),
-	SelectAll:     key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select all")),
-	DeselectAll:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "deselect all")),
-	InvertSelect:  key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "invert selection")),
-	SortBySize:    key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "sort by size")),
-	SortByName:    key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "sort by name")),
-	SortByDate:    key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "sort by date")),
-	SearchToggle:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "toggle search")),
-}
-
-type displayItem struct {
-	Name string
-	Path string
-	IsDir bool
-	ModTime string
-	Size string
-	Type string
-	fs.DirEntry
+	Up:           key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move up")),
+	Down:         key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move down")),
+	Left:         key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "page up")),
+	Right:        key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "page down")),
+	ToggleSelect: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle select")),
+	ToggleInput:  key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "input path")),
+	Confirm:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm/navigate")),
+	Quit:         key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc/ctrl+c", "quit/back")),
+	SelectAll:    key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select all")),
+	DeselectAll:  key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "deselect all")),
+	InvertSelect: key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "invert selection")),
+	SortBySize:   key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "sort by size")),
+	SortByName:   key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "sort by name")),
+	SortByDate:   key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "sort by date")),
+	SearchToggle: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "toggle search")),
 }
 
 // --- Model ---
 type Model struct {
-	path      string
-	lastPath  string // For relative path resolution
-	items     []displayItem
-	selected  map[string]struct{}
-	cursor    int
-	keys      KeyMap
-	quitting  bool
-	mode      mode
-	sortType  sortType
-	sortAsc   bool // true for ascending, false for descending
-	input     textinput.Model
-	inputErr  error
-	height    int // For viewport height
-	offset    int // For scrolling
-	files     []*fileInfo.FileNode
+	path       string
+	lastPath   string // For relative path resolution
+	items      []NodeDisplayItem
+	selected   map[string]struct{}
+	cursor     int
+	keys       KeyMap
+	quitting   bool
+	mode       mode
+	sortType   sortType
+	sortAsc    bool // true for ascending, false for descending
+	input      textinput.Model
+	inputErr   error
+	height     int // For viewport height
+	offset     int // For scrolling
+	files      []*fileInfo.FileNode
 	searchMode bool
 	// OnSelect func([]*fileInfo.FileNode) tea.Cmd // Callback for when files are selected
 }
@@ -112,8 +101,8 @@ func InitialModel() Model {
 	ti.Focus()
 	ti.CharLimit = 128
 	ti.Width = 80
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+
+	ti.Cursor.Style = style.HighlightFontStyle
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -122,9 +111,9 @@ func InitialModel() Model {
 	}
 
 	return Model{
-		path:     "",               // Initially empty
-		lastPath: wd,               // Start with the working directory
-		items:    []displayItem{}, // Initially empty
+		path:     "",                  // Initially empty
+		lastPath: wd,                  // Start with the working directory
+		items:    []NodeDisplayItem{}, // Initially empty
 		selected: make(map[string]struct{}),
 		keys:     DefaultKeyMap,
 		mode:     modeInput, // Start in input mode
@@ -168,7 +157,7 @@ func (m *Model) sortItems() {
 	})
 }
 
-func (m *Model) loadDirectory(path string) ([]displayItem, error) {
+func (m *Model) loadDirectory(path string) ([]NodeDisplayItem, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(m.lastPath, path)
 	}
@@ -201,7 +190,7 @@ func (m *Model) loadDirectory(path string) ([]displayItem, error) {
 		return nil, err
 	}
 
-	newItems := make([]displayItem, len(entries))
+	newItems := make([]NodeDisplayItem, len(entries))
 	for i, entry := range entries {
 		info, err := entry.Info()
 		modTime := ""
@@ -226,7 +215,7 @@ func (m *Model) loadDirectory(path string) ([]displayItem, error) {
 			}
 		}
 
-		newItems[i] = displayItem{
+		newItems[i] = NodeDisplayItem{
 			Name:     entry.Name(),
 			Path:     filepath.Join(absPath, entry.Name()),
 			IsDir:    entry.IsDir(),
@@ -464,7 +453,7 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if key.Matches(msg, m.keys.Confirm) {
 		path := m.input.Value()
-		
+
 		// Load directory - all path validation is handled in loadDirectory
 		items, err := m.loadDirectory(path)
 		if err != nil {
@@ -547,7 +536,7 @@ func (m Model) View() string {
 	if start < len(m.items) {
 		slice = m.items[start:end]
 	} else if len(m.items) == 0 {
-		slice = []displayItem{}
+		slice = []NodeDisplayItem{}
 	}
 
 	for i, item := range slice {
@@ -565,7 +554,7 @@ func (m Model) View() string {
 		}
 
 		// Add emoji based on item type
-		nameStr := m.getIconForItem(item) + " " + item.Name
+		nameStr := GetIconForItem(item) + " " + item.Name
 
 		// Pad right first, then add style
 		nameCell := util.PadRight(nameStr, nameWidth+2) // +2 for emoji and spaces
@@ -578,7 +567,7 @@ func (m Model) View() string {
 			typeCell = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(typeCell)
 		} else {
 			nameCell = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Render(nameCell)
-			typeCell = m.getColorForFileType(item).Render(typeCell)
+			typeCell = GetColorForFileType(item).Render(typeCell)
 		}
 
 		s.WriteString(nameCell + " " +
@@ -655,110 +644,4 @@ func (m *Model) visibleItems() int {
 		visible = 8
 	}
 	return visible
-}
-
-// getIconForItem returns the appropriate emoji icon for different file types
-func (m Model) getIconForItem(item displayItem) string {
-	if item.IsDir {
-		return "📁"
-	}
-
-	// Get file extension (convert to lowercase for case-insensitive matching)
-	fileType := strings.ToLower(filepath.Ext(item.Name))
-
-	// Return appropriate icon based on file type
-	switch fileType {
-	case ".txt", ".md", ".log":
-		return "📄"
-	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp":
-		return "🖼️"
-	case ".mp4", ".avi", ".mkv", ".mov", ".wmv":
-		return "🎥"
-	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
-		return "🎵"
-	case ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2":
-		return "📦"
-	case ".pdf":
-		return "📕"
-	case ".doc", ".docx":
-		return "📄"
-	case ".xls", ".xlsx", ".csv":
-		return "📊"
-	case ".ppt", ".pptx":
-		return "📈"
-	case ".py":
-		return "🐍"
-	case ".go":
-		return "🐹"
-	case ".js", ".ts":
-		return "📜"
-	case ".html", ".htm":
-		return "🌐"
-	case ".css":
-		return "🎨"
-	case ".json":
-		return "🔧"
-	case ".yml", ".yaml":
-		return "⚙️"
-	case ".xml":
-		return "🏗️"
-	case ".sh", ".bash", ".zsh":
-		return "🐚"
-	case ".exe", ".bat", ".cmd":
-		return "⚙️"
-	default:
-		// For MIME type-based icons
-		if item.Type != "" {
-			if strings.HasPrefix(item.Type, "text/") {
-				return "📄"
-			}
-			if strings.HasPrefix(item.Type, "image/") {
-				return "🖼️"
-			}
-			if strings.HasPrefix(item.Type, "audio/") {
-				return "🎵"
-			}
-			if strings.HasPrefix(item.Type, "video/") {
-				return "🎥"
-			}
-			if strings.HasPrefix(item.Type, "application/pdf") {
-				return "📕"
-			}
-			// Default file icon for other types
-			return "📄"
-		}
-		return "📄"
-	}
-}
-
-// getColorForFileType returns appropriate color for different file types
-func (m Model) getColorForFileType(item displayItem) lipgloss.Style {
-	fileType := strings.ToLower(filepath.Ext(item.Name))
-
-	switch fileType {
-	case ".txt", ".md", ".log":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("39")) // Blue
-	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("133")) // Magenta
-	case ".mp4", ".avi", ".mkv", ".mov", ".wmv":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("124")) // Red
-	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
-	case ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("136")) // Yellow
-	case ".pdf":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("160")) // Red (dark)
-	case ".py", ".go", ".js", ".ts":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("26")) // Cyan
-	case ".html", ".htm":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("34")) // Green
-	case ".json", ".xml":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("60")) // Purple
-	case ".css":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("199")) // Pink
-	case ".exe", ".bat", ".cmd":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("22")) // Dark Green
-	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("244")) // Gray
-	}
 }

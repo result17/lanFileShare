@@ -353,7 +353,7 @@ func (m *model) senderView() string {
 	var mainContent string
 	switch m.sender.state {
 	case findingReceivers:
-		mainContent = style.HighlightFontStyle.Render(fmt.Sprintf("%s🔍 %s", m.sender.spinner.View(), "Finding receivers..."))
+		mainContent = style.RenderWithSafeReset(style.HighlightFontStyle, fmt.Sprintf("\n%s🔍 %s", m.sender.spinner.View(), "Finding receivers..."))
 	case selectingReceiver:
 		mainContent = fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
 		mainContent += style.BaseStyle.Render(m.sender.table.View()) + "\n"
@@ -394,7 +394,7 @@ func (m *model) senderView() string {
 	}
 
 	// Wrap main content in adaptive container
-	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, ""))
+	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, "Sender"))
 
 	// Add enhanced UI components - remove extra newline for compact layout
 	// Show retry dialog if visible

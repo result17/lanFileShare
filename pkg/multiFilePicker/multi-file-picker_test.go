@@ -60,7 +60,7 @@ func TestInitialModel(t *testing.T) {
 
 func TestUpdateMovement(t *testing.T) {
 	m := Model{
-		items: make([]displayItem, 3), // 3 dummy items
+		items: make([]NodeDisplayItem, 3), // 3 dummy items
 		keys:  DefaultKeyMap,
 	}
 

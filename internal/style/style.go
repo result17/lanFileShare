@@ -1,6 +1,8 @@
 package style
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
@@ -24,10 +26,10 @@ var (
 	SuccessStyle = lipgloss.NewStyle().Foreground(colorGreen)
 )
 
-// --- Sender Styles ---
 var (
 	BaseStyle          = lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorDarkGray)
 	HighlightFontStyle = lipgloss.NewStyle().Foreground(colorCyan)
+	ThemeStyle         = lipgloss.NewStyle().Foreground(colorPurple)
 )
 
 // --- File Tree And Multi File Picker Styles ---
@@ -60,3 +62,26 @@ func NewTableStyles() table.Styles {
 	styles.Selected = styles.Selected.Foreground(colorLightGray).Background(colorBlue).Bold(false)
 	return styles
 }
+
+// renderWithSafeReset renders text with a style but uses a safe reset that preserves background color
+func RenderWithSafeReset(style lipgloss.Style, text string) string {
+	// Get the styled text
+	styled := style.Render(text)
+
+	// Replace the full reset \x1b[0m with a selective reset that preserves background
+	// \x1b[39m resets foreground color to default
+	// \x1b[22m resets bold/faint
+	// \x1b[23m resets italic
+	// \x1b[24m resets underline
+	// \x1b[25m resets blink
+	// \x1b[27m resets reverse
+	// \x1b[28m resets hidden
+	// \x1b[29m resets strikethrough
+	safeReset := "\x1b[39m\x1b[22m\x1b[23m\x1b[24m\x1b[25m\x1b[27m\x1b[28m\x1b[29m"
+
+	// Replace all occurrences of the full reset with safe reset
+	result := strings.ReplaceAll(styled, "\x1b[0m", safeReset)
+
+	return result
+}
+// SafeRenderStyle is a wrapper around lipgloss.Style that provides safe rendering

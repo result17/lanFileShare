@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -61,24 +63,30 @@ func (m *model) initReceiver() tea.Cmd {
 }
 
 func (m model) receiverView() string {
+	var result strings.Builder
+	var mainContent string
 	switch m.receiver.state {
 	case awaitingConnection:
-		return fmt.Sprintf("\n\n %s Awaiting sender connection on port %d...", m.receiver.spinner.View(), m.receiver.port)
+		mainContent = fmt.Sprintf("\n\n %s %s %s...", style.RenderWithSafeReset(style.HighlightFontStyle, m.receiver.spinner.View()), style.RenderWithSafeReset(style.HighlightFontStyle, "Awaiting sender connection on port"), style.RenderWithSafeReset(style.ThemeStyle, strconv.Itoa(m.receiver.port)))
 	case awaitingConfirmation:
 		help := fmt.Sprintf("  %s/%s  %s/%s \n",
 			DefaultKeyMap.Accept.Help().Key, DefaultKeyMap.Accept.Help().Desc,
 			DefaultKeyMap.Reject.Help().Key, DefaultKeyMap.Reject.Help().Desc,
 		)
-		return fmt.Sprintf("%s\n%s", m.receiver.fileTree.View(), style.HelpStyle.Render(help))
+		mainContent = fmt.Sprintf("%s\n%s", m.receiver.fileTree.View(), style.HelpStyle.Render(help))
 	case receivingFiles:
-		return fmt.Sprintf("\n\n %s Receiving files...", m.receiver.spinner.View())
+		mainContent = fmt.Sprintf("\n\n %s Receiving files...", m.receiver.spinner.View())
 	case receiveComplete: // Add this new case
-		return "\nFile transfer complete!\n\nPress Enter to exit."
+		mainContent = "File transfer complete!\n\nPress Enter to exit."
 	case receiveFailed:
-		return fmt.Sprintf("\nAn error occurred: %v\n\nPress Enter to restart.", style.ErrorStyle.Render(m.receiver.lastError.Error()))
+		mainContent = fmt.Sprintf("An error occurred: %v\n\nPress Enter to restart.", style.ErrorStyle.Render(m.receiver.lastError.Error()))
 	default:
-		return "Internal error: unknown receiver state"
+		mainContent = "Internal error: unknown receiver state"
 	}
+
+	result.WriteString(m.responsiveLayout.AdaptiveContainer(mainContent, "Receiver"))
+
+	return result.String()
 }
 
 func (m *model) resetReceiver() (tea.Model, tea.Cmd) {
