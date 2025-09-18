@@ -17,6 +17,7 @@ import (
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
 
 type mode int
@@ -78,7 +79,7 @@ var DefaultKeyMap = KeyMap{
 type Model struct {
 	path       string
 	lastPath   string // For relative path resolution
-	items      []NodeDisplayItem
+	items      []components.NodeDisplayItem
 	selected   map[string]struct{}
 	cursor     int
 	keys       KeyMap
@@ -113,7 +114,7 @@ func InitialModel() Model {
 	return Model{
 		path:     "",                  // Initially empty
 		lastPath: wd,                  // Start with the working directory
-		items:    []NodeDisplayItem{}, // Initially empty
+		items:    []components.NodeDisplayItem{}, // Initially empty
 		selected: make(map[string]struct{}),
 		keys:     DefaultKeyMap,
 		mode:     modeInput, // Start in input mode
@@ -157,7 +158,7 @@ func (m *Model) sortItems() {
 	})
 }
 
-func (m *Model) loadDirectory(path string) ([]NodeDisplayItem, error) {
+func (m *Model) loadDirectory(path string) ([]components.NodeDisplayItem, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(m.lastPath, path)
 	}
@@ -190,7 +191,7 @@ func (m *Model) loadDirectory(path string) ([]NodeDisplayItem, error) {
 		return nil, err
 	}
 
-	newItems := make([]NodeDisplayItem, len(entries))
+	newItems := make([]components.NodeDisplayItem, len(entries))
 	for i, entry := range entries {
 		info, err := entry.Info()
 		modTime := ""
@@ -215,7 +216,7 @@ func (m *Model) loadDirectory(path string) ([]NodeDisplayItem, error) {
 			}
 		}
 
-		newItems[i] = NodeDisplayItem{
+		newItems[i] = components.NodeDisplayItem{
 			Name:     entry.Name(),
 			Path:     filepath.Join(absPath, entry.Name()),
 			IsDir:    entry.IsDir(),
@@ -500,7 +501,8 @@ func (m Model) View() string {
 	s.WriteString(textInputView)
 	
 	if m.inputErr != nil {
-		s.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.inputErr.Error()))
+		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		s.WriteString("\n" + style.RenderWithSafeReset(errorStyle, m.inputErr.Error()))
 	}
 	s.WriteString("\n\n")
 
@@ -521,11 +523,11 @@ func (m Model) View() string {
 	// Table header: pad first, then style
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
 	s.WriteString(
-		headerStyle.Render(util.PadRight("", 5)) + " " +
-			headerStyle.Render(util.PadRight("Name", nameWidth)) + " " +
-			headerStyle.Render(util.PadRight("Last Modified", timeWidth)) + " " +
-			headerStyle.Render(util.PadRight("Size", sizeWidth)) +
-			headerStyle.Render(util.PadRight("Type", typeWidth)) + "\n\n",
+		style.RenderWithSafeReset(headerStyle, util.PadRight("", 5)) + " " +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Name", nameWidth)) + " " +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Last Modified", timeWidth)) + " " +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Size", sizeWidth)) +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Type", typeWidth)) + "\n\n",
 	)
 
 	visibleItems := m.visibleItems()
@@ -545,7 +547,7 @@ func (m Model) View() string {
 	if start < len(m.items) {
 		slice = m.items[start:end]
 	} else if len(m.items) == 0 {
-		slice = []NodeDisplayItem{}
+		slice = []components.NodeDisplayItem{}
 	}
 
 	for i, item := range slice {
@@ -563,7 +565,7 @@ func (m Model) View() string {
 		}
 
 		// Add emoji based on item type
-		nameStr := GetIconForItem(item) + " " + item.Name
+		nameStr := components.GetIconForItem(item) + " " + item.Name
 
 		// Pad right first, then add style
 		nameCell := util.PadRight(nameStr, nameWidth+2) // +2 for emoji and spaces
@@ -572,15 +574,19 @@ func (m Model) View() string {
 		sizeCell := util.PadRight(item.Size, sizeWidth)
 
 		if item.IsDir {
-			nameCell = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true).Render(nameCell)
-			typeCell = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(typeCell)
+			dirNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+			nameCell = style.RenderWithSafeReset(dirNameStyle, nameCell)
+			dirTypeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			typeCell = style.RenderWithSafeReset(dirTypeStyle, typeCell)
 		} else {
-			nameCell = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Render(nameCell)
-			typeCell = GetColorForFileType(item).Render(typeCell)
+			fileNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+			nameCell = style.RenderWithSafeReset(fileNameStyle, nameCell)
+			typeCell = style.RenderWithSafeReset(components.GetColorForFileType(item), typeCell)
 		}
 
+		timeCellStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("237"))
 		s.WriteString(nameCell + " " +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("237")).Render(timeCell) + " " +
+			style.RenderWithSafeReset(timeCellStyle, timeCell) + " " +
 			sizeCell + " " +
 			typeCell + "\n\n")
 	}
@@ -588,20 +594,21 @@ func (m Model) View() string {
 	// Scroll indicator
 	if len(m.items) > visibleItems {
 		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Italic(true)
-		s.WriteString(scrollStyle.Render(fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, len(m.items))))
+		s.WriteString(style.RenderWithSafeReset(scrollStyle, fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, len(m.items))))
 	}
 
 	// Footer with selection count
 	if len(m.selected) > 0 {
 		footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-		s.WriteString(footerStyle.Render(fmt.Sprintf("\nSelected: %d file(s)", len(m.selected))))
+		s.WriteString(style.RenderWithSafeReset(footerStyle, fmt.Sprintf("\nSelected: %d file(s)", len(m.selected))))
 	}
 
 	return s.String()
 }
 
 func (m Model) helpView() string {
-	return lipgloss.NewStyle().Faint(true).Render(
+	helpStyle := lipgloss.NewStyle().Faint(true)
+	return style.RenderWithSafeReset(helpStyle,
 		fmt.Sprintf("Use '%s'/'%s' to page, '%s' to browse, '%s' to confirm, '%s' to quit",
 			m.keys.Left.Help().Key, m.keys.Right.Help().Key, m.keys.ToggleInput.Help().Key, m.keys.Confirm.Help().Key, m.keys.Quit.Help().Key),
 	)

@@ -1,4 +1,4 @@
-package multiFilePicker
+package components
 
 import (
 	"github.com/charmbracelet/lipgloss"

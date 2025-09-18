@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
 
 // setupTestDir creates a temporary directory structure for testing.
@@ -60,7 +61,7 @@ func TestInitialModel(t *testing.T) {
 
 func TestUpdateMovement(t *testing.T) {
 	m := Model{
-		items: make([]NodeDisplayItem, 3), // 3 dummy items
+		items: make([]components.NodeDisplayItem, 3), // 3 dummy items
 		keys:  DefaultKeyMap,
 	}
 

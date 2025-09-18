@@ -216,17 +216,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tick(time.Second)
 	case tea.KeyMsg:
-		// Process the key through the keyboard manager
-		action := m.keyboardManager.ProcessKey(msg)
-		if newModel, cmd, handled := m.handleGlobalAction(action); handled {
-			return newModel, cmd
+		if m.mode == Sender && m.sender.state == selectingFiles && !m.sender.fp.IsBrowseMode() {
+			// Process the key through the keyboard manager
+			action := m.keyboardManager.ProcessKey(msg)
+			if newModel, cmd, handled := m.handleGlobalAction(action); handled {
+				return newModel, cmd
+			}
+
+			// Handle overlay components (theme selector, context menu, retry dialog)
+			if newModel, cmd, handled := m.handleOverlayComponents(action); handled {
+				return newModel, cmd
+			}
 		}
-
-	// Handle overlay components (theme selector, context menu, retry dialog)
-	if newModel, cmd, handled := m.handleOverlayComponents(action); handled {
-		return newModel, cmd
-	}
-
 	case tea.WindowSizeMsg:
 		// Update responsive layout
 		m.responsiveLayout.Update(msg)
@@ -351,7 +352,7 @@ func (m *model) handleOverlayComponents(action components.KeyAction) (tea.Model,
 		// Retry dialog is visible but didn't handle this action
 		return m, nil, true
 	}
-	
+
 	// No overlay components are visible, don't handle the action
 	return m, nil, false
 }
