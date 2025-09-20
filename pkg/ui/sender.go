@@ -357,9 +357,12 @@ func (m *model) senderView() string {
 		if m.responsiveLayout.IsCompactMode() {
 			receiverName = m.responsiveLayout.TruncateText(receiverName)
 		}
-		mainContent = fmt.Sprintf("\n%s Waiting for %s to confirm...",
-			m.spinner.View(),
-			style.HighlightFontStyle.Render(receiverName))
+		mainContent = fmt.Sprintf("\n%s %s %s %s",
+			style.RenderWithSafeReset(style.HighlightFontStyle, m.spinner.View()),
+			style.RenderWithSafeReset(style.HighlightFontStyle, "Waiting for"),
+			style.RenderWithSafeReset(style.ThemeStyle, receiverName),
+			style.RenderWithSafeReset(style.HighlightFontStyle, "to confirm..."),
+		)
 	case sendingFiles:
 		mainContent = m.renderTransferProgress()
 	case transferPaused:

@@ -126,11 +126,11 @@ func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.stateManager.CloseRequest()
 
-	// s.uiMessages <- receiver.SenderUpdateMsg{
-	// 	OS:       req.SenderOS,
-	// 	Host:     r.RemoteAddr,
-	// 	Hostname: req.SenderHostname,
-	// }
+	s.uiMessages <- receiver.SenderUpdateMsg{
+		OS:       req.SenderOS,
+		Host:     r.RemoteAddr,
+		Hostname: req.SenderHostname,
+	}
 	s.uiMessages <- receiver.FileNodeUpdateMsg{Nodes: req.SignedFiles.Files}
 
 	w.Header().Set("Content-Type", "text/event-stream")

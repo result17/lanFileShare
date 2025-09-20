@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/internal/app_events/receiver"
+	"github.com/rescp17/lanFileSharer/internal/style"
 )
 
 // SenderCardModel displays sender information and implements tea.Model
@@ -14,7 +14,6 @@ type SenderCardModel struct {
 	Host     string // IP address
 	Hostname string // hostname
 }
-
 
 // NewSenderCard returns a pointer to SenderCardModel so it can be used with tea.NewProgram
 func NewSenderCard() *SenderCardModel {
