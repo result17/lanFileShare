@@ -95,6 +95,7 @@ func (a *App) prepareFilesForTransfer(files []fileInfo.FileNode) (*transfer.File
 // Each transfer now creates its own FileStructureManager
 
 // Run starts the application's main event loop.
+// TODO restart logic
 func (a *App) Run(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 

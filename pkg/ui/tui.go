@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
+	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/discovery"
 	receiverApp "github.com/rescp17/lanFileSharer/pkg/receiver"
 	senderApp "github.com/rescp17/lanFileSharer/pkg/sender"
@@ -54,6 +56,7 @@ type model struct {
 	breadcrumb           *components.Breadcrumb       // Global Breadcrumb
 	keyboardManager      *components.KeyboardManager  // Global Keyboard Manager
 	responsiveLayout     *components.ResponsiveLayout // Global Responsive Layout
+	spinner              spinner.Model
 }
 
 func InitialModel(m Mode, port int, outputPath string) model {
@@ -89,6 +92,8 @@ func InitialModel(m Mode, port int, outputPath string) model {
 	responsiveLayout := components.NewResponsiveLayout(themeManager)
 	statusIndicator := components.NewStatusIndicator(5, true) // Keep 5 messages, show timestamps
 
+	s := style.NewSpinner()
+
 	themeSelector.SetOnHidden(keyboardManager.RestoreLastContext)
 
 	helpPanel.SetCompact(true)
@@ -123,18 +128,15 @@ func InitialModel(m Mode, port int, outputPath string) model {
 		breadcrumb:           breadcrumb,
 		keyboardManager:      keyboardManager,
 		responsiveLayout:     responsiveLayout,
+		spinner:              s,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-
-	var initCmd tea.Cmd
-	switch m.mode {
-	case Sender:
-		initCmd = m.initSender()
-	case Receiver:
-		initCmd = m.initReceiver()
-	}
+	initCmd := tea.Batch(
+		m.spinner.Tick,
+		m.listenForAppMessages(),
+	)
 
 	runCmd := func() tea.Msg {
 		if err := m.appController.Run(m.ctx); err != nil {
@@ -149,9 +151,10 @@ func (m model) Init() tea.Cmd {
 	}
 
 	// Start the global UI tick
-	tickCmd := tick(time.Second)
+	// TODO
+	// tickCmd := tick(time.Second)
 
-	return tea.Batch(initCmd, runCmd, tickCmd)
+	return tea.Batch(initCmd, runCmd,)
 }
 
 func (m model) View() string {
@@ -201,8 +204,11 @@ func (m model) View() string {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		var spinCmd tea.Cmd
+		m.spinner, spinCmd = m.spinner.Update(msg)
+		return m, spinCmd
 	case tea.QuitMsg:
 		if m.cancel != nil {
 			m.cancel()
@@ -216,7 +222,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tick(time.Second)
 	case tea.KeyMsg:
-		if m.mode == Sender && m.sender.state == selectingFiles && !m.sender.fp.IsBrowseMode() {
+		if m.mode != Sender || m.sender.state == selectingFiles || m.sender.fp.IsBrowseMode() {
 			// Process the key through the keyboard manager
 			action := m.keyboardManager.ProcessKey(msg)
 			if newModel, cmd, handled := m.handleGlobalAction(action); handled {
@@ -233,6 +239,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.responsiveLayout.Update(msg)
 		// Update status bar width
 		m.statusBar.SetWidth(msg.Width)
+		return m, nil
 	}
 
 	// Handle mode-specific updates
@@ -264,12 +271,6 @@ func (m *model) handleRefresh() tea.Cmd {
 	switch m.mode {
 	case Sender:
 		switch m.sender.state {
-		case findingReceivers:
-			// Restart discovery
-			return m.initSender()
-		case selectingReceiver:
-			// Refresh receiver list
-			return m.initSender()
 		default:
 			// Show quick tip using global quickTip
 			m.quickTip.Show("Refresh not available in current state", "info", 3)

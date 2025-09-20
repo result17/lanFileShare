@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
 	receiverEvent "github.com/rescp17/lanFileSharer/internal/app_events/receiver"
@@ -29,7 +28,6 @@ const (
 type receiverModel struct {
 	appController AppController
 	state         receiverState
-	spinner       spinner.Model
 	port          int
 	fileTree      fileTree.Model
 	lastError     error
@@ -48,28 +46,20 @@ var DefaultKeyMap = KeyMap{
 }
 
 func initReceiverModel(port int, appController AppController) receiverModel {
-	s := style.NewSpinner()
 
 	return receiverModel{
-		spinner: s,
 		port:    port,
 		state:   awaitingConnection,
 	}
 }
 
-func (m *model) initReceiver() tea.Cmd {
-	return tea.Batch(
-		m.receiver.spinner.Tick,
-		m.listenForAppMessages(),
-	)
-}
 
 func (m model) receiverView() string {
 	var result strings.Builder
 	var mainContent string
 	switch m.receiver.state {
 	case awaitingConnection:
-		mainContent = fmt.Sprintf("\n\n %s %s %s...", style.RenderWithSafeReset(style.HighlightFontStyle, m.receiver.spinner.View()), style.RenderWithSafeReset(style.HighlightFontStyle, "Awaiting sender connection on port"), style.RenderWithSafeReset(style.ThemeStyle, strconv.Itoa(m.receiver.port)))
+		mainContent = fmt.Sprintf("\n\n %s %s %s...", style.RenderWithSafeReset(style.HighlightFontStyle, m.spinner.View()), style.RenderWithSafeReset(style.HighlightFontStyle, "Awaiting sender connection on port"), style.RenderWithSafeReset(style.ThemeStyle, strconv.Itoa(m.receiver.port)))
 	case awaitingConfirmation:
 		help := fmt.Sprintf("  %s/%s  %s/%s \n",
 			DefaultKeyMap.Accept.Help().Key, DefaultKeyMap.Accept.Help().Desc,
@@ -77,7 +67,7 @@ func (m model) receiverView() string {
 		)
 		mainContent = fmt.Sprintf("%s\n%s", m.receiver.senderCard.View(), m.receiver.fileTree.View(), style.HelpStyle.Render(help))
 	case receivingFiles:
-		mainContent = fmt.Sprintf("\n\n %s Receiving files...", m.receiver.spinner.View())
+		mainContent = fmt.Sprintf("\n\n %s Receiving files...", m.spinner.View())
 	case receiveComplete: // Add this new case
 		mainContent = "File transfer complete!\n\nPress Enter to exit."
 	case receiveFailed:
@@ -127,11 +117,8 @@ func (m *model) updateReceivingFiles(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case receiverEvent.FileNodeUpdateMsg:
 		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 		return m, nil
-	default:
-		var cmd tea.Cmd
-		m.receiver.spinner, cmd = m.receiver.spinner.Update(msg)
-		return m, cmd
 	}
+	return m, nil
 }
 
 // Example of a new state-specific update function
@@ -145,11 +132,8 @@ func (m *model) updateAwaitingConnection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.receiver.state = awaitingConfirmation
 		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)
 		return m, nil
-	default:
-		var cmd tea.Cmd
-		m.receiver.spinner, cmd = m.receiver.spinner.Update(msg)
-		return m, cmd
 	}
+	return m, nil
 }
 
 func (m *model) updateAwaitingConfirmation(msg tea.Msg) (tea.Model, tea.Cmd) {

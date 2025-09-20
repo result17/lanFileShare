@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	appevents "github.com/rescp17/lanFileSharer/internal/app_events"
@@ -36,7 +35,6 @@ const (
 type senderModel struct {
 	appController    AppController
 	state            senderState
-	spinner          spinner.Model
 	table            table.Model
 	fp               multiFilePicker.Model
 	services         []discovery.ServiceInfo
@@ -71,7 +69,6 @@ var columns = []table.Column{
 }
 
 func initSenderModel(appController AppController) senderModel {
-	s := style.NewSpinner()
 
 	t := table.New(
 		table.WithColumns(columns),
@@ -98,7 +95,6 @@ func initSenderModel(appController AppController) senderModel {
 	keyboardManager := components.NewKeyboardManager()
 
 	return senderModel{
-		spinner:         s,
 		fp:              multiFilePicker.InitialModel(),
 		state:           findingReceivers,
 		table:           t,
@@ -111,16 +107,6 @@ func initSenderModel(appController AppController) senderModel {
 		keyboardManager: keyboardManager,
 		appController:   appController,
 	}
-}
-
-func (m model) initSender() tea.Cmd {
-	return m.sender.initialSenderCmd()
-}
-
-func (m senderModel) initialSenderCmd() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, func() tea.Msg {
-		return <-m.appController.UIMessages()
-	})
 }
 
 func (m *senderModel) updateReceiverTable(services []discovery.ServiceInfo) {
@@ -142,13 +128,6 @@ func (m *model) updateSender(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateSenderByMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// spinner cmd
-	if tickMsg, ok := msg.(spinner.TickMsg); ok && m.sender.state == findingReceivers {
-		var spinCmd tea.Cmd
-		m.sender.spinner, spinCmd = m.sender.spinner.Update(tickMsg)
-		return m, spinCmd
-	}
-
 	// send file msg to senderApp
 	if fileMsg, ok := msg.(multiFilePicker.SelectedFileNodeMsg); ok {
 		m.appController.AppEvents() <- senderEvent.SendFilesMsg{
@@ -353,7 +332,7 @@ func (m *model) senderView() string {
 	var mainContent string
 	switch m.sender.state {
 	case findingReceivers:
-		mainContent = style.RenderWithSafeReset(style.HighlightFontStyle, fmt.Sprintf("\n%s🔍 %s", m.sender.spinner.View(), "Finding receivers..."))
+		mainContent = style.RenderWithSafeReset(style.HighlightFontStyle, fmt.Sprintf("\n%s🔍 %s", m.spinner.View(), "Finding receivers..."))
 	case selectingReceiver:
 		mainContent = fmt.Sprintf("\n✔  Found %d receiver(s)\n", len(m.sender.services))
 		mainContent += style.BaseStyle.Render(m.sender.table.View()) + "\n"
@@ -379,7 +358,7 @@ func (m *model) senderView() string {
 			receiverName = m.responsiveLayout.TruncateText(receiverName)
 		}
 		mainContent = fmt.Sprintf("\n%s Waiting for %s to confirm...",
-			m.sender.spinner.View(),
+			m.spinner.View(),
 			style.HighlightFontStyle.Render(receiverName))
 	case sendingFiles:
 		mainContent = m.renderTransferProgress()
@@ -458,7 +437,7 @@ func (m *model) renderTransferProgress() string {
 
 	if m.responsiveLayout.ShouldShowIcons() {
 		result.WriteString(fmt.Sprintf("\n%s Sending files to %s\n\n",
-			m.sender.spinner.View(),
+			m.spinner.View(),
 			style.HighlightFontStyle.Render(receiverName)))
 	} else {
 		result.WriteString(fmt.Sprintf("Sending to %s\n\n", receiverName))
@@ -756,7 +735,8 @@ func (m *model) retryLastOperation() tea.Cmd {
 		return nil
 	case findingReceivers:
 		// Retry discovery
-		return m.initSender()
+		// TODO
+		// return m.initSender()
 	}
 
 	return nil
@@ -813,7 +793,9 @@ func (m *senderModel) handleDiscoveryAction(action components.KeyAction, msg tea
 
 	switch action {
 	case components.KeyActionRefresh:
-		return m.initialSenderCmd()
+		// TODO
+		return nil
+		// return m.initialSenderCmd()
 	default:
 		return nil
 	}
@@ -845,7 +827,9 @@ func (m *senderModel) handleSelectionAction(action components.KeyAction, msg tea
 		}
 		return nil
 	case components.KeyActionBack:
-		return m.initialSenderCmd()
+		// TODO
+		return nil
+		// return m.initialSenderCmd()
 	default:
 		return nil
 	}
