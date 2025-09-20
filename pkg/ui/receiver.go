@@ -12,6 +12,7 @@ import (
 	receiverEvent "github.com/rescp17/lanFileSharer/internal/app_events/receiver"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileTree"
+	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
 
 // receiverState defines the different states of the receiver UI
@@ -32,6 +33,7 @@ type receiverModel struct {
 	port          int
 	fileTree      fileTree.Model
 	lastError     error
+	senderCard    components.SenderCardModel
 }
 
 type KeyMap struct {
@@ -73,7 +75,7 @@ func (m model) receiverView() string {
 			DefaultKeyMap.Accept.Help().Key, DefaultKeyMap.Accept.Help().Desc,
 			DefaultKeyMap.Reject.Help().Key, DefaultKeyMap.Reject.Help().Desc,
 		)
-		mainContent = fmt.Sprintf("%s\n%s", m.receiver.fileTree.View(), style.HelpStyle.Render(help))
+		mainContent = fmt.Sprintf("%s\n%s", m.receiver.senderCard.View(), m.receiver.fileTree.View(), style.HelpStyle.Render(help))
 	case receivingFiles:
 		mainContent = fmt.Sprintf("\n\n %s Receiving files...", m.receiver.spinner.View())
 	case receiveComplete: // Add this new case
@@ -135,6 +137,10 @@ func (m *model) updateReceivingFiles(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Example of a new state-specific update function
 func (m *model) updateAwaitingConnection(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case receiverEvent.SenderUpdateMsg:
+		cardModel, _ := m.receiver.senderCard.Update(msg)
+		m.receiver.senderCard = cardModel.(components.SenderCardModel)
+		return m, nil
 	case receiverEvent.FileNodeUpdateMsg:
 		m.receiver.state = awaitingConfirmation
 		m.receiver.fileTree = fileTree.NewFileTree("Received files info:", msg.Nodes)

@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"strings"
 
 	"github.com/pion/webrtc/v4"
@@ -57,10 +59,21 @@ func (s *APISignaler) SendOffer(ctx context.Context, offer webrtc.SessionDescrip
 		return fmt.Errorf("failed to create ask url: %w", err)
 	}
 
+	var hostname string
+	name, err := os.Hostname()
+	if err == nil {
+		hostname = name
+	} else {
+		hostname = ""
+	}
+
 	payload := AskPayload{
 		SignedFiles: signedFiles,
 		Offer:       offer,
+		SenderHostname: hostname,
+		SenderOS: runtime.GOOS,
 	}
+	
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal offer payload: %w", err)

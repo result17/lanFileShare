@@ -284,6 +284,8 @@ func (c *SenderConn) Establish(ctx context.Context, fsm *transfer.FileStructureM
 	return nil
 }
 
+
+
 // retrySetRemoteDescription attempts to set the remote description with retry logic
 // This helps handle temporary ICE gathering issues
 func (c *Connection) retrySetRemoteDescription(sd webrtc.SessionDescription, maxRetries int) error {

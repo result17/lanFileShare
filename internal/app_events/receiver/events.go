@@ -25,6 +25,13 @@ type FileNodeUpdateMsg struct {
 	Nodes []fileInfo.FileNode
 }
 
+type SenderUpdateMsg struct {
+	appevents.AppUIMessage
+	OS       string
+	Host     string // IP address
+	Hostname string // hostname
+}
+
 // TransferFinishedMsg signals the end of a file transfer, with status.
 type TransferFinishedMsg struct {
 	appevents.AppUIMessage
