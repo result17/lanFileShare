@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
@@ -192,39 +191,9 @@ func (m *Model) loadDirectory(path string) ([]components.NodeDisplayItem, error)
 	}
 
 	newItems := make([]components.NodeDisplayItem, len(entries))
+
 	for i, entry := range entries {
-		info, err := entry.Info()
-		modTime := ""
-		size := ""
-		typeStr := ""
-
-		if err == nil {
-			modTime = info.ModTime().Format("2006-01-02 15:04:05")
-			if info.IsDir() {
-				size = "<DIR>"
-			} else {
-				size = util.FormatSize(info.Size())
-			}
-		}
-
-		// Get MIME type for files
-		if !entry.IsDir() {
-			entryPath := filepath.Join(absPath, entry.Name())
-			mime, err := mimetype.DetectFile(entryPath)
-			if err == nil {
-				typeStr = mime.String()
-			}
-		}
-
-		newItems[i] = components.NodeDisplayItem{
-			Name:     entry.Name(),
-			Path:     filepath.Join(absPath, entry.Name()),
-			IsDir:    entry.IsDir(),
-			ModTime:  modTime,
-			Size:     size,
-			Type:     typeStr,
-			DirEntry: entry,
-		}
+		newItems[i] = components.GetNodeDisplayItemFromDirEntity(entry, absPath)
 	}
 
 	// Sort items: directories first, then files, both alphabetically

@@ -65,7 +65,9 @@ func (m model) receiverView() string {
 			DefaultKeyMap.Accept.Help().Key, DefaultKeyMap.Accept.Help().Desc,
 			DefaultKeyMap.Reject.Help().Key, DefaultKeyMap.Reject.Help().Desc,
 		)
-		mainContent = fmt.Sprintf("%s\n%s\n%s", m.receiver.senderCard.View(), m.receiver.fileTree.View(), style.HelpStyle.Render(help))
+		result.WriteString(m.responsiveLayout.AdaptiveContainer(m.receiver.senderCard.View(), "Remote sender"))
+
+		mainContent = fmt.Sprintf("\n%s\n%s", m.receiver.fileTree.View(), style.HelpStyle.Render(help))
 	case receivingFiles:
 		mainContent = fmt.Sprintf("\n\n %s Receiving files...", m.spinner.View())
 	case receiveComplete: // Add this new case
