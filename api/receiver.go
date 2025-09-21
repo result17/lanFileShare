@@ -117,6 +117,7 @@ func (s *ReceiverService) AskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("success to verify file structure")
+	slog.Info("[ask payload]", req)
 
 	decisionChan, err := s.stateManager.CreateRequest(req.Offer, req.SignedFiles)
 	if err != nil {

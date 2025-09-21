@@ -15,7 +15,7 @@ import (
 
 const (
 	DATE_FORMAT_STR = "2006-01-02 15:04:05"
-	DIR_SIZE_STR = "<DIR>"
+	DIR_SIZE_STR    = "<DIR>"
 )
 
 type NodeDisplayItem struct {
@@ -65,7 +65,7 @@ func GetNodeDisplayItemFromDirEntity(entry os.DirEntry, absPath string) NodeDisp
 	}
 
 	var renderSize string
-	if item.IsDir {
+	if !item.IsDir {
 		renderStyle := GetColorForFileType(item)
 		renderSize = fmt.Sprintf("%s %s", GetIconForItem(item), style.RenderWithSafeReset(renderStyle, SimplifyMIME(item.Type, filepath.Ext(item.Name))))
 	} else {
@@ -215,26 +215,26 @@ func SimplifyMIME(base string, extFallback string) string {
 
 	// common explicit mapping (exact matches)
 	var common = map[string]string{
-		"text/plain":                                                                 "Text",
-		"text/html":                                                                  "HTML",
-		"application/json":                                                           "JSON",
-		"application/pdf":                                                            "PDF",
-		"application/zip":                                                            "ZIP",
-		"application/x-7z-compressed":                                                "7z",
-		"application/x-rar-compressed":                                               "RAR",
-		"application/vnd.openxmlformats-officedocument.wordprocessingml.document":    "Word",
-		"application/msword":                                                          "Word",
-		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":          "Excel",
-		"application/vnd.ms-excel":                                                   "Excel",
-		"application/vnd.openxmlformats-officedocument.presentationml.presentation":  "PowerPoint",
-		"application/vnd.ms-powerpoint":                                              "PowerPoint",
-		"application/octet-stream":                                                   "Binary",
-		"image/png":                                                                   "PNG",
-		"image/jpeg":                                                                  "JPEG",
-		"image/gif":                                                                   "GIF",
-		"image/webp":                                                                  "WEBP",
-		"audio/mpeg":                                                                  "MP3",
-		"video/mp4":                                                                   "MP4",
+		"text/plain":                   "Text",
+		"text/html":                    "HTML",
+		"application/json":             "JSON",
+		"application/pdf":              "PDF",
+		"application/zip":              "ZIP",
+		"application/x-7z-compressed":  "7z",
+		"application/x-rar-compressed": "RAR",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word",
+		"application/msword": "Word",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel",
+		"application/vnd.ms-excel": "Excel",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation": "PowerPoint",
+		"application/vnd.ms-powerpoint":                                             "PowerPoint",
+		"application/octet-stream":                                                  "Binary",
+		"image/png":                                                                 "PNG",
+		"image/jpeg":                                                                "JPEG",
+		"image/gif":                                                                 "GIF",
+		"image/webp":                                                                "WEBP",
+		"audio/mpeg":                                                                "MP3",
+		"video/mp4":                                                                 "MP4",
 	}
 
 	if label, ok := common[strings.ToLower(base)]; ok {

@@ -13,8 +13,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/internal/style"
+	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
@@ -111,8 +111,8 @@ func InitialModel() Model {
 	}
 
 	return Model{
-		path:     "",                  // Initially empty
-		lastPath: wd,                  // Start with the working directory
+		path:     "",                             // Initially empty
+		lastPath: wd,                             // Start with the working directory
 		items:    []components.NodeDisplayItem{}, // Initially empty
 		selected: make(map[string]struct{}),
 		keys:     DefaultKeyMap,
@@ -459,7 +459,7 @@ func (m Model) View() string {
 
 	// Header
 	s.WriteString("Enter a path to browse, or select files below. " + m.helpView() + "\n \n")
-	
+
 	// Use safe rendering for textinput if you have a background color
 	// If you don't have a background color for the textinput, just use the original
 	textInputView := m.input.View()
@@ -468,7 +468,7 @@ func (m Model) View() string {
 	// For now, just use the safe reset function:
 	textInputView = style.RenderWithSafeReset(lipgloss.NewStyle(), textInputView)
 	s.WriteString(textInputView)
-	
+
 	if m.inputErr != nil {
 		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 		s.WriteString("\n" + style.RenderWithSafeReset(errorStyle, m.inputErr.Error()))
@@ -538,19 +538,19 @@ func (m Model) View() string {
 
 		// Pad right first, then add style
 		nameCell := util.PadRight(nameStr, nameWidth+2) // +2 for emoji and spaces
-		typeCell := util.PadRight(item.Type, typeWidth)
+		typeCell := util.PadRight(item.RenderType, typeWidth)
 		timeCell := util.PadRight(item.ModTime, timeWidth)
 		sizeCell := util.PadRight(item.Size, sizeWidth)
 
 		if item.IsDir {
 			dirNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 			nameCell = style.RenderWithSafeReset(dirNameStyle, nameCell)
-			dirTypeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-			typeCell = style.RenderWithSafeReset(dirTypeStyle, typeCell)
+			// dirTypeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			// typeCell = style.RenderWithSafeReset(dirTypeStyle, typeCell)
 		} else {
 			fileNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 			nameCell = style.RenderWithSafeReset(fileNameStyle, nameCell)
-			typeCell = style.RenderWithSafeReset(components.GetColorForFileType(item), typeCell)
+			// typeCell = style.RenderWithSafeReset(components.GetColorForFileType(item), typeCell)
 		}
 
 		timeCellStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("237"))
