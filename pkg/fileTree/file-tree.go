@@ -6,9 +6,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/internal/util"
 	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
+	"github.com/rescp17/lanFileSharer/pkg/ui/components"
 )
 
 // KeyMap defines the keybindings for the file tree.
@@ -19,6 +21,8 @@ type KeyMap struct {
 	GoToChild  key.Binding
 	Quit       key.Binding
 }
+
+const PAGE_VISIBLE_ITEM_COUNT = 8
 
 // DefaultKeyMap provides sensible default keybindings.
 var DefaultKeyMap = KeyMap{
@@ -31,22 +35,36 @@ var DefaultKeyMap = KeyMap{
 
 // Model represents the state of the file tree TUI.
 type Model struct {
-	title string
-	nodes []fileInfo.FileNode
-	keys  KeyMap
+	nodes       []fileInfo.FileNode
+	selected 	[]fileInfo.FileNode
+	activeItems []components.NodeDisplayItem
+	keys        KeyMap
 	// history is a stack that keeps track of the parent nodes, allowing for "back" navigation.
 	history [][]fileInfo.FileNode
 	cursor  int
-	width   int
-	height  int
+	height  int // For viewport height
+	offset  int // For scrolling
 }
 
 // NewFileTree creates a new file tree model.
 func NewFileTree(title string, nodes []fileInfo.FileNode) Model {
+	var itemsCount int
+	if len(nodes) > PAGE_VISIBLE_ITEM_COUNT {
+		itemsCount = PAGE_VISIBLE_ITEM_COUNT
+	} else {
+		itemsCount = len(nodes)
+	}
+
+	items := make([]components.NodeDisplayItem, itemsCount)
+
+	for i := range items {
+		items[i] = components.GetNodeDisplayItemFromFileNode(nodes[i])
+	}
+
 	return Model{
-		title: title,
 		nodes: nodes,
-		keys:  DefaultKeyMap,
+		activeItems: items,
+		keys:        DefaultKeyMap,
 		// Pre-allocate a bit of capacity for the history stack
 		history: make([][]fileInfo.FileNode, 0, 5),
 	}
@@ -71,7 +89,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keys.Down):
-			if m.cursor < len(m.nodes)-1 {
+			if m.cursor < len(m.activeItems)-1 {
 				m.cursor++
 			}
 
@@ -106,74 +124,96 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var s strings.Builder
 
-	// Title
-	s.WriteString(style.TitleStyle.Render(m.title))
-	s.WriteString("\n\n")
+	// Table column widths
+	nameWidth := 34
+	typeWidth := 20
+	timeWidth := 19
+	sizeWidth := 14
 
-	nameWidth := 40
-	sizeWidth := 20
-	typeWidth := 35
+	// Table header: pad first, then style
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
+	s.WriteString(
+		style.RenderWithSafeReset(headerStyle, util.PadRight("", 5)) + " " +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Name", nameWidth)) + " " +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Last Modified", timeWidth)) + " " +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Size", sizeWidth)) +
+			style.RenderWithSafeReset(headerStyle, util.PadRight("Type", typeWidth)) + "\n\n",
+	)
 
-	// Header
-	s.WriteString(style.HeaderStyle.Render(util.PadRight("", 1)))
-	s.WriteString(style.HeaderStyle.Render(util.PadRight("Name", nameWidth)))
-	s.WriteString(style.HeaderStyle.Render(util.PadRight("Size", sizeWidth)))
-	s.WriteString(style.HeaderStyle.Render(util.PadRight("Type", typeWidth)))
-	s.WriteString("\n\n")
+	visibleItems := m.visibleItems()
 
-	len := len(m.nodes)
-	// File list
-	for i, node := range m.nodes {
-		cursor := style.NoCursorStyle.String()
-		if m.cursor == i {
-			cursor = style.CursorStyle.String()
-		}
+	start := m.offset
+	end := m.offset + visibleItems
+	length := len(m.activeItems)
 
-		name := node.Name
-		sizeStr := ""
-		typeStr := "<DIR>"
-
-		var nameCell, sizeCell, typeCell string
-
-		if node.IsDir {
-			nameCell = style.DirStyle.Render(util.PadRight(name+"/", nameWidth))
-			typeCell = style.DirStyle.Render(util.PadRight(typeStr, typeWidth))
-		} else {
-			sizeStr = util.FormatSize(node.Size)
-			typeStr = node.MimeType
-			nameCell = style.FileStyle.Render(util.PadRight(name, nameWidth))
-			typeCell = style.FileStyle.Render(util.PadRight(typeStr, typeWidth))
-		}
-
-		sizeCell = util.PadRight(sizeStr, sizeWidth)
-
-		row := fmt.Sprintf("%s %s %s %s", cursor, nameCell, sizeCell, typeCell)
-		s.WriteString(row)
-		if i != len-1 {
-			s.WriteString("\n\n")
-		} else {
-			s.WriteString("\n")
-		}
+	if end > length {
+		end = length
 	}
 
-	// Help view
-	help := fmt.Sprintf("\n%s  %s  %s  %s  %s",
-		m.keys.Up.Help().Key+"/"+m.keys.Up.Help().Desc,
-		m.keys.Down.Help().Key+"/"+m.keys.Down.Help().Desc,
-		m.keys.GoToChild.Help().Key+"/"+m.keys.GoToChild.Help().Desc,
-		m.keys.GoToParent.Help().Key+"/"+m.keys.GoToParent.Help().Desc,
-		m.keys.Quit.Help().Key+"/"+m.keys.Quit.Help().Desc,
-	)
-	s.WriteString(style.HelpStyle.Render(help))
+	// Ensure we don't render a slice with a negative start index
+	if start < 0 {
+		start = 0
+	}
 
-	return style.DocStyle.Render(s.String())
+	slice := m.activeItems
+
+	for i, item := range slice {
+		actualIndex := start + i
+		if m.cursor == actualIndex {
+			s.WriteString("▶ ")
+		} else {
+			s.WriteString("  ")
+		}
+
+		// Add emoji based on item type
+		nameStr := components.GetIconForItem(item) + " " + item.Name
+
+		// Pad right first, then add style
+		nameCell := util.PadRight(nameStr, nameWidth+2) // +2 for emoji and spaces
+		typeCell := util.PadRight(item.RenderType, typeWidth)
+		timeCell := util.PadRight(item.ModTime, timeWidth)
+		sizeCell := util.PadRight(item.Size, sizeWidth)
+
+		if item.IsDir {
+			dirNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+			nameCell = style.RenderWithSafeReset(dirNameStyle, nameCell)
+			// dirTypeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			// typeCell = style.RenderWithSafeReset(dirTypeStyle, typeCell)
+		} else {
+			fileNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+			nameCell = style.RenderWithSafeReset(fileNameStyle, nameCell)
+			// typeCell = style.RenderWithSafeReset(components.GetColorForFileType(item), typeCell)
+		}
+
+		timeCellStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("237"))
+		s.WriteString(nameCell + " " +
+			style.RenderWithSafeReset(timeCellStyle, timeCell) + " " +
+			sizeCell + " " +
+			typeCell + "\n\n")
+	}
+
+	// Scroll indicator
+	if length > visibleItems {
+		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Italic(true)
+		s.WriteString(style.RenderWithSafeReset(scrollStyle, fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, length)))
+	}
+
+	// Footer with selection count
+	if length > 0 {
+		footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+		s.WriteString(style.RenderWithSafeReset(footerStyle, fmt.Sprintf("\nSelected: %d file(s)", len( m.selected))))
+	}
+
+	return s.String()
 }
 
-// GetSelectedNode returns the currently selected FileNode.
-// This can be called after the TUI exits to get the user's choice.
-func (m *Model) GetSelectedNode() *fileInfo.FileNode {
-	if len(m.nodes) > 0 && m.cursor < len(m.nodes) {
-		return &m.nodes[m.cursor]
+func (m *Model) visibleItems() int {
+	headerHeight := 8
+	// Each item now takes up 2 lines
+	visible := (m.height - headerHeight) / 2
+	if visible < 1 {
+		// Fallback to a reasonable number, maybe half of the original
+		visible = 8
 	}
-	return nil
+	return visible
 }

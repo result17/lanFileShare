@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/rescp17/lanFileSharer/internal/util"
 )
 
 type FileNode struct {
 	Name     string     `json:"name"`
 	IsDir    bool       `json:"is_dir"`
 	Size     int64      `json:"size"`
+	ModTime  string     `json:"mode_time"`
 	MimeType string     `json:"mime_type,omitempty"`
 	Checksum string     `json:"checksum,omitempty"`
 	Children []FileNode `json:"children,omitempty"`
@@ -46,6 +48,15 @@ func CreateNode(path string) (FileNode, error) {
 			}
 			node.Children = append(node.Children, childNode)
 			node.Size += childNode.Size
+			info, err := entry.Info()
+
+			if err != nil {
+				node.ModTime = info.ModTime().Format(util.DATE_FORMAT_STR)
+			} else {
+				node.ModTime = "Unknown"
+			}
+
+			
 		}
 	} else {
 		mime, err := mimetype.DetectFile(path)
@@ -62,3 +73,4 @@ func CreateNode(path string) (FileNode, error) {
 	node.Checksum = checksum
 	return node, nil
 }
+

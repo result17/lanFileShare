@@ -5,6 +5,11 @@ import (
 	"math"
 )
 
+const (
+	DATE_FORMAT_STR = "2006-01-02 15:04:05"
+	DIR_SIZE_STR    = "<DIR>"
+)
+
 func FormatSize(size int64) string {
 	const unit = 1024
 	if size < unit {

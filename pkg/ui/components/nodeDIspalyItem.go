@@ -5,17 +5,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/rescp17/lanFileSharer/internal/style"
 	"github.com/rescp17/lanFileSharer/internal/util"
-)
-
-const (
-	DATE_FORMAT_STR = "2006-01-02 15:04:05"
-	DIR_SIZE_STR    = "<DIR>"
+	"github.com/rescp17/lanFileSharer/pkg/fileInfo"
 )
 
 type NodeDisplayItem struct {
@@ -37,9 +34,9 @@ func GetNodeDisplayItemFromDirEntity(entry os.DirEntry, absPath string) NodeDisp
 	typeStr := ""
 
 	if err == nil {
-		modTime = info.ModTime().Format(DATE_FORMAT_STR)
+		modTime = info.ModTime().Format(util.DATE_FORMAT_STR)
 		if info.IsDir() {
-			size = DATE_FORMAT_STR
+			size = util.DIR_SIZE_STR
 		} else {
 			size = util.FormatSize(info.Size())
 		}
@@ -278,4 +275,26 @@ func SimplifyMIME(base string, extFallback string) string {
 		return "App"
 	}
 	return "File"
+}
+
+func GetNodeDisplayItemFromFileNode(n fileInfo.FileNode) NodeDisplayItem {
+	item := NodeDisplayItem{
+		Name:    n.Name,
+		IsDir:   n.IsDir,
+		Size:    strconv.FormatInt(n.Size, 10),
+		Type:    n.MimeType,
+		ModTime: n.ModTime,
+	}
+
+	var renderSize string
+	if !item.IsDir {
+		renderStyle := GetColorForFileType(item)
+		renderSize = fmt.Sprintf("%s %s", GetIconForItem(item), style.RenderWithSafeReset(renderStyle, SimplifyMIME(item.Type, filepath.Ext(item.Name))))
+	} else {
+		renderSize = GetIconForItem(item)
+	}
+
+	item.RenderType = renderSize
+
+	return item
 }
