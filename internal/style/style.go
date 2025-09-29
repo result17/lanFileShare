@@ -27,6 +27,10 @@ var (
 )
 
 var (
+	SafeReset = "\x1b[39m\x1b[22m\x1b[23m\x1b[24m\x1b[25m\x1b[27m\x1b[28m\x1b[29m"
+)
+
+var (
 	BaseStyle          = lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorDarkGray)
 	HighlightFontStyle = lipgloss.NewStyle().Foreground(colorCyan)
 	ThemeStyle         = lipgloss.NewStyle().Foreground(colorPurple)
@@ -77,10 +81,9 @@ func RenderWithSafeReset(style lipgloss.Style, text string) string {
 	// \x1b[27m resets reverse
 	// \x1b[28m resets hidden
 	// \x1b[29m resets strikethrough
-	safeReset := "\x1b[39m\x1b[22m\x1b[23m\x1b[24m\x1b[25m\x1b[27m\x1b[28m\x1b[29m"
-
+	
 	// Replace all occurrences of the full reset with safe reset
-	result := strings.ReplaceAll(styled, "\x1b[0m", safeReset)
+	result := strings.ReplaceAll(styled, "\x1b[0m", SafeReset)
 
 	return result
 }

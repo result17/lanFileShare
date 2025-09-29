@@ -554,7 +554,7 @@ func (m Model) View() string {
 		s.WriteString(nameCell + " " +
 			style.RenderWithSafeReset(textStyle, timeCell) + " " +
 			sizeCell + " " +
-			typeCell + "\n\n")
+			typeCell + style.SafeReset + "\n\n")
 	}
 
 	// Scroll indicator
