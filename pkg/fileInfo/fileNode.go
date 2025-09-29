@@ -56,7 +56,6 @@ func CreateNode(path string) (FileNode, error) {
 				node.ModTime = "Unknown"
 			}
 
-			
 		}
 	} else {
 		mime, err := mimetype.DetectFile(path)
@@ -64,6 +63,14 @@ func CreateNode(path string) (FileNode, error) {
 			node.MimeType = "application/octet-stream"
 		} else {
 			node.MimeType = mime.String()
+		}
+
+		info, err := os.Stat(path)
+
+		if err != nil {
+			node.ModTime = info.ModTime().Format(util.DATE_FORMAT_STR)
+		} else {
+			node.ModTime = "Unknown"
 		}
 	}
 	checksum, err := node.CalcChecksum()
@@ -73,4 +80,3 @@ func CreateNode(path string) (FileNode, error) {
 	node.Checksum = checksum
 	return node, nil
 }
-

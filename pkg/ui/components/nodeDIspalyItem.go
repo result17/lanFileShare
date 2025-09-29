@@ -61,15 +61,15 @@ func GetNodeDisplayItemFromDirEntity(entry os.DirEntry, absPath string) NodeDisp
 		DirEntry: entry,
 	}
 
-	var renderSize string
+	var renderType string
 	if !item.IsDir {
 		renderStyle := GetColorForFileType(item)
-		renderSize = fmt.Sprintf("%s %s", GetIconForItem(item), style.RenderWithSafeReset(renderStyle, SimplifyMIME(item.Type, filepath.Ext(item.Name))))
+		renderType = renderStyle.Render(fmt.Sprintf("%s %s", GetIconForItem(item), SimplifyMIME(item.Type, filepath.Ext(item.Name)))) 
 	} else {
-		renderSize = GetIconForItem(item)
+		renderType = GetIconForItem(item)
 	}
 
-	item.RenderType = renderSize
+	item.RenderType = renderType
 
 	return item
 }

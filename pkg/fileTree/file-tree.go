@@ -36,7 +36,6 @@ var DefaultKeyMap = KeyMap{
 // Model represents the state of the file tree TUI.
 type Model struct {
 	nodes       []fileInfo.FileNode
-	selected 	[]fileInfo.FileNode
 	activeItems []components.NodeDisplayItem
 	keys        KeyMap
 	// history is a stack that keeps track of the parent nodes, allowing for "back" navigation.
@@ -176,12 +175,12 @@ func (m Model) View() string {
 
 		if item.IsDir {
 			dirNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-			nameCell = style.RenderWithSafeReset(dirNameStyle, nameCell)
+			nameCell = style.RenderWithSafeReset(dirNameStyle, nameCell) + lipgloss.NewStyle().Render("")
 			// dirTypeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 			// typeCell = style.RenderWithSafeReset(dirTypeStyle, typeCell)
 		} else {
 			fileNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-			nameCell = style.RenderWithSafeReset(fileNameStyle, nameCell)
+			nameCell = style.RenderWithSafeReset(fileNameStyle, nameCell) + lipgloss.NewStyle().Render("")
 			// typeCell = style.RenderWithSafeReset(components.GetColorForFileType(item), typeCell)
 		}
 
@@ -196,12 +195,6 @@ func (m Model) View() string {
 	if length > visibleItems {
 		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Italic(true)
 		s.WriteString(style.RenderWithSafeReset(scrollStyle, fmt.Sprintf("\n... %d/%d ...\n", m.cursor+1, length)))
-	}
-
-	// Footer with selection count
-	if length > 0 {
-		footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-		s.WriteString(style.RenderWithSafeReset(footerStyle, fmt.Sprintf("\nSelected: %d file(s)", len( m.selected))))
 	}
 
 	return s.String()

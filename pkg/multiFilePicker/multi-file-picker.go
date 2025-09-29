@@ -542,20 +542,17 @@ func (m Model) View() string {
 		timeCell := util.PadRight(item.ModTime, timeWidth)
 		sizeCell := util.PadRight(item.Size, sizeWidth)
 
+		textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+
 		if item.IsDir {
 			dirNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 			nameCell = style.RenderWithSafeReset(dirNameStyle, nameCell)
-			// dirTypeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-			// typeCell = style.RenderWithSafeReset(dirTypeStyle, typeCell)
 		} else {
-			fileNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-			nameCell = style.RenderWithSafeReset(fileNameStyle, nameCell)
-			// typeCell = style.RenderWithSafeReset(components.GetColorForFileType(item), typeCell)
+			nameCell = style.RenderWithSafeReset(textStyle, nameCell)
 		}
 
-		timeCellStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("237"))
 		s.WriteString(nameCell + " " +
-			style.RenderWithSafeReset(timeCellStyle, timeCell) + " " +
+			style.RenderWithSafeReset(textStyle, timeCell) + " " +
 			sizeCell + " " +
 			typeCell + "\n\n")
 	}
